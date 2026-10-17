@@ -30,13 +30,44 @@ class ServerPastePreview {
     final groups = <ServerPasteDraft>[];
     final unknown = <String>[];
     var draft = ServerPasteDraft();
+    var addressFirst = false;
+    final pendingLines = <String>[];
+    void flushLines() {
+      for (final address in pendingLines) {
+        if (!draft.lines.contains(address)) draft.lines.add(address);
+      }
+      pendingLines.clear();
+    }
+
     void finish() {
+      flushLines();
       if (draft.hasRecognizedFields) {
         groups.add(draft);
       } else {
         unknown.addAll(draft.unrecognized);
       }
       draft = ServerPasteDraft();
+      addressFirst = false;
+    }
+
+    void nextAccount() {
+      final next = List<String>.of(pendingLines);
+      pendingLines.clear();
+      finish();
+      draft.lines.addAll(next);
+      addressFirst = next.isNotEmpty;
+    }
+
+    void address(String value) {
+      if (addressFirst &&
+          (draft.username.isNotEmpty || draft.password.isNotEmpty)) {
+        if (!pendingLines.contains(value)) pendingLines.add(value);
+      } else {
+        if (draft.username.isEmpty && draft.password.isEmpty) {
+          addressFirst = true;
+        }
+        if (!draft.lines.contains(value)) draft.lines.add(value);
+      }
     }
 
     for (final raw in text.split(RegExp(r'\r?\n'))) {
@@ -50,17 +81,17 @@ class ServerPastePreview {
         final key = field[1]!.toLowerCase();
         final value = field[2]!;
         if (['名称', '服务器名称', 'name'].contains(key)) {
-          if (draft.name.isNotEmpty) finish();
+          if (draft.name.isNotEmpty) nextAccount();
           draft.name = value;
           continue;
         }
         if (['用户名', '用户', '账号', 'username', 'user'].contains(key)) {
-          if (draft.username.isNotEmpty) finish();
+          if (draft.username.isNotEmpty) nextAccount();
           draft.username = value;
           continue;
         }
         if (['密码', 'password', 'pass'].contains(key)) {
-          if (draft.password.isNotEmpty) finish();
+          if (draft.password.isNotEmpty) nextAccount();
           draft.password = value;
           continue;
         }
@@ -74,8 +105,7 @@ class ServerPastePreview {
           }
         } else {
           try {
-            final address = normalizeServerAddress(value).toString();
-            if (!draft.lines.contains(address)) draft.lines.add(address);
+            address(normalizeServerAddress(value).toString());
             continue;
           } on MediaServerException {
             /* keep the invalid field for correction */
@@ -86,8 +116,7 @@ class ServerPastePreview {
         caseSensitive: false,
       ).hasMatch(trimmed)) {
         try {
-          final address = normalizeServerAddress(trimmed).toString();
-          if (!draft.lines.contains(address)) draft.lines.add(address);
+          address(normalizeServerAddress(trimmed).toString());
           continue;
         } on MediaServerException {
           /* do not silently drop a credential URL */

@@ -50,6 +50,9 @@ class ProviderConnectController extends ChangeNotifier {
   final List<String> extraLines = [];
   PendingCloudCredentials? _pendingCloud;
   String? _submittedPassword;
+  String? _submittedName;
+  SavedServer? _configured;
+  List<String> _submittedLines = const [];
   ProviderConnectStage stage = ProviderConnectStage.credentials;
   bool busy = false;
   MediaServerFailureKind? failure;
@@ -110,6 +113,9 @@ class ProviderConnectController extends ChangeNotifier {
       return;
     }
     _authorization = authorization;
+    _configured = existing == null ? null : auth.sources.server(existing!.id);
+    _submittedName = displayName;
+    _submittedLines = List.of(extraLines);
     _guard(epoch);
     authorization.requireValid();
     _client = auth
@@ -141,6 +147,7 @@ class ProviderConnectController extends ChangeNotifier {
     ServerPasteDraft draft, {
     bool acceptUnrecognized = false,
   }) {
+    if (busy || _disposed) return Future.value();
     if (draft.unrecognized.isNotEmpty && !acceptUnrecognized) {
       failure = MediaServerFailureKind.invalidResponse;
       _changed();
@@ -167,7 +174,7 @@ class ProviderConnectController extends ChangeNotifier {
         final uri = normalizeServerAddress(address);
         final info = await _client!.getPublicInfo(uri);
         _guard(epoch);
-        _authorization!.requireValid();
+        _authorization!.requireServerIdentity(info.id);
         final session = await _client!.authenticateByName(
           baseUrl: uri,
           username: username.trim(),
@@ -201,6 +208,11 @@ class ProviderConnectController extends ChangeNotifier {
     final uri = type == MediaServerType.plex
         ? null
         : normalizeServerAddress(address);
+    if (uri != null) {
+      final info = await _client!.getPublicInfo(uri);
+      _guard(epoch);
+      _authorization!.requireServerIdentity(info.id);
+    }
     final availability = await interactive.availability(method, server: uri);
     _authorization!.requireValid();
     if (!availability.isAvailable) {
@@ -301,34 +313,34 @@ class ProviderConnectController extends ChangeNotifier {
     _authorization!.requireValid();
     _guard(epoch);
     final id = _authorization!.id;
-    // Discovery may include unreachable relays. Only the deliberately selected
-    // connection is admitted; extra addresses belong to the editable preview.
-    final oldLine = existing?.lines
-        .where((l) => normalizeServerAddress(l.address) == connection.uri)
+    // First import admits only the selected discovery endpoint. Reauthorization
+    // retains the configured lines, IDs, names and order and verifies all of them.
+    final configured = _configured;
+    final address = normalizeServerAddress(connection.uri.toString())
+        .toString();
+    final oldLine = configured?.lines
+        .where((l) => normalizeServerAddress(l.address).toString() == address)
         .firstOrNull;
-    final lines = [
-      ServerLine(
-        id: oldLine?.id ?? '$id-line',
-        address: normalizeServerAddress(connection.uri.toString()).toString(),
-      ),
-    ];
-    const selected = 0;
+    final selectedLine =
+        oldLine ?? ServerLine(id: generateLineId(), address: address);
+    final lines = [...?configured?.lines, if (oldLine == null) selectedLine];
     final server = SavedServer(
       id: id,
       name: resource.server.serverName,
-      nickname: displayName ?? existing?.nickname,
+      nickname: _submittedName ?? _configured?.nickname,
       userAgent: normalizeUserAgent(userAgent),
       username: resource.user.name,
       region: region,
       serviceType: type,
       lines: lines,
-      activeLineId: lines[selected].id,
-      lineSelection: existing?.lineSelection.isAutomatic == false
-          ? LineSelection.fixed(lines[selected].id)
+      activeLineId: selectedLine.id,
+      lastSuccessfulLineId: selectedLine.id,
+      lineSelection: _configured?.lineSelection.isAutomatic == false
+          ? LineSelection.fixed(selectedLine.id)
           : const LineSelection.auto(),
-      iconId: existing?.iconId,
-      protectionRef: existing?.protectionRef,
-      credentialRef: existing?.credentialRef,
+      iconId: _configured?.iconId,
+      protectionRef: _configured?.protectionRef,
+      credentialRef: _configured?.credentialRef,
       verifiedServerId: resource.server.id,
       authorizationMethod: AuthorizationMethod.browserPin,
       cloudAccountId: account!.id,
@@ -375,22 +387,22 @@ class ProviderConnectController extends ChangeNotifier {
         region: region,
         authorizationMethod: method,
         verifiedServerId: info.id,
-        nickname: displayName ?? existing?.nickname,
+        nickname: _submittedName ?? _configured?.nickname,
         userAgent: normalizeUserAgent(userAgent),
-        lines: existing == null
+        lines: _configured == null
             ? [ServerLine(id: '$id-line', address: uri.toString())]
             : [
-                for (final line in existing!.lines)
-                  line.id == existing!.activeLine?.id
+                for (final line in _configured!.lines)
+                  line.id == _configured!.activeLine?.id
                       ? line.copyWith(address: uri.toString())
                       : line,
               ],
-        activeLineId: existing?.activeLine?.id ?? '$id-line',
-        lineSelection: existing?.lineSelection ?? const LineSelection.auto(),
-        lastSuccessfulLineId: existing?.lastSuccessfulLineId,
-        iconId: existing?.iconId,
-        protectionRef: existing?.protectionRef,
-        credentialRef: existing?.credentialRef,
+        activeLineId: _configured?.activeLine?.id ?? '$id-line',
+        lineSelection: _configured?.lineSelection ?? const LineSelection.auto(),
+        lastSuccessfulLineId: _configured?.lastSuccessfulLineId,
+        iconId: _configured?.iconId,
+        protectionRef: _configured?.protectionRef,
+        credentialRef: _configured?.credentialRef,
       ),
       StoredCredentials(
         password: _submittedPassword,
@@ -413,7 +425,7 @@ class ProviderConnectController extends ChangeNotifier {
         .map((l) => normalizeServerAddress(l.address).toString())
         .toSet();
     final lines = [...server.lines];
-    for (final raw in extraLines) {
+    for (final raw in _submittedLines) {
       final address = normalizeServerAddress(raw).toString();
       if (addresses.add(address)) {
         lines.add(ServerLine(id: generateLineId(), address: address));
@@ -465,6 +477,11 @@ class ProviderConnectController extends ChangeNotifier {
     if (pending != null) unawaited(pending.cancel().catchError((Object _) {}));
     _client?.clearSession();
     _submittedPassword = null;
+    _submittedName = null;
+    _configured = null;
+    _submittedLines = const [];
+    displayName = null;
+    extraLines.clear();
     _pendingCloud = null;
     attempt = null;
     account = null;

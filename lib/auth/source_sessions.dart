@@ -75,6 +75,7 @@ class SourceAuthorization {
     this._generation,
     this._attempt,
     this._cloudRevision,
+    this._configuration,
   );
   final SourceSessionRegistry _owner;
   final String id;
@@ -84,10 +85,21 @@ class SourceAuthorization {
   final int _generation;
   final int _attempt;
   final int _cloudRevision;
+  final SavedServer? _configuration;
   bool _finished = false;
   bool get isValid => _owner._acceptsAuthorization(this);
   void requireValid() {
     if (!isValid) throw StateError('Authorization revoked');
+  }
+
+  void requireServerIdentity(String identity) {
+    requireValid();
+    final expected = _configuration?.expectedServerId;
+    if (expected != null && expected != identity) {
+      throw const MediaServerException(
+        MediaServerFailureKind.incompatibleServer,
+      );
+    }
   }
 
   Future<AuthorizationStatus> poll(AuthorizationAttempt attempt) async {
@@ -118,7 +130,9 @@ class SourceSession {
     this.client,
     this.revision, {
     this.verified = false,
+    this._activationAvailable = false,
   });
+  bool _activationAvailable;
   final bool verified;
   final SourceAccount account;
   final MediaServerClient client;
@@ -762,6 +776,7 @@ class SourceSessionRegistry {
       access.generation,
       attempt,
       _cloudRevision,
+      existing,
     );
     _pendingAuthorizations[id] = authorization;
     return authorization;
@@ -779,6 +794,15 @@ class SourceSessionRegistry {
       _authAttempts[authorization.id] == authorization._attempt &&
       !_transitioning.contains(authorization.id);
 
+  String _connectionConfiguration(SavedServer server) => jsonEncode({
+    'lines': [
+      for (final line in server.lines) [line.id, line.address],
+    ],
+    'active': server.activeLineId,
+    'selection': server.lineSelection.toJson(),
+    'userAgent': server.normalizedUserAgent,
+  });
+
   /// Verify resource/server/effective-user correspondence before committing.
   /// Discovery alone never imports or selects a library.
   Future<SourceSession> commitAuthorization(
@@ -790,8 +814,17 @@ class SourceSessionRegistry {
     Future<void> Function()? rollbackCandidate,
     bool remember = false,
   }) async {
+    SavedServer? committedConfiguration;
     void guard() {
       authorization.requireValid();
+      final baseline = committedConfiguration ?? authorization._configuration;
+      final current = _servers.where((s) => s.id == server.id).firstOrNull;
+      if (baseline != null &&
+          (current == null ||
+              _connectionConfiguration(current) !=
+                  _connectionConfiguration(baseline))) {
+        throw StateError('Source configuration changed; retry authorization');
+      }
       if (_cloudDisconnects.contains(server.cloudCredentialRef)) {
         throw StateError('Cloud authorization revoked');
       }
@@ -807,6 +840,7 @@ class SourceSessionRegistry {
         server.verifiedServerId == null) {
       throw StateError('Authorization identity mismatch');
     }
+    authorization.requireServerIdentity(server.verifiedServerId!);
     final client = _clientFor(server.serviceType);
     try {
       client.setUserAgent(server.userAgent);
@@ -888,7 +922,27 @@ class SourceSessionRegistry {
             previous.userId == value.userId &&
             previous.homeUserId == value.homeUserId &&
             previous.cloudAccountId == value.cloudAccountId;
+        final baseline = authorization._configuration;
         final saved = server.copyWith(
+          nickname: old != null && old.nickname != baseline?.nickname
+              ? old.nickname ?? ''
+              : server.nickname,
+          iconId: old != null && old.iconId != baseline?.iconId
+              ? old.iconId
+              : server.iconId,
+          protectionRef: old?.protectionRef,
+          clearProtection: old != null && old.protectionRef == null,
+          lines: [
+            for (final line in server.lines)
+              line.copyWith(
+                nickname:
+                    old?.lines
+                        .where((l) => l.id == line.id)
+                        .firstOrNull
+                        ?.nickname ??
+                    line.nickname,
+              ),
+          ],
           libraryIds: preserveScope ? old.libraryIds : const [],
           scopeKnown: preserveScope ? old.scopeKnown : false,
           participates: old?.participates ?? server.participates,
@@ -913,6 +967,7 @@ class SourceSessionRegistry {
           );
           guard();
           _servers = next;
+          committedConfiguration = saved;
           if (remember) _lastServerId = server.id;
           _configurationRevision++;
         } catch (_) {
@@ -951,6 +1006,7 @@ class SourceSessionRegistry {
         client,
         ++_revision,
         verified: true,
+        activationAvailable: true,
       );
       _sessions.remove(server.id)?.client.clearSession();
       _sessions[server.id] = session;
@@ -1173,7 +1229,9 @@ class SourceSessionRegistry {
     List<SavedServer> Function() change, {
     String? lastServerId,
     bool replaceLast = false,
+    void Function()? guard,
   }) => _enqueue(() async {
+    guard?.call();
     final next = change();
     final previous = ServerListSnapshot(
       servers: _servers,
@@ -1186,6 +1244,7 @@ class SourceSessionRegistry {
           lastServerId: replaceLast ? lastServerId : _lastServerId,
         ),
       );
+      guard?.call();
     } catch (_) {
       await store.save(previous);
       rethrow;
@@ -1482,6 +1541,7 @@ class SourceSessionRegistry {
             value,
             ++_revision,
             verified: true,
+            activationAvailable: true,
           );
           prepared.remove(value);
           value.onSessionExpired = () {
@@ -1608,16 +1668,19 @@ class SourceSessionRegistry {
     guard: guard,
   );
 
-  Future<void> rememberSelection(String id) => _lastServerId == id
-      ? Future.value()
-      : _commit(
-          () {
-            _allowed(id);
-            return List.of(_servers);
-          },
-          replaceLast: true,
-          lastServerId: id,
-        );
+  Future<void> rememberSelection(String id, {void Function()? guard}) async {
+    guard?.call();
+    if (_lastServerId == id) return;
+    await _commit(
+      () {
+        _allowed(id);
+        return List.of(_servers);
+      },
+      replaceLast: true,
+      lastServerId: id,
+      guard: guard,
+    );
+  }
 
   Future<void> reorderServers(List<String> ids) => _commit(() {
     final byId = {for (final s in _servers) s.id: s};
@@ -1818,8 +1881,8 @@ class SourceSessionRegistry {
     return {for (final view in views) view.id: view.name};
   }
 
-  /// 已保存的访问令牌直接挂上，并带上该服务器的 User-Agent。
-  /// 内存里已有同一令牌的会话则复用，不再请求公开信息或重新登录。
+  /// Reuse a verified in-memory session; a cold acquisition checks anonymous
+  /// server identity before attaching the saved token and verifying its user.
   Future<SourceSession> ensureSession(String id) async {
     final server = _allowed(id);
     if (_candidateCommits.contains(id)) {
@@ -1895,6 +1958,13 @@ class SourceSessionRegistry {
       if (stored == null || !_credentialsMatch(server, stored)) {
         throw StateError('Login required');
       }
+      final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+      _requireCurrent(server, scope, generation);
+      if (info.id != server.expectedServerId) {
+        throw const MediaServerException(
+          MediaServerFailureKind.incompatibleServer,
+        );
+      }
       client.attachSession(
         baseUrl: Uri.parse(server.baseUrl),
         accessToken: stored.accessToken,
@@ -1903,12 +1973,10 @@ class SourceSessionRegistry {
       );
       await sessionIdentityVerifier?.call(server, stored, client);
       _requireCurrent(server, scope, generation);
-      if (server.serviceType == MediaServerType.plex) {
-        final user = await client.getUser();
-        _requireCurrent(server, scope, generation);
-        if (user.id != stored.userId) {
-          throw StateError('Account identity mismatch');
-        }
+      final user = await client.getUser();
+      _requireCurrent(server, scope, generation);
+      if (user.id != stored.userId) {
+        throw StateError('Account identity mismatch');
       }
       if ((_scopes[server.id] ?? 0) != scope ||
           _allowed(server.id).region != server.region ||
@@ -1928,6 +1996,7 @@ class SourceSessionRegistry {
         ),
         client,
         ++_revision,
+        verified: true,
       );
       _sessions.remove(server.id)?.client.clearSession();
       _sessions[server.id] = session;
@@ -1947,18 +2016,23 @@ class SourceSessionRegistry {
   }
 
   /// Reuse a just-committed proof without a second network phase after durable
-  /// selection. This clone keeps the provider's proof and transport isolated.
+  /// selection. The proof is consumed once; ordinary restore/switch always
+  /// verifies afresh. The clone keeps provider proof and transport isolated.
   MediaServerClient? verifiedClient(String id, StoredCredentials value) {
     final server = _allowed(id);
     final session = _sessions[id];
     if (session == null ||
         !session.verified ||
+        !session._activationAvailable ||
+        session.account.verifiedServerId != server.expectedServerId ||
+        session.client.customUserAgent != server.normalizedUserAgent ||
         session.client.baseUrl?.toString() != server.baseUrl ||
         session.client.accessToken != value.accessToken ||
         session.account.userId != value.userId ||
         !_credentialsMatch(server, value)) {
       return null;
     }
+    session._activationAvailable = false;
     return session.client.withRequestGuard(selectedSessionGuard(id));
   }
 

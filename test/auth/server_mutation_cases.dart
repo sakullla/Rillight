@@ -43,13 +43,21 @@ class _Adapter extends FakeEmbyAdapter {
   _Adapter(this.endpoints) : super(endpoints);
   final List<FakeEmbyServer> endpoints;
   final List<RequestOptions> requests = [];
+  bool Function(RequestOptions)? holdWhen;
+  Completer<void>? gate;
+  Completer<void>? entered;
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
     Stream<Uint8List>? stream,
     Future<void>? cancelled,
-  ) {
+  ) async {
     requests.add(options);
+    if (holdWhen?.call(options) == true) {
+      holdWhen = null;
+      entered?.complete();
+      await gate?.future;
+    }
     for (final server in endpoints) {
       server.issuedTokens.addAll(
         endpoints
@@ -331,6 +339,241 @@ void main() {
       'https://b.test',
     ]);
   });
+
+  for (final entry in ['direct', 'provider', 'switch', 'restore', 'ensure']) {
+    test('changed saved identity stays anonymous through $entry', () async {
+      final saved = auth.savedServers.single;
+      while (auth.libraryCountsLoading) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      primary.serverId = 'impostor';
+      adapter.requests.clear();
+      if (entry == 'direct') {
+        expect(
+          await auth.connect(
+            address: primary.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          ),
+          isFalse,
+        );
+      } else if (entry == 'provider') {
+        final controller = ProviderConnectController(
+          auth: auth,
+          existing: saved,
+        );
+        addTearDown(controller.dispose);
+        await controller.password(
+          primary.baseUrl.toString(),
+          'alice',
+          'correct-horse',
+        );
+        expect(controller.failure, MediaServerFailureKind.incompatibleServer);
+      } else if (entry == 'switch') {
+        await auth.switchTo(saved.id);
+        expect(auth.failure?.kind, MediaServerFailureKind.incompatibleServer);
+      } else {
+        final cold = AuthController(
+          client: EmbyClient(
+            device: auth.client.device,
+            dio: dioForFakeEmby(adapter),
+          ),
+          credentials: auth.credentials,
+          servers: store,
+        );
+        addTearDown(cold.dispose);
+        if (entry == 'restore') {
+          await cold.restore();
+          expect(cold.isLoggedIn, isFalse);
+        } else {
+          await cold.sources.load();
+          await expectLater(
+            cold.sources.ensureSession(saved.id),
+            throwsA(isA<MediaServerException>()),
+          );
+        }
+      }
+      expect(adapter.requests, isNotEmpty);
+      expect(
+        adapter.requests.map((r) => r.uri.path),
+        everyElement(contains('/System/Info/Public')),
+      );
+      expect(
+        adapter.requests.any(
+          (r) => r.headers.values.any((v) => '$v'.contains('token-')),
+        ),
+        isFalse,
+      );
+      expect((await store.load()).lastServerId, saved.id);
+    });
+  }
+
+  test(
+    'late line edit saves A without overriding a newer selection of B',
+    () async {
+      final a = auth.savedServers.single;
+      await auth.connect(
+        address: other.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final b = auth.session!.server;
+      await auth.switchTo(a.id);
+      adapter.gate = Completer<void>();
+      adapter.entered = Completer<void>();
+      adapter.holdWhen = (r) => r.uri.host == alternate.baseUrl.host;
+      final edit = auth.updateLineAddress(
+        a.id,
+        a.activeLineId!,
+        alternate.baseUrl.toString(),
+      );
+      await adapter.entered!.future;
+      await auth.switchTo(b.id);
+      adapter.gate!.complete();
+      await edit;
+      expect(auth.session!.server.id, b.id);
+      expect(auth.client.baseUrl, other.baseUrl);
+      expect(auth.sources.server(a.id).baseUrl, alternate.baseUrl.toString());
+      expect((await store.load()).lastServerId, b.id);
+    },
+  );
+
+  test('failed or cancelled target activation leaves disk selection and current session', () async {
+    final a = auth.savedServers.single;
+    await auth.connect(
+      address: other.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final b = auth.session!.server;
+    await auth.switchTo(a.id);
+    final before = await store.file.readAsString();
+    other.publicInfoStatus = 503;
+    await auth.switchTo(b.id);
+    expect(auth.session!.server.id, a.id);
+    expect(await store.file.readAsString(), before);
+    other.publicInfoStatus = null;
+    store.gate = Completer<void>();
+    store.entered = Completer<void>();
+    final gate = store.gate!;
+    var valid = true;
+    final selecting = auth.switchTo(
+      b.id,
+      guard: () {
+        if (!valid) throw StateError('cancelled');
+      },
+    );
+    await store.entered!.future;
+    valid = false;
+    gate.complete();
+    await selecting;
+    expect(auth.session!.server.id, a.id);
+    expect(auth.client.baseUrl, primary.baseUrl);
+    expect(await store.file.readAsString(), before);
+  });
+
+  test('authorization merges concurrent metadata and rejects changed connection configuration', () async {
+    final server = auth.savedServers.single;
+    final value = (await auth.credentials.read(server.id))!;
+    final attempt = await auth.sources.beginAuthorization(
+      serviceType: server.serviceType,
+      region: server.region,
+      configuredServerId: server.id,
+    );
+    adapter.gate = Completer<void>();
+    adapter.entered = Completer<void>();
+    adapter.holdWhen = (r) => r.uri.path.endsWith('/System/Info/Public');
+    final commit = auth.sources.commitAuthorization(
+      attempt,
+      server: server,
+      value: value,
+    );
+    await adapter.entered!.future;
+    await auth.renameServer(server.id, 'New name');
+    await auth.sources.renameLine(server.id, server.activeLineId!, 'My line');
+    await auth.sources.persistProtectionReference(server.id, 'new-protection');
+    adapter.gate!.complete();
+    await commit;
+    final merged = (await store.load()).servers.single;
+    expect(merged.nickname, 'New name');
+    expect(merged.activeLine!.nickname, 'My line');
+    expect(merged.protectionRef, 'new-protection');
+    final nextAttempt = await auth.sources.beginAuthorization(
+      serviceType: server.serviceType,
+      region: server.region,
+      configuredServerId: server.id,
+    );
+    adapter.gate = Completer<void>();
+    adapter.entered = Completer<void>();
+    adapter.holdWhen = (r) => r.uri.path.endsWith('/System/Info/Public');
+    final pending = auth.sources.commitAuthorization(
+      nextAttempt,
+      server: merged,
+      value: value,
+    );
+    final rejected = expectLater(pending, throwsStateError);
+    await adapter.entered!.future;
+    await auth.sources.setLineAddress(server.id, alternate.baseUrl.toString());
+    final changed = await store.file.readAsString();
+    adapter.gate!.complete();
+    await rejected;
+    expect(await store.file.readAsString(), changed);
+    expect((await store.load()).servers.single.lines, hasLength(2));
+  });
+
+  test('address-first accounts stay separated and same-account lines stay together', () {
+    final preview = ServerPastePreview.parse(
+      '地址: https://a.test\n用户名: alice\n密码: one\n'
+      '地址: https://b.test\n用户名: bob\n密码: two',
+    );
+    expect(preview.groups, hasLength(2));
+    expect(preview.groups.map((g) => g.username), ['alice', 'bob']);
+    expect(preview.groups.map((g) => g.lines.single), [
+      'https://a.test',
+      'https://b.test',
+    ]);
+    final partial = ServerPastePreview.parse(
+      '名称: Server\n地址: https://a.test\n用户名: alice\n'
+      '地址: https://b.test\n用户名: bob',
+    );
+    expect(partial.groups.map((g) => g.lines.single), [
+      'https://a.test',
+      'https://b.test',
+    ]);
+    final multi = ServerPastePreview.parse(
+      '地址: https://a.test\n用户名: alice\n密码: one\n线路2: https://b.test',
+    );
+    expect(multi.groups.single.lines, ['https://a.test', 'https://b.test']);
+  });
+
+  test(
+    'reset discards failed paste name and lines before manual addition',
+    () async {
+      final controller = ProviderConnectController(auth: auth);
+      addTearDown(controller.dispose);
+      final draft = ServerPastePreview.parse(
+        '名称: Cancelled\n用户名: alice\n密码: correct-horse\n'
+        '${primary.baseUrl}\n${other.baseUrl}',
+      ).groups.single;
+      await controller.submitDraft(draft);
+      expect(controller.failure, MediaServerFailureKind.incompatibleServer);
+      controller.reset();
+      expect(controller.displayName, isNull);
+      expect(controller.extraLines, isEmpty);
+      await controller.password(
+        other.baseUrl.toString(),
+        'alice',
+        'correct-horse',
+      );
+      expect(controller.failure, isNull);
+      expect(controller.stage, ProviderConnectStage.done);
+      expect(auth.session!.server.nickname, isNull);
+      expect(
+        auth.session!.server.lines.single.address,
+        other.baseUrl.toString(),
+      );
+    },
+  );
 
   test('address validation preserves port and prefix and rejects credential-bearing URLs', () {
     expect(

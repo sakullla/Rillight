@@ -35,6 +35,7 @@ class FakePlex {
   bool remuxDecision = false;
   bool expireHome = false;
   bool includeOwnedResource = false;
+  bool includeAlternateConnection = false;
   String secondAudioCodec = 'aac';
   String secondAudioLanguage = 'eng';
   bool additionalUnsupportedAudio = false;
@@ -74,7 +75,9 @@ class FakePlex {
   }
 
   Future<void> _handle(HttpRequest r) async {
-    final rawPath = r.uri.path.replaceFirst('/prefix', '');
+    final rawPath = r.uri.path
+        .replaceFirst('/prefix', '')
+        .replaceFirst('/alternate', '');
     final ownedServer = rawPath.startsWith('/owned/');
     final path = ownedServer ? rawPath.substring('/owned'.length) : rawPath;
     final q = r.uri.queryParameters;
@@ -185,6 +188,8 @@ class FakePlex {
               : 'owner-resource',
           'connections': [
             {'uri': url.toString(), 'local': true, 'relay': false},
+            if (includeAlternateConnection)
+              {'uri': '$url/alternate', 'local': true, 'relay': false},
             {'uri': 'https://relay.invalid', 'local': false, 'relay': true},
           ],
         },

@@ -104,6 +104,29 @@ void main() {
     }
   }
 
+  test(
+    'failed Jellyfin selection leaves the previous Emby selection durable',
+    () async {
+      final embyId = auth.session!.server.id;
+      await selectJellyfin();
+      final jellyfinId = auth.session!.server.id;
+      await auth.switchTo(embyId);
+      final before = (await auth.sources.store.load()).lastServerId;
+      jellyfin.serverId = 'changed-remote';
+      await auth.switchTo(jellyfinId);
+      expect(auth.session!.server.id, embyId);
+      expect((await auth.sources.store.load()).lastServerId, before);
+      final restored = AuthController(
+        client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+        credentials: auth.credentials,
+        servers: auth.sources.store,
+      );
+      addTearDown(restored.dispose);
+      await restored.restore();
+      expect(restored.session!.server.id, embyId);
+    },
+  );
+
   test('provider switch replaces captured detail client and discards old catalog/search responses', () async {
     final catalog = CatalogController(auth: auth);
     final search = SearchController(auth: auth, cache: catalog.cache);

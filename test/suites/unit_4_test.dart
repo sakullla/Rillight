@@ -11,12 +11,8 @@ void main() {
     caseEntrypoints['aggregation/history_cases.dart']!,
   );
   group(
-    'aggregation/playback_switch_test.dart',
-    caseEntrypoints['aggregation/playback_switch_cases.dart']!,
-  );
-  group(
-    'aggregation/query_test.dart',
-    caseEntrypoints['aggregation/query_cases.dart']!,
+    'aggregation/identity_test.dart',
+    caseEntrypoints['aggregation/identity_cases.dart']!,
   );
   group(
     'aggregation/work_index_regression_test.dart',
@@ -27,28 +23,40 @@ void main() {
     caseEntrypoints['app/source_route_extra_codec_cases.dart']!,
   );
   group(
-    'app/window_geometry_test.dart',
-    caseEntrypoints['app/window_geometry_cases.dart']!,
+    'auth/playback_cleanup_authority_test.dart',
+    caseEntrypoints['auth/playback_cleanup_authority_cases.dart']!,
   );
   group(
     'auth/provider_session_ownership_test.dart',
     caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
   );
   group(
-    'auth/server_import_test.dart',
-    caseEntrypoints['auth/server_import_cases.dart']!,
+    'auth/server_mutation_test.dart',
+    caseEntrypoints['auth/server_mutation_cases.dart']!,
   );
   group(
     'auth/source_sessions_test.dart',
     caseEntrypoints['auth/source_sessions_cases.dart']!,
   );
   group(
-    'emby/emby_socket_test.dart',
-    caseEntrypoints['emby/emby_socket_cases.dart']!,
+    'catalog/emby_catalog_client_test.dart',
+    caseEntrypoints['catalog/emby_catalog_client_cases.dart']!,
+  );
+  group(
+    'emby/emby_url_test.dart',
+    caseEntrypoints['emby/emby_url_cases.dart']!,
   );
   group(
     'emby/video_preview_test.dart',
     caseEntrypoints['emby/video_preview_cases.dart']!,
+  );
+  group(
+    'media_server/contract_test.dart',
+    caseEntrypoints['media_server/contract_cases.dart']!,
+  );
+  group(
+    'mobile/catalog_controllers_test.dart',
+    caseEntrypoints['mobile/catalog_controllers_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 2]',
@@ -59,40 +67,36 @@ void main() {
     caseEntrypoints['player/cache/range_lease_index_cases.dart']!,
   );
   group(
-    'player/capability_record_test.dart',
-    caseEntrypoints['player/capability_record_cases.dart']!,
+    'player/danmaku/danmaku_hash_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_hash_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_layout_test.dart',
     caseEntrypoints['player/danmaku/danmaku_layout_cases.dart']!,
   );
   group(
+    'player/device_profile_test.dart',
+    caseEntrypoints['player/device_profile_cases.dart']!,
+  );
+  group(
     'player/playback_http_proxy_test.dart [part 3]',
     caseEntrypoints['player/playback_http_proxy_cases.dart#2']!,
   );
   group(
-    'player/playback_transport_session_test.dart',
-    caseEntrypoints['player/playback_transport_session_cases.dart']!,
+    'player/playback_wake_lock_test.dart',
+    caseEntrypoints['player/playback_wake_lock_cases.dart']!,
   );
   group(
     'player/player_host_command_test.dart',
     caseEntrypoints['player/player_host_command_cases.dart']!,
   );
   group(
-    'player/player_process_protocol_test.dart',
-    caseEntrypoints['player/player_process_protocol_cases.dart']!,
-  );
-  group(
-    'player/player_runtime_options_test.dart',
-    caseEntrypoints['player/player_runtime_options_cases.dart']!,
-  );
-  group(
     'player/player_settings_test.dart',
     caseEntrypoints['player/player_settings_cases.dart']!,
   );
   group(
-    'player/provider_part_playback_test.dart',
-    caseEntrypoints['player/provider_part_playback_cases.dart']!,
+    'player/provider_process_boundary_test.dart',
+    caseEntrypoints['player/provider_process_boundary_cases.dart']!,
   );
   group(
     'player/response_read_ahead_test.dart [part 2]',
@@ -101,9 +105,5 @@ void main() {
   group(
     'player/rillight_video_backend_test.dart [part 2]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#1']!,
-  );
-  group(
-    'plex/plex_review_regression_test.dart',
-    caseEntrypoints['plex/plex_review_regression_cases.dart']!,
   );
 }

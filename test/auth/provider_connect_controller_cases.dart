@@ -138,6 +138,43 @@ void main() {
       },
     );
 
+    test('saved Jellyfin identity is checked before password, switch, restore and cold acquisition', () async {
+      await controller.password(fake.url.toString(), 'alice', 'password');
+      expect(controller.failure, isNull);
+      while (auth.libraryCountsLoading) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      final saved = auth.savedServers.single;
+      fake.serverId = 'impostor-jellyfin';
+      fake.requests.clear();
+      final reauth = ProviderConnectController(auth: auth, existing: saved);
+      addTearDown(reauth.dispose);
+      await reauth.password(fake.url.toString(), 'alice', 'password');
+      expect(reauth.failure, MediaServerFailureKind.incompatibleServer);
+      await auth.switchTo(saved.id);
+      expect(auth.failure?.kind, MediaServerFailureKind.incompatibleServer);
+      final cold = AuthController(
+        client: JellyfinClient(device: device),
+        credentials: auth.credentials,
+        servers: auth.sources.store,
+      );
+      addTearDown(cold.dispose);
+      await cold.restore();
+      expect(cold.isLoggedIn, isFalse);
+      await expectLater(
+        cold.sources.ensureSession(saved.id),
+        throwsA(isA<MediaServerException>()),
+      );
+      expect(
+        fake.requests.map((r) => r.path),
+        everyElement(endsWith('/System/Info/Public')),
+      );
+      expect(
+        fake.requests.any((r) => r.authorization?.contains('Token=') == true),
+        isFalse,
+      );
+    });
+
     test(
       'wrong password and disabled Quick Connect remain recoverable',
       () async {
@@ -324,7 +361,15 @@ void main() {
         } finally {
           browse.dispose();
         }
+        fake.includeAlternateConnection = true;
+        final sourceId = auth.savedServers.single.id;
+        await auth.addLine(sourceId, '${fake.url}/alternate');
+        for (final line in auth.savedServers.single.lines) {
+          await auth.sources.renameLine(sourceId, line.id, 'Name-${line.id}');
+        }
+        await auth.refreshServers();
         final saved = auth.savedServers.single;
+        final originalLines = saved.lines.map((l) => l.toJson()).toList();
         controller.dispose();
         controller = ProviderConnectController(
           pollInterval: const Duration(milliseconds: 10),
@@ -356,6 +401,33 @@ void main() {
         expect(controller.failure, isNull);
         expect(auth.session!.userId, home.id);
         expect(auth.session!.accessToken, 'child-resource');
+        expect(
+          auth.savedServers.single.lines.map((l) => l.toJson()).toList(),
+          originalLines,
+        );
+        controller.dispose();
+        controller = ProviderConnectController(
+          auth: auth,
+          existing: auth.savedServers.single,
+          pollInterval: const Duration(milliseconds: 10),
+        );
+        await controller.authorize('');
+        await waitFor(
+          () =>
+              controller.stage == ProviderConnectStage.resources ||
+              controller.failure != null,
+        );
+        expect(controller.failure, isNull);
+        final reauthorized = controller.resources.single;
+        await controller.selectResource(
+          reauthorized,
+          reauthorized.connections.first,
+        );
+        expect(controller.failure, isNull);
+        expect(
+          auth.savedServers.single.lines.map((l) => l.toJson()).toList(),
+          originalLines,
+        );
       } finally {
         controller.dispose();
         auth.dispose();

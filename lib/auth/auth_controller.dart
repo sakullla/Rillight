@@ -391,11 +391,26 @@ class AuthController extends ChangeNotifier {
                     )),
           )
           .firstOrNull;
+      // An address already belonging to another saved identity must stay
+      // anonymous, even when the user entered a different account name.
+      for (final known in _savedServers.where(
+        (s) =>
+            s.serviceType == serviceType &&
+            s.lines.any((l) => normalizeServerAddress(l.address) == baseUrl),
+      )) {
+        if (known.expectedServerId != null &&
+            known.expectedServerId != info.id) {
+          throw const MediaServerException(
+            MediaServerFailureKind.incompatibleServer,
+          );
+        }
+      }
       authorization = await sources.beginAuthorization(
         serviceType: serviceType,
         region: AccessRegion.ordinary,
         configuredServerId: existing?.id,
       );
+      authorization.requireServerIdentity(info.id);
       final result = await candidate.authenticateByName(
         baseUrl: baseUrl,
         username: username,
@@ -556,14 +571,13 @@ class AuthController extends ChangeNotifier {
       }
       current();
       final server = sources.server(serverId);
-      await sources.rememberSelection(serverId);
-      current();
       await _activate(
         server,
         stored,
         generation: generation,
         guard: guard,
         usePrepared: prepared || lineId != null,
+        remember: true,
       );
       await refreshServers();
       _lineSwitchFailure = null;
@@ -630,17 +644,29 @@ class AuthController extends ChangeNotifier {
     Future<void> Function() mutation,
   ) async {
     final previous = _session;
+    final generation = _activationGeneration;
     _refreshingSelection = true;
     try {
       await mutation();
       await refreshServers();
       final next = sources.server(id);
-      if (previous?.server.id == id &&
+      if (_ownsActivation(generation) &&
+          _session?.server.id == id &&
+          previous?.server.id == id &&
           (previous!.server.baseUrl != next.baseUrl ||
               previous.server.normalizedUserAgent !=
                   next.normalizedUserAgent)) {
         final stored = await credentials.read(id);
-        if (stored != null) await _activate(next, stored, usePrepared: true);
+        if (stored != null &&
+            _ownsActivation(generation) &&
+            _session?.server.id == id) {
+          await _activate(
+            next,
+            stored,
+            generation: generation,
+            usePrepared: true,
+          );
+        }
       }
       if (_prefill?.id == id) _prefill = next;
       _lineSwitchFailure = null;
@@ -935,6 +961,7 @@ class AuthController extends ChangeNotifier {
     void Function()? guard,
     int? generation,
     bool usePrepared = false,
+    bool remember = false,
   }) async {
     guard?.call();
     final operation = generation ?? ++_activationGeneration;
@@ -944,20 +971,13 @@ class AuthController extends ChangeNotifier {
         server.cloudAccountId != stored.cloudAccountId) {
       throw StateError('Source credential identity mismatch');
     }
-    // Verification may await the network. A candidate must not share mutable
-    // session fields with the published client or another pending activation.
-    // Legacy Emby activation is synchronous and retains injected subclasses.
-    final prepared = !usePrepared || server.serviceType == MediaServerType.emby
-        ? null
-        : sources.verifiedClient(server.id, stored);
-    final attached =
-        prepared ??
-        (server.serviceType == MediaServerType.emby &&
-                _client.serviceType == server.serviceType
-            ? _client
-            : createProviderClient(server.serviceType));
-    if (server.serviceType != MediaServerType.emby &&
-        identical(attached, _client)) {
+    // Never attach a token to an unverified endpoint or mutate the published
+    // client while a candidate is awaiting anonymous identity verification.
+    final prepared = usePrepared
+        ? sources.verifiedClient(server.id, stored)
+        : null;
+    var attached = prepared ?? sources.createCandidate(server.serviceType);
+    if (identical(attached, _client)) {
       throw StateError('Provider factory must return an independent client');
     }
     attached.onSessionExpired = null;
@@ -965,38 +985,56 @@ class AuthController extends ChangeNotifier {
     late final void Function() sourceGuard;
     MediaServerClient? guarded;
     try {
+      sourceGuard = sources.selectedSessionGuard(server.id);
+      void current() {
+        _requireActivation(operation);
+        sourceGuard();
+        guard?.call();
+      }
+
       if (prepared == null) {
+        attached.setUserAgent(server.normalizedUserAgent);
+        final info = await attached.getPublicInfo(Uri.parse(server.baseUrl));
+        current();
+        if (info.id != server.expectedServerId) {
+          throw const MediaServerException(
+            MediaServerFailureKind.incompatibleServer,
+          );
+        }
         attached.attachSession(
           baseUrl: Uri.parse(server.baseUrl),
           accessToken: stored.accessToken,
           userId: stored.userId,
           userAgent: server.normalizedUserAgent,
         );
-      }
-      sourceGuard = sources.selectedSessionGuard(server.id);
-      if (server.serviceType != MediaServerType.emby && prepared == null) {
-        final info = await attached.getPublicInfo(Uri.parse(server.baseUrl));
-        _requireActivation(operation);
-        sourceGuard();
-        guard?.call();
-        if (info.id != (server.verifiedServerId ?? server.id)) {
-          throw const MediaServerException(MediaServerFailureKind.forbidden);
-        }
         await sources.verifyAttachedSession(server.id, stored, attached);
-        _requireActivation(operation);
-        sourceGuard();
-        guard?.call();
+        current();
       }
       if (server.serviceType != MediaServerType.emby) {
         guarded = attached.withRequestGuard(sourceGuard);
       }
-      guard?.call();
-      _requireActivation(operation);
-      sourceGuard();
+      current();
+      if (remember) await sources.rememberSelection(server.id, guard: current);
+      current();
     } catch (_) {
       attached.clearSession();
       guarded?.clearSession();
       rethrow;
+    }
+    if (server.serviceType == MediaServerType.emby) {
+      // Keep Emby's refresh/retry owner and injected behavior, but only attach
+      // after the independent candidate and durable selection have succeeded.
+      final candidate = attached;
+      attached = _client.serviceType == MediaServerType.emby
+          ? _client
+          : sources.createCandidate(MediaServerType.emby);
+      attached.attachSession(
+        baseUrl: Uri.parse(server.baseUrl),
+        accessToken: stored.accessToken,
+        userId: stored.userId,
+        userAgent: server.normalizedUserAgent,
+      );
+      candidate.clearSession();
     }
     final retired = _client;
     final retiredGuarded = _guardedClient;
@@ -1082,6 +1120,10 @@ class AuthController extends ChangeNotifier {
       selectedClient.setUserAgent(session.server.normalizedUserAgent);
       final verifiedServerId = session.server.expectedServerId;
       if (verifiedServerId == null) return false;
+      final info = await selectedClient.getPublicInfo(
+        Uri.parse(session.server.baseUrl),
+      );
+      if (!current() || info.id != verifiedServerId) return false;
       final auth = await selectedClient.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
