@@ -22,3 +22,16 @@ Encrypted containers still require `BackupImportKeys` supplied by the embedding
 application. Common configs can carry their own `_key`; no third-party key is
 bundled. Missing keys produce an explicit failure and no writes. Tests use
 synthetic keys, accounts and addresses.
+
+File reading uses the shared `PickedAppFile.fromXFile` adapter. Android's
+file selector supplies an in-memory `XFile.fromData`; passing a stream end
+beyond its byte length throws instead of stopping at EOF. Read to EOF and
+check the cumulative byte count while consuming the stream. Do not replace
+this with an unbounded `readAsBytes` for path-backed files. The regression
+coverage in `test/app/file_import_test.dart` uses synthetic backups only.
+
+A file-read fix does not provision decryption keys: the current application
+initializes `AuthController.backupImportKeys` with empty keys. Hills imports
+therefore still report `decryptionKeyUnavailable` until verified key material
+is supplied by the embedding application. A private exported backup must not
+be committed as a test fixture.

@@ -13,11 +13,64 @@ class PickedAppFile {
     required this.read,
   });
 
+  /// Wraps both path-backed desktop files and Android's in-memory documents.
+  static Future<PickedAppFile> fromXFile(selector.XFile file) async {
+    return PickedAppFile(
+      fileName: file.name.isEmpty
+          ? file.path.split(RegExp(r'[\\/]')).last
+          : file.name,
+      length: await _lengthOf(file),
+      read: (limit) => _readBounded(file, limit),
+    );
+  }
+
   final String fileName;
   final int? length;
   final AppFileBytesReader read;
 
   Future<Uint8List> readBytes(int limit) => read(limit);
+
+  static Future<int?> _lengthOf(selector.XFile file) async {
+    try {
+      return await file.length();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Uint8List> _readBounded(selector.XFile file, int limit) async {
+    final Stream<List<int>> stream;
+    try {
+      // Android returns XFile.fromData. Its openRead slices the backing bytes
+      // and throws if an explicit end exceeds their length. Read to EOF and
+      // enforce the limit while consuming, also covering unknown/stale sizes.
+      stream = file.openRead();
+    } catch (error) {
+      throw AppFileReadException(error.toString());
+    }
+    final chunks = <Uint8List>[];
+    var total = 0;
+    try {
+      await for (final chunk in stream) {
+        total += chunk.length;
+        if (total > limit) {
+          throw AppFileTooLargeException(-1, limit);
+        }
+        chunks.add(chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
+      }
+    } on AppFileTooLargeException {
+      rethrow;
+    } catch (error) {
+      throw AppFileReadException(error.toString());
+    }
+    final bytes = Uint8List(total);
+    var offset = 0;
+    for (final chunk in chunks) {
+      bytes.setRange(offset, offset + chunk.length, chunk);
+      offset += chunk.length;
+    }
+    return bytes;
+  }
 }
 
 /// 设备没有可用的文件选择 provider(常见于 Android TV)。
@@ -75,52 +128,6 @@ class DefaultAppFilePicker implements AppFilePicker {
       throw AppFilePickerUnavailableException(error.code);
     }
     if (picked == null) return null;
-    final file = picked;
-    return PickedAppFile(
-      fileName: file.name.isEmpty
-          ? (file.path.split(RegExp(r'[\\/]')).last)
-          : file.name,
-      length: await _lengthOf(file),
-      read: (limit) => _readBounded(file, limit),
-    );
-  }
-
-  static Future<int?> _lengthOf(selector.XFile file) async {
-    try {
-      return await file.length();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<Uint8List> _readBounded(selector.XFile file, int limit) async {
-    final Stream<List<int>> stream;
-    try {
-      stream = file.openRead(0, limit + 1);
-    } catch (error) {
-      throw AppFileReadException(error.toString());
-    }
-    final chunks = <Uint8List>[];
-    var total = 0;
-    try {
-      await for (final chunk in stream) {
-        total += chunk.length;
-        if (total > limit) {
-          throw AppFileTooLargeException(-1, limit);
-        }
-        chunks.add(chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
-      }
-    } on AppFileTooLargeException {
-      rethrow;
-    } catch (error) {
-      throw AppFileReadException(error.toString());
-    }
-    final bytes = Uint8List(total);
-    var offset = 0;
-    for (final chunk in chunks) {
-      bytes.setRange(offset, offset + chunk.length, chunk);
-      offset += chunk.length;
-    }
-    return bytes;
+    return PickedAppFile.fromXFile(picked);
   }
 }
