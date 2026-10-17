@@ -36,6 +36,7 @@ class UpdateDownloadState {
     this.total,
     this.verified,
     this.failure,
+    this.failedPhase,
   });
   final UpdateDownloadPhase phase;
   final AppRelease? release;
@@ -44,6 +45,9 @@ class UpdateDownloadState {
   final int? total;
   final VerifiedUpdate? verified;
   final UpdateDownloadFailure? failure;
+
+  /// Retains the operation that failed after [phase] becomes failed.
+  final UpdateDownloadPhase? failedPhase;
   bool get busy =>
       phase == UpdateDownloadPhase.downloading ||
       phase == UpdateDownloadPhase.verifying;
@@ -246,6 +250,9 @@ class UpdateController extends ChangeNotifier {
         release: candidate,
         asset: asset,
         failure: failure,
+        failedPhase: failure == UpdateDownloadFailure.cancelled
+            ? null
+            : download.phase,
       );
     } finally {
       if (active()) {

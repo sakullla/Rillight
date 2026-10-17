@@ -162,6 +162,52 @@ void main() {
     );
   }
 
+  test(
+    'playback occupancy notifies before spawn and releases after close',
+    () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      final states = <bool>[];
+      host.addListener(() => states.add(host.playbackOccupied));
+      control.spawnHold = Completer<void>();
+      final pending = host.open(
+        const PlayerOpenRequest(itemId: 'movie-up', startPaused: true),
+      );
+      expect(host.current, isNull);
+      expect(host.playbackOccupied, isTrue);
+      expect(states, [true]);
+      control.spawnHold!.complete();
+      await pending;
+      expect(host.playbackOccupied, isTrue);
+      await host.close();
+      expect(host.playbackOccupied, isFalse);
+      expect(states.last, isFalse);
+      host.dispose();
+      auth.dispose();
+    },
+  );
+
+  test(
+    'a queued close cannot clear the next opening playback reservation',
+    () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      control.spawnHold = Completer<void>();
+      final closing = host.close();
+      final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      await closing;
+      expect(host.current, isNull);
+      expect(host.playbackOccupied, isTrue);
+      control.spawnHold!.complete();
+      await opening;
+      await host.close();
+      expect(host.playbackOccupied, isFalse);
+      host.dispose();
+      auth.dispose();
+    },
+  );
+
   PlaybackSessionSnapshot snapshotFor(
     AuthController auth, {
     String? baseUrl,

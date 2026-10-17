@@ -184,7 +184,7 @@ class _UpdateCheckState extends State<UpdateCheck> {
               UpdateDownloadPhase.verifying => l.updateVerifying,
               UpdateDownloadPhase.ready => l.updateReady,
               UpdateDownloadPhase.cancelled => l.updateCancelled,
-              UpdateDownloadPhase.failed => _downloadFailure(l, d.failure),
+              UpdateDownloadPhase.failed => _downloadFailure(l, d),
               UpdateDownloadPhase.idle => '',
             }, key: const Key('app-update-download-status')),
             if (d.busy) ...[
@@ -299,14 +299,22 @@ class _UpdateCheckState extends State<UpdateCheck> {
   };
   static String _downloadFailure(
     AppLocalizations l,
-    UpdateDownloadFailure? failure,
-  ) => switch (failure) {
-    UpdateDownloadFailure.checksum => l.updateChecksumFailed,
-    UpdateDownloadFailure.disk => l.updateDiskFailed,
-    UpdateDownloadFailure.timeout => l.updateDownloadTimeout,
-    UpdateDownloadFailure.unsafeAsset => l.updateUnsafePackage,
-    _ => l.updateDownloadFailed,
-  };
+    UpdateDownloadState download,
+  ) {
+    if (download.failedPhase == UpdateDownloadPhase.verifying &&
+        (download.failure == UpdateDownloadFailure.network ||
+            download.failure == UpdateDownloadFailure.timeout)) {
+      return l.updateVerificationUnavailable;
+    }
+    return switch (download.failure) {
+      UpdateDownloadFailure.checksum => l.updateChecksumFailed,
+      UpdateDownloadFailure.disk => l.updateDiskFailed,
+      UpdateDownloadFailure.timeout => l.updateDownloadTimeout,
+      UpdateDownloadFailure.unsafeAsset => l.updateUnsafePackage,
+      _ => l.updateDownloadFailed,
+    };
+  }
+
   static String _installGuide(
     AppLocalizations l,
     UpdateOperatingSystem? system,

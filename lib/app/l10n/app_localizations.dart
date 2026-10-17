@@ -4432,6 +4432,12 @@ abstract class AppLocalizations {
   /// **'无法通过安装包完整性校验，已禁止安装。请重新下载或打开 Release 页。'**
   String get updateChecksumFailed;
 
+  /// No description provided for @updateVerificationUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法获取校验文件，无法完成安装包完整性校验，已禁止安装。请重试或打开 Release 页。'**
+  String get updateVerificationUnavailable;
+
   /// No description provided for @updateDiskFailed.
   ///
   /// In zh, this message translates to:

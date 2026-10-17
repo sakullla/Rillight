@@ -2299,6 +2299,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateChecksumFailed => '无法通过安装包完整性校验，已禁止安装。请重新下载或打开 Release 页。';
 
   @override
+  String get updateVerificationUnavailable =>
+      '无法获取校验文件，无法完成安装包完整性校验，已禁止安装。请重试或打开 Release 页。';
+
+  @override
   String get updateDiskFailed => '无法保存安装包，请检查剩余存储空间及目录权限后重试。';
 
   @override
