@@ -118,7 +118,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
               height: 18,
               child: CupertinoActivityIndicator(),
             )
-          : const Icon(AppIcons.play, size: 22, fill: AppIcons.filled),
+          : Icon(AppIcons.play, size: expand ? 22 : 24, fill: AppIcons.filled),
       label: Text(
         l10n.play,
         maxLines: 1,
@@ -127,7 +127,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
       style: AppButtonStyle(
-        minimumSize: Size(0, expand ? 48 : 44),
+        minimumSize: Size(0, expand ? 48 : 52),
         shape: const StadiumBorder(),
         // 手机头图上的播放钮用反相实底:深色是白底黑字,浅色是墨底白字。
         backgroundColor: onScrim
@@ -140,10 +140,12 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
             : expand
             ? scheme.onInverseSurface
             : scheme.onPrimary,
+        // 主 CTA 从 hero 画面里浮出来;加载态撤掉投影避免"悬空的灰底"。
+        boxShadow: _opening ? null : AppShadow.emphasis(scheme.brightness),
       ),
       variant: AppButtonVariant.filled,
     );
-    // 手机播放与详情同一行。播放保持反相实底；详情只描边，不再用相近的实心块。
+    // 手机播放与详情同一行。播放保持反相实底;详情只描边,不再用相近的实心块。
     final details = expand
         ? AppButton(
             onPressed: widget.onDetails,
@@ -159,15 +161,19 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
         : AppButton(
             onPressed: widget.onDetails,
             style: AppButtonStyle(
-              minimumSize: const Size(0, 44),
+              minimumSize: const Size(0, 52),
               shape: const StadiumBorder(),
               foregroundColor: onScrim
                   ? const Color(0xffffffff)
                   : scheme.onSurface,
-              backgroundColor: onScrim ? null : scheme.surfaceContainerLowest,
+              // 深色遮罩上的详情钮做玻璃 pill:白底低透明 + 细白边,
+              // 比裸描边在复杂底图上更清晰,也和播放钮的实底形成层次。
+              backgroundColor: onScrim
+                  ? const Color(0xffffffff).withValues(alpha: .14)
+                  : scheme.surfaceContainerLowest,
               side: BorderSide(
                 color: onScrim
-                    ? const Color(0xffffffff).withValues(alpha: .72)
+                    ? const Color(0xffffffff).withValues(alpha: .32)
                     : scheme.outline,
               ),
             ),

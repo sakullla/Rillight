@@ -678,10 +678,14 @@ class _ConnectPageState extends State<ConnectPage> {
     final servers = _filteredServers(auth);
     final header = Row(
       children: [
-        Text(
-          l10n.savedServers,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
+        Flexible(
+          child: Text(
+            l10n.savedServers,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
         if (auth.savedServers.isNotEmpty) ...[

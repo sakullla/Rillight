@@ -1736,17 +1736,8 @@ class _ChapterStripState extends State<_ChapterStrip> {
 }
 
 /// 桌面鼠标左键可以拖动章节条。竖直滚轮仍交给外层详情页。
-class _ChapterScrollBehavior extends CupertinoScrollBehavior {
+class _ChapterScrollBehavior extends AppScrollBehavior {
   const _ChapterScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const {
-    PointerDeviceKind.mouse,
-    PointerDeviceKind.touch,
-    PointerDeviceKind.stylus,
-    PointerDeviceKind.trackpad,
-    PointerDeviceKind.invertedStylus,
-  };
 }
 
 class _ChapterTile extends StatelessWidget {

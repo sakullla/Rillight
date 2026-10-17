@@ -10,3 +10,4 @@ export 'theme.dart';
 export 'controls.dart';
 export 'dialogs.dart';
 export 'artwork_palette.dart';
+export 'scroll_behavior.dart';

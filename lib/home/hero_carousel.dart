@@ -290,6 +290,11 @@ class HeroScrim extends StatelessWidget {
   }
 }
 
+/// 压在画面上的文字统一带一层软阴影,亮部/杂色底图上仍可读。
+const List<Shadow> heroScrimTextShadow = [
+  Shadow(blurRadius: 18, color: Color(0xA6000000), offset: Offset(0, 2)),
+];
+
 /// 左下文字块:标题 → meta 行 + ★ → 简介(可选) → 按钮槽。
 ///
 /// 压在深色遮罩上时白字硬编码。[onPaper] 为真时改用主题墨色,并放弃
@@ -345,6 +350,7 @@ class HeroTextBlock extends StatelessWidget {
     final overviewColor = onPaper
         ? ink.withValues(alpha: .78)
         : const Color(0xffffffff).withValues(alpha: .78);
+    final textShadow = onPaper ? null : heroScrimTextShadow;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -366,7 +372,7 @@ class HeroTextBlock extends StatelessWidget {
                         (large
                                 ? theme.textTheme.bodyLarge
                                 : theme.textTheme.bodyMedium)
-                            ?.copyWith(color: metaColor),
+                            ?.copyWith(color: metaColor, shadows: textShadow),
                   ),
                 ),
               if (item.communityRating != null) ...[
@@ -387,7 +393,11 @@ class HeroTextBlock extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style:
                 (large ? theme.textTheme.bodyLarge : theme.textTheme.bodyMedium)
-                    ?.copyWith(color: overviewColor, height: 1.6),
+                    ?.copyWith(
+                      color: overviewColor,
+                      height: 1.6,
+                      shadows: textShadow,
+                    ),
           ),
         ],
         if (includeActions) ...[
@@ -408,9 +418,7 @@ class HeroTextBlock extends StatelessWidget {
         fontWeight: FontWeight.w700,
         height: 1.15,
         letterSpacing: large ? -.2 : null,
-        shadows: onPaper
-            ? null
-            : const [Shadow(blurRadius: 12, color: Color(0x8a000000))],
+        shadows: onPaper ? null : heroScrimTextShadow,
       ),
     );
     final logoWidth = logoMaxWidth;

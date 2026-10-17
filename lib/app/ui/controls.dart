@@ -66,6 +66,7 @@ class AppButtonStyle {
     this.side,
     this.shape,
     this.textStyle,
+    this.boxShadow,
   });
   final EdgeInsetsGeometry? padding;
   final Size? minimumSize, fixedSize;
@@ -76,6 +77,10 @@ class AppButtonStyle {
   final BorderSide? side;
   final OutlinedBorder? shape;
   final TextStyle? textStyle;
+
+  /// 投影:仅实底主按钮(如播放 CTA)需要,从画面里浮出来。描边/纯文本按钮
+  /// 保持平面,浮层投影由 [AppShadow] 提供。
+  final List<BoxShadow>? boxShadow;
 }
 
 /// Selectable read-only text with an owned controller that follows its value.
@@ -296,6 +301,7 @@ class _AppButtonState extends State<AppButton> {
       side: side,
       radius: _buttonRadius(widget.variant),
       scale: scale,
+      shadow: widget.style?.boxShadow,
     );
   }
 
@@ -418,7 +424,11 @@ class _AppButtonState extends State<AppButton> {
               constraints: fixedSize == null
                   ? null
                   : BoxConstraints.tight(_fixedHitSize(fixedSize, minimumSize)),
-              decoration: ShapeDecoration(color: face.fill, shape: shape),
+              decoration: ShapeDecoration(
+                color: face.fill,
+                shape: shape,
+                shadows: face.shadow,
+              ),
               child: ExcludeFocus(
                 child: CupertinoButton(
                   padding: widget.style?.padding ?? widget.padding,
@@ -468,10 +478,12 @@ class _ButtonFace {
     required this.side,
     required this.radius,
     required this.scale,
+    this.shadow,
   });
   final Color fill, foreground;
   final BorderSide side;
   final double radius, scale;
+  final List<BoxShadow>? shadow;
 }
 
 class AppIconButton extends StatelessWidget {
@@ -575,6 +587,12 @@ class _AppTooltipState extends State<AppTooltip> {
             Overlay.of(context).context.findRenderObject()! as RenderBox;
         final rect =
             anchor.localToGlobal(Offset.zero, ancestor: overlay) & anchor.size;
+        // 深色主题用深色 tooltip:白盒压在暗画面上同样"莫名其妙"。
+        final dark = colors.brightness == Brightness.dark;
+        final background = dark
+            ? colors.surfaceContainerHighest
+            : colors.inverseSurface;
+        final foreground = dark ? colors.onSurface : colors.onInverseSurface;
         return Positioned.fill(
           child: CustomSingleChildLayout(
             delegate: _TooltipLayout(rect),
@@ -586,15 +604,13 @@ class _AppTooltipState extends State<AppTooltip> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: colors.inverseSurface,
-                  borderRadius: BorderRadius.circular(6),
+                  color: background,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: AppShadow.overlay(colors.brightness),
                 ),
                 child: Text(
                   widget.message,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.onInverseSurface,
-                  ),
+                  style: TextStyle(fontSize: 12, color: foreground),
                 ),
               ),
             ),

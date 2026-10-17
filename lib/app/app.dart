@@ -66,7 +66,7 @@ class RillightApp extends StatelessWidget {
             ],
             theme: theme.cupertino,
             scrollBehavior: environment.isDesktop || environment.isTv
-                ? null
+                ? const AppScrollBehavior()
                 : const PhoneScrollBehavior(),
             routerConfig: router,
             builder: (context, child) {

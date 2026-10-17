@@ -83,7 +83,7 @@ class MediaShelf extends StatefulWidget {
   static double heroClearanceFor(BuildContext context, double screenWidth) {
     final title = lineHeightOf(
       context,
-      AppUiTheme.of(context).textTheme.titleMedium,
+      AppUiTheme.of(context).textTheme.titleLarge,
     );
     final image = wideCardWidthFor(screenWidth) * 9 / 16;
     final labels = wideLabelExtentFor(context, customCard: false);
@@ -372,7 +372,8 @@ class _MediaShelfState extends State<MediaShelf> {
                     widget.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    // 手机与首页分区同一字阶：20 号粗体。
+                    // 分区标题两级字阶:手机 20 号粗体,桌面用 titleLarge(20)加粗,
+                    // 不再比手机小一档。
                     style: AppUiTheme.of(context).phone
                         ? AppUiTheme.of(context).textTheme.titleLarge?.copyWith(
                             fontSize: 20,
@@ -380,7 +381,10 @@ class _MediaShelfState extends State<MediaShelf> {
                             height: 1.25,
                             letterSpacing: -0.2,
                           )
-                        : AppUiTheme.of(context).textTheme.titleMedium,
+                        : AppUiTheme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
                   ),
                 ),
                 if (widget.headerAction != null) widget.headerAction!,
@@ -392,10 +396,17 @@ class _MediaShelfState extends State<MediaShelf> {
                       foregroundColor: AppUiTheme.of(context)
                           .colorScheme
                           .onSurfaceVariant,
+                      backgroundColor: AppUiTheme.of(context)
+                          .colorScheme
+                          .surfaceContainerHigh,
                       textStyle: AppUiTheme.of(context).textTheme.labelLarge,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.sm,
+                        6,
+                        AppSpacing.xs,
+                        6,
                       ),
+                      shape: const StadiumBorder(),
                     ),
                     icon: const Icon(CupertinoIcons.arrow_right, size: 16),
                     label: Text(l10n.more),
@@ -656,17 +667,8 @@ class _EnsureVisibleOnFocusState extends State<_EnsureVisibleOnFocus> {
   }
 }
 
-class _ShelfScrollBehavior extends CupertinoScrollBehavior {
+class _ShelfScrollBehavior extends AppScrollBehavior {
   const _ShelfScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const {
-    PointerDeviceKind.mouse,
-    PointerDeviceKind.touch,
-    PointerDeviceKind.stylus,
-    PointerDeviceKind.trackpad,
-    PointerDeviceKind.invertedStylus,
-  };
 }
 
 class _ScrollButton extends StatelessWidget {
@@ -691,6 +693,7 @@ class _ScrollButton extends StatelessWidget {
         tooltip: tooltip,
         onPressed: onPressed,
         icon: Icon(icon),
+        size: ScrimIconButtonSize.large,
       ),
     );
   }

@@ -4,7 +4,6 @@ import 'source_switch_menu.dart';
 
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
@@ -573,15 +572,6 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   }
 }
 
-class _CategoryScrollBehavior extends CupertinoScrollBehavior {
+class _CategoryScrollBehavior extends AppScrollBehavior {
   const _CategoryScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const {
-    PointerDeviceKind.mouse,
-    PointerDeviceKind.touch,
-    PointerDeviceKind.stylus,
-    PointerDeviceKind.trackpad,
-    PointerDeviceKind.invertedStylus,
-  };
 }

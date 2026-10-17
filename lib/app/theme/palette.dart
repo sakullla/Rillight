@@ -2,18 +2,21 @@ import 'package:flutter/widgets.dart';
 
 abstract final class AppPalette {
   /// 一套主题的全部取色。深色组件保持平面;浅色另加细边、白底输入和浮层阴影。
+  ///
+  /// 桌面深色走"影院墨黑":基色压到近黑的冷调墨蓝,表面阶梯只留轻微蓝紫,
+  /// 让海报和 hero 画面成为页面里唯一的色彩主角。浅色纸色主题保持阅读感。
   static const Tones darkTones = Tones(
-    base: Color(0xFF151A28),
-    surfaceLowest: Color(0xFF171D2C),
-    surfaceLow: Color(0xFF1D2536),
-    surface: Color(0xFF242D40),
-    surfaceHigh: Color(0xFF2B354A),
-    surfaceHighest: Color(0xFF354158),
-    surfaceBright: Color(0xFF414D65),
+    base: Color(0xFF0F131B),
+    surfaceLowest: Color(0xFF121722),
+    surfaceLow: Color(0xFF171C29),
+    surface: Color(0xFF1D2333),
+    surfaceHigh: Color(0xFF242B3E),
+    surfaceHighest: Color(0xFF2C354B),
+    surfaceBright: Color(0xFF39445E),
     onSurface: Color(0xFFF3F5FF),
-    onSurfaceVariant: Color(0xFFB9C3D9),
-    outline: Color(0xFF78849F),
-    outlineVariant: Color(0xFF39445B),
+    onSurfaceVariant: Color(0xFFB4BFD4),
+    outline: Color(0xFF76829C),
+    outlineVariant: Color(0xFF323C50),
     accent: Color(0xFFB8B8FF),
     onAccent: Color(0xFF242052),
     accentContainer: Color(0xFF37355F),
@@ -31,7 +34,7 @@ abstract final class AppPalette {
     errorContainer: Color(0xFF5C2320),
     onErrorContainer: Color(0xFFFFD2CD),
     inverseSurface: Color(0xFFF3F5FF),
-    onInverseSurface: Color(0xFF242D40),
+    onInverseSurface: Color(0xFF1D2333),
     inversePrimary: Color(0xFF5757A8),
     scrim: Color(0xFF000000),
   );

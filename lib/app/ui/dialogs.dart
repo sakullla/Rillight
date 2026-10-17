@@ -51,15 +51,7 @@ class AppDialog extends StatelessWidget {
                     alpha: theme.brightness == Brightness.dark ? 0.65 : 0.9,
                   ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: theme.colorScheme.scrim.withValues(
-                      alpha: theme.brightness == Brightness.dark ? .42 : .16,
-                    ),
-                    blurRadius: 32,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
+                boxShadow: AppShadow.overlay(theme.brightness),
               ),
               child: SingleChildScrollView(
                 child: Padding(

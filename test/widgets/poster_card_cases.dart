@@ -125,10 +125,34 @@ void main() {
     expect(find.textContaining('2020'), findsOneWidget);
     expect(find.textContaining('45分钟'), findsOneWidget);
     expect(find.text('可播电影'), findsWidgets);
-    expect(findAppTooltip('可播电影'), findsOneWidget);
+    // 短标题不会被截断,不再挂 tooltip。
+    expect(findAppTooltip('可播电影'), findsNothing);
     expect(taps, 0);
     expect(host.current, isNull);
   });
+
+  testWidgets(
+    'truncated caption owns a tooltip while short titles stay silent',
+    (tester) async {
+      const longTitle = MediaItem(
+        id: 'movie-long',
+        name: '一部名字特别特别长、在卡片宽度内一定会被截断的电影标题',
+        type: 'Movie',
+        productionYear: 2020,
+      );
+      await tester.pumpWidget(
+        _wrap(
+          host: host,
+          child: PosterCard(item: longTitle, onTap: () {}),
+        ),
+      );
+      await _hover(tester, find.byType(PosterCard));
+      // 被截断的标题挂 tooltip,悬停可见完整文本。
+      expect(findAppTooltip(longTitle.name), findsOneWidget);
+      // 短标题对照组:同样悬停也不产生 tooltip。
+      expect(findAppTooltip('可播电影'), findsNothing);
+    },
+  );
 
   testWidgets('light hover keeps the title and uses the accent play control', (
     tester,

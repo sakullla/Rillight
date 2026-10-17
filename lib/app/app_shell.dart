@@ -47,7 +47,7 @@ class AppShell extends StatefulWidget {
   /// 有系统标题按钮时,导航、编辑首页、搜索、设置和账号收进同一条
   /// 标题按钮带,垂直中心与最小化/最大化/关闭重合。没有标题按钮时,
   /// 这些控件在本高度内共用一条中线。
-  static const topBarHeight = 52.0;
+  static const topBarHeight = 56.0;
 
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
   static const topFadeHeight = 36.0;
@@ -532,7 +532,7 @@ class _TopBar extends StatelessWidget {
                           tooltip: l10n.phoneHomeEdit,
                           padding: EdgeInsets.zero,
                           constraints: kTitleBarIconConstraints,
-                          size: 18,
+                          size: 20,
                           onPressed: () {
                             unawaited(showHomeDisplayDialog(context));
                           },
@@ -564,7 +564,7 @@ class _TopBar extends StatelessWidget {
                         ),
                       ],
                       IconTheme(
-                        data: IconTheme.of(context).copyWith(size: 18),
+                        data: IconTheme.of(context).copyWith(size: 20),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -639,43 +639,43 @@ class _NavTextButton extends StatelessWidget {
       onPressed: onPressed,
       style: AppButtonStyle(
         foregroundColor: fg,
+        // 选中底由内部 pill 表达,整钮的悬停/焦点面不再叠一层。
+        hoverColor: const Color(0x00000000),
         textStyle: theme.textTheme.titleMedium?.copyWith(
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
         minimumSize: const Size(44, kWindowChromeHeight),
       ),
       variant: AppButtonVariant.plain,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(
-                  icon,
-                  size: 17,
-                  fill: selected ? AppIcons.filled : AppIcons.outline,
-                  color: selected ? colorScheme.primary : fg,
-                ),
-                const SizedBox(width: 6),
-              ],
-              Text(label),
+      child: AnimatedContainer(
+        duration: AppMotion.fast,
+        curve: AppMotion.standard,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xxs,
+        ),
+        decoration: BoxDecoration(
+          color: selected
+              ? colorScheme.surfaceContainerHigh
+              : const Color(0x00000000),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(
+                icon,
+                size: 18,
+                fill: selected ? AppIcons.filled : AppIcons.outline,
+                color: selected ? colorScheme.primary : fg,
+              ),
+              const SizedBox(width: 6),
             ],
-          ),
-          const SizedBox(height: 4),
-          AnimatedContainer(
-            duration: AppMotion.fast,
-            curve: AppMotion.standard,
-            height: 2.5,
-            width: selected ? 22 : 0,
-            decoration: BoxDecoration(
-              color: selected ? colorScheme.primary : const Color(0x00000000),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
+            Text(label),
+          ],
+        ),
       ),
     );
   }

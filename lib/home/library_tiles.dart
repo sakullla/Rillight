@@ -1,4 +1,5 @@
-import 'package:flutter/gestures.dart';
+import 'dart:ui' show ImageFilter;
+
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
@@ -258,17 +259,8 @@ class _LibraryScrollButton extends StatelessWidget {
 }
 
 /// 片库行允许鼠标拖动。不拦截滚轮，竖向滚动仍由首页接管。
-class _LibraryRailScrollBehavior extends CupertinoScrollBehavior {
+class _LibraryRailScrollBehavior extends AppScrollBehavior {
   const _LibraryRailScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const {
-    PointerDeviceKind.mouse,
-    PointerDeviceKind.touch,
-    PointerDeviceKind.stylus,
-    PointerDeviceKind.trackpad,
-    PointerDeviceKind.invertedStylus,
-  };
 }
 
 class LibraryCardFace extends StatelessWidget {
@@ -288,7 +280,7 @@ class LibraryCardFace extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.md),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       child: ColoredBox(
         color: colorScheme.surfaceContainerHigh,
         child: Stack(
@@ -307,11 +299,11 @@ class LibraryCardFace extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  stops: const [0.4, 1],
+                  stops: const [0.45, 1],
                   colors: [
                     colorScheme.scrim.withValues(alpha: 0),
                     colorScheme.scrim.withValues(
-                      alpha: AppScrim.of(context, AppScrim.textStart),
+                      alpha: AppScrim.of(context, AppScrim.bottomMid),
                     ),
                   ],
                 ),
@@ -321,14 +313,30 @@ class LibraryCardFace extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.sm),
               child: Align(
                 alignment: Alignment.bottomLeft,
-                child: Text(
-                  library.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.start,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: const Color(0xffffffff),
-                    fontWeight: FontWeight.w600,
+                // 玻璃铭牌:名字浮在毛玻璃片上,比裸白字更精致,亮图上也可读。
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                    child: ColoredBox(
+                      color: const Color(0xff000000).withValues(alpha: 0.32),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.xxs,
+                        ),
+                        child: Text(
+                          library.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.start,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: const Color(0xffffffff),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -359,7 +367,7 @@ class _LibraryCard extends StatelessWidget {
       child: AppHoverCard(
         inkKey: CatalogKeys.library(library.id),
         onTap: () => context.push(AppRoutes.library(library.id)),
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         child: LibraryCardFace(library: library, width: width, height: height),
       ),
     );

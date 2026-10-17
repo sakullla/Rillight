@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/gestures.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -736,17 +735,8 @@ class _AlbumRailState extends State<_AlbumRail> {
   }
 }
 
-class _AlbumScrollBehavior extends CupertinoScrollBehavior {
+class _AlbumScrollBehavior extends AppScrollBehavior {
   const _AlbumScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const {
-    PointerDeviceKind.mouse,
-    PointerDeviceKind.touch,
-    PointerDeviceKind.stylus,
-    PointerDeviceKind.trackpad,
-    PointerDeviceKind.invertedStylus,
-  };
 }
 
 class _AlbumStill extends StatefulWidget {

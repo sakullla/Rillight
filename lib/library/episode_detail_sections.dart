@@ -793,17 +793,8 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
 }
 
 /// 桌面鼠标左键可以拖动演职员横条。竖直滚轮仍交给外层详情页。
-class _RowScrollBehavior extends CupertinoScrollBehavior {
+class _RowScrollBehavior extends AppScrollBehavior {
   const _RowScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const {
-    PointerDeviceKind.mouse,
-    PointerDeviceKind.touch,
-    PointerDeviceKind.stylus,
-    PointerDeviceKind.trackpad,
-    PointerDeviceKind.invertedStylus,
-  };
 }
 
 class _PersonCard extends StatelessWidget {

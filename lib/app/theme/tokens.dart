@@ -24,6 +24,9 @@ abstract final class AppRadii {
   static const double md = 12;
   static const double lg = 16;
   static const double xl = 20;
+
+  /// 海报/媒体卡默认圆角。比通用 md 更圆润,是内容卡片的面孔。
+  static const double card = 14;
 }
 
 /// 动效 token:统一时长与 easeOut 系曲线。
@@ -295,4 +298,64 @@ abstract final class AppGlass {
   static const double reducedTint = 0.92;
   static const double edgeLight = 0.16;
   static const double specular = 0.14;
+}
+
+/// 投影 token:桌面深色用"低透明、大模糊"的悬浮影,浅色用弥散软影。
+///
+/// 深色页面本身接近纯黑,重投影会糊成一片,因此深色档透明低、半径大;
+/// 浅色纸面吃影,用较实的弥散影拉开卡片与页面。
+abstract final class AppShadow {
+  /// 卡片悬停/浮起:海报卡、媒体库卡、悬停浮层。
+  static List<BoxShadow> cardHover(Brightness brightness) =>
+      brightness == Brightness.dark
+      ? const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 28,
+            offset: Offset(0, 14),
+          ),
+        ]
+      : const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ];
+
+  /// 强调控件(主播放钮等)的实底投影,让 CTA 从画面里浮出来。
+  static List<BoxShadow> emphasis(Brightness brightness) =>
+      brightness == Brightness.dark
+      ? const [
+          BoxShadow(
+            color: Color(0x80000000),
+            blurRadius: 20,
+            offset: Offset(0, 8),
+          ),
+        ]
+      : const [
+          BoxShadow(
+            color: Color(0x2E000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ];
+
+  /// 浮层(对话框、菜单):比卡片更高一档。
+  static List<BoxShadow> overlay(Brightness brightness) =>
+      brightness == Brightness.dark
+      ? const [
+          BoxShadow(
+            color: Color(0x99000000),
+            blurRadius: 40,
+            offset: Offset(0, 18),
+          ),
+        ]
+      : const [
+          BoxShadow(
+            color: Color(0x40000000),
+            blurRadius: 36,
+            offset: Offset(0, 14),
+          ),
+        ];
 }

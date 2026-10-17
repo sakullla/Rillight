@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
+import 'package:rillight/app/widgets/media_progress_bar.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_list.dart';
@@ -53,10 +54,12 @@ class PosterCard extends StatelessWidget {
         onTap: onTap,
         // 行高会裁切放大溢出。只放大封面,标题留在原位,避免悬停时被裁掉。
         hoverScale: 1,
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         builder: (context, highlighted) {
           final zoom =
               highlighted && !wide && !MediaQuery.disableAnimationsOf(context);
+          final scheme = AppUiTheme.of(context).colorScheme;
+          final light = scheme.brightness == Brightness.light;
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -64,15 +67,19 @@ class PosterCard extends StatelessWidget {
               DecoratedBox(
                 position: DecorationPosition.foreground,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  borderRadius: BorderRadius.circular(AppRadii.card),
+                  // 静止无框,悬停浮一圈高光环,替代旧版常驻的 0.8px 细线框。
                   border: Border.all(
-                    color: AppUiTheme.of(context).colorScheme.onSurface
-                        .withValues(alpha: 0.08),
-                    width: 0.8,
+                    color: highlighted
+                        ? (light
+                              ? scheme.outline
+                              : const Color(0xffffffff).withValues(alpha: 0.24))
+                        : const Color(0x00000000),
+                    width: 1.2,
                   ),
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  borderRadius: BorderRadius.circular(AppRadii.card),
                   clipBehavior: Clip.hardEdge,
                   child: SizedBox(
                     width: width,
@@ -109,7 +116,7 @@ class PosterCard extends StatelessWidget {
                         if (showProgress && item.canResume)
                           Align(
                             alignment: Alignment.bottomCenter,
-                            child: _ResumeProgressBar(
+                            child: MediaProgressBar(
                               key: CatalogKeys.resumeProgress,
                               value: progress,
                               label: l10n.playbackProgress(
@@ -221,7 +228,7 @@ class EpisodeThumbCard extends StatelessWidget {
                       if (item.canResume)
                         Align(
                           alignment: Alignment.bottomCenter,
-                          child: _ResumeProgressBar(
+                          child: MediaProgressBar(
                             value: progress,
                             label: l10n.playbackProgress(
                               (progress * 100).round(),
@@ -406,22 +413,34 @@ class _Caption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textStyle = style;
+    // 只有真正被截断的标题才挂 tooltip;完整标题悬停弹"完整文本"莫名其妙。
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: textStyle),
+      maxLines: 1,
+      strutStyle: StrutStyle.fromTextStyle(
+        textStyle ?? const TextStyle(),
+        forceStrutHeight: true,
+      ),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout(maxWidth: width);
+    final truncated = painter.didExceedMaxLines;
+    painter.dispose();
+    final child = Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.start,
+      style: textStyle,
+      strutStyle: StrutStyle.fromTextStyle(
+        textStyle ?? const TextStyle(),
+        forceStrutHeight: true,
+      ),
+    );
     return SizedBox(
       width: width,
-      child: AppTooltip(
-        message: text,
-        child: Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.start,
-          style: style,
-          strutStyle: StrutStyle.fromTextStyle(
-            style ?? const TextStyle(),
-            forceStrutHeight: true,
-          ),
-        ),
-      ),
+      child: truncated ? AppTooltip(message: text, child: child) : child,
     );
   }
 }
@@ -544,7 +563,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                               side: light
                                   ? BorderSide(color: scheme.outlineVariant)
                                   : null,
-                              minimumSize: const Size(32, 32),
+                              minimumSize: const Size(36, 36),
                               padding: const EdgeInsets.all(AppSpacing.xxs),
                             ),
                             icon: const Icon(
@@ -583,13 +602,14 @@ class _PosterRevealOverlay extends StatelessWidget {
                                 ? scheme.onPrimary
                                 : const Color(0xff000000),
                             padding: EdgeInsets.zero,
-                            minimumSize: const Size(44, 44),
+                            minimumSize: const Size(56, 56),
                             shape: const CircleBorder(),
+                            boxShadow: AppShadow.emphasis(scheme.brightness),
                           ),
                           icon: const Icon(
                             AppIcons.play,
                             fill: AppIcons.filled,
-                            size: 22,
+                            size: 26,
                           ),
                         ),
                       ),
@@ -642,40 +662,6 @@ class _PosterRevealOverlay extends StatelessWidget {
                   ],
                 )
               : const SizedBox.expand(),
-        ),
-      ),
-    );
-  }
-}
-
-class _ResumeProgressBar extends StatelessWidget {
-  const _ResumeProgressBar({
-    super.key,
-    required this.value,
-    required this.label,
-  });
-
-  final double value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      container: true,
-      label: label,
-      child: SizedBox(
-        height: 3,
-        child: ColoredBox(
-          color: const Color(0xff000000).withValues(alpha: 0.45),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FractionallySizedBox(
-              widthFactor: value.clamp(0.0, 1.0),
-              child: ColoredBox(
-                color: AppUiTheme.of(context).colorScheme.primary,
-              ),
-            ),
-          ),
         ),
       ),
     );

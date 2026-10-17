@@ -58,8 +58,8 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   bool _focusWithin = false;
   final Map<String, HeroLayout> _layoutOverride = {};
 
-  /// 右下切换控件尺寸:箭头 44,圆点命中区 44。
-  static const double _controlExtent = 44;
+  /// 右下切换控件尺寸:箭头 48,圆点命中区 44。
+  static const double _controlExtent = 48;
 
   bool get _stage => widget.topOverlap > 0;
 
