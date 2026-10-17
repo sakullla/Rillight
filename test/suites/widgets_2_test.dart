@@ -19,8 +19,8 @@ void main() {
     caseEntrypoints['auth/connect_page_cases.dart']!,
   );
   group(
-    'catalog/shelf_grid_scroll_rebuild_test.dart',
-    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
+    'auth/provider_connect_routing_test.dart',
+    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
   );
   group(
     'home/hero_artwork_test.dart',
@@ -31,8 +31,8 @@ void main() {
     caseEntrypoints['mobile/mobile_flow_cases.dart#2']!,
   );
   group(
-    'player/android_seek_cancellation_test.dart',
-    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
+    'player/ended_navigation_test.dart',
+    caseEntrypoints['player/ended_navigation_cases.dart']!,
   );
   group(
     'tv/tv_lan_pair_test.dart [part 1]',
