@@ -363,6 +363,13 @@
     ]
   },
   {
+    "id": "home-libraries-menu",
+    "feature": "home",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
     "id": "home-loading-120ms",
     "feature": "home",
     "platforms": [

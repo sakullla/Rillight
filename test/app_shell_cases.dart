@@ -33,6 +33,7 @@ import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_overlay.dart';
 
 import 'emby/fake_emby_server.dart';
@@ -601,6 +602,89 @@ void main() {
         expect(find.text('退出登录'), findsOneWidget);
         expect(find.byKey(ServerSwitcherDialog.privateKey), findsNothing);
         expect(find.byType(ServerSwitcherDialog), findsOneWidget);
+        expect(path(), AppRoutes.library('view-movies'));
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    testWidgets(
+      'wide top bar offers a search field pill, a libraries menu and an opaque search surface',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final auth = await _connect(tester);
+        final app = await _sourceApp(tester, auth as SyntheticSourceAuth);
+        await tester.pumpWidget(app);
+        await settle(tester);
+
+        String path() =>
+            GoRouter.of(tester.element(find.byKey(AppShell.topBarKey)))
+                .state
+                .uri
+                .path;
+
+        // 宽窗口的搜索入口是带提示文字与快捷键的胶囊,不是孤零零的图标。
+        final pill = find.byKey(SearchAction.pillKey);
+        expect(pill, findsOneWidget);
+        expect(
+          find.descendant(of: pill, matching: find.text('搜索电影或剧集')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: pill,
+            matching: find.text(SearchAction.shortcutLabel()),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester.getCenter(pill).dy,
+          moreOrLessEquals(
+            tester.getCenter(find.byKey(AppShell.homeNavKey)).dy,
+            epsilon: 1,
+          ),
+        );
+
+        // 媒体库下拉直接列出片库并跳转。
+        await tester.tap(find.byKey(AppShell.librariesNavKey));
+        await settle(tester);
+        final entry = find.byKey(AppShell.libraryNavEntryKey('view-movies'));
+        expect(entry, findsOneWidget);
+        await tester.tap(entry);
+        await settle(tester);
+        expect(path(), AppRoutes.library('view-movies'));
+        expect(find.byType(LibraryPage), findsOneWidget);
+
+        // 搜索面是实色阅读面,盖住顶栏;关闭后焦点回到胶囊。
+        await tester.tap(pill);
+        await settle(tester);
+        final close = find.byKey(SearchOverlay.closeKey);
+        expect(close, findsOneWidget);
+        final surface = find.ancestor(
+          of: find.byType(AggregationPage),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is ColoredBox &&
+                widget.color ==
+                    AppUiTheme.of(tester.element(find.byType(AggregationPage)))
+                        .scaffoldBackgroundColor,
+          ),
+        );
+        expect(surface, findsWidgets);
+        expect(tester.getTopLeft(surface.first).dy, 0);
+        expect(
+          tester.getCenter(close).dy,
+          moreOrLessEquals(
+            tester.getCenter(find.byKey(const Key('aggregation-keyword'))).dy,
+            epsilon: 1,
+          ),
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await settle(tester);
+        expect(close, findsNothing);
         expect(path(), AppRoutes.library('view-movies'));
         expect(tester.takeException(), isNull);
       },

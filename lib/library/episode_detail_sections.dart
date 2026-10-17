@@ -293,6 +293,10 @@ class EpisodePeopleSection extends StatelessWidget {
 
   final List<ItemPerson> people;
 
+  /// 宽桌面窗口的圆形头像直径。
+  static double desktopAvatarWidth(double screenWidth) =>
+      (MediaShelf.posterWidthFor(screenWidth) * 0.72).clamp(104.0, 148.0);
+
   /// 分组顺序:演员 → 导演 → 编剧 → 其他。
   static const _typeOrder = ['Actor', 'Director', 'Writer'];
 
@@ -379,6 +383,7 @@ class _PersonMetrics {
     required this.imageMaxWidth,
     required this.phone,
     required this.tv,
+    this.circle = false,
   });
 
   final double width;
@@ -393,7 +398,10 @@ class _PersonMetrics {
   final bool phone;
   final bool tv;
 
-  double imageHeight() => width * 3 / 2;
+  /// 桌面:圆形头像,姓名与角色居中。
+  final bool circle;
+
+  double imageHeight() => circle ? width : width * 3 / 2;
 }
 
 _PersonMetrics _personMetrics(BuildContext context) {
@@ -449,18 +457,42 @@ _PersonMetrics _personMetrics(BuildContext context) {
       tv: false,
     );
   }
-  final width = MediaShelf.posterWidthFor(screen);
+  if (screen < 600) {
+    // 窄桌面窗口整卡分页,沿用海报比例。
+    final width = MediaShelf.posterWidthFor(screen);
+    return _PersonMetrics(
+      width: width,
+      cardGap: MediaShelf.cardGap,
+      imageGap: AppSpacing.xs,
+      radius: AppRadii.md,
+      surface: scheme.surfaceContainerHigh,
+      titleStyle: theme.textTheme.titleSmall,
+      roleStyle: theme.textTheme.bodySmall?.copyWith(
+        color: scheme.onSurface.withValues(alpha: 0.72),
+      ),
+      titlePadding: EdgeInsets.zero,
+      imageMaxWidth: catalogPosterMaxWidth(
+        width,
+        MediaQuery.devicePixelRatioOf(context),
+      ),
+      phone: false,
+      tv: false,
+    );
+  }
+  // 桌面用圆形头像:比海报尺寸的灰块紧凑,一行能看到更多人。
+  final width = EpisodePeopleSection.desktopAvatarWidth(screen);
   return _PersonMetrics(
     width: width,
-    cardGap: MediaShelf.cardGap,
-    imageGap: AppSpacing.xs,
-    radius: AppRadii.md,
+    cardGap: AppSpacing.lg,
+    imageGap: AppSpacing.sm,
+    radius: width / 2,
     surface: scheme.surfaceContainerHigh,
     titleStyle: theme.textTheme.titleSmall,
     roleStyle: theme.textTheme.bodySmall?.copyWith(
-      color: scheme.onSurface.withValues(alpha: 0.72),
+      color: scheme.onSurfaceVariant,
     ),
-    titlePadding: EdgeInsets.zero,
+    titlePadding: const EdgeInsets.symmetric(horizontal: 2),
+    circle: true,
     imageMaxWidth: catalogPosterMaxWidth(
       width,
       MediaQuery.devicePixelRatioOf(context),
@@ -819,11 +851,14 @@ class _PersonCard extends StatelessWidget {
               fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
             )
           : metrics.titleStyle;
+      final align = metrics.circle ? TextAlign.center : TextAlign.start;
       return SizedBox(
         width: metrics.width,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: metrics.circle
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
             _PersonPoster(person: person, metrics: metrics, focused: focused),
             SizedBox(height: metrics.imageGap),
@@ -833,7 +868,7 @@ class _PersonCard extends StatelessWidget {
                 name.isEmpty ? '?' : name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.start,
+                textAlign: align,
                 style: titleStyle,
                 strutStyle: StrutStyle.fromTextStyle(
                   titleStyle ?? const TextStyle(),
@@ -848,7 +883,7 @@ class _PersonCard extends StatelessWidget {
                   role,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.start,
+                  textAlign: align,
                   style: metrics.roleStyle,
                   strutStyle: StrutStyle.fromTextStyle(
                     metrics.roleStyle ?? const TextStyle(),
@@ -1015,6 +1050,10 @@ class _PersonPosterState extends State<_PersonPoster> {
                     return Image.memory(
                       bytes,
                       fit: BoxFit.cover,
+                      // 人像海报多为半身照,圆形裁切时把脸留在框内。
+                      alignment: metrics.circle
+                          ? const Alignment(0, -0.55)
+                          : Alignment.center,
                       gaplessPlayback: true,
                       errorBuilder: (context, error, stackTrace) =>
                           _letter(context),
@@ -1030,6 +1069,37 @@ class _PersonPosterState extends State<_PersonPoster> {
   Widget _letter(BuildContext context) {
     final name = widget.person.name.trim();
     final theme = AppUiTheme.of(context);
+    if (widget.metrics.circle) {
+      // 没有头像:按姓名取一组稳定的柔和渐变,首字放大,不再是一片灰。
+      final scheme = theme.colorScheme;
+      final palette = [
+        scheme.primaryContainer,
+        scheme.secondaryContainer,
+        scheme.tertiaryContainer,
+      ];
+      final seed = name.runes.fold<int>(0, (sum, rune) => sum + rune);
+      final base = palette[seed % palette.length];
+      final accent = palette[(seed + 1) % palette.length];
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [base, Color.lerp(base, accent, 0.6)!],
+          ),
+        ),
+        child: Center(
+          child: Text(
+            name.isEmpty ? '?' : name.characters.first,
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontSize: widget.metrics.width * 0.3,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface.withValues(alpha: 0.86),
+            ),
+          ),
+        ),
+      );
+    }
     return Center(
       child: Text(
         name.isEmpty ? '?' : name.characters.first,

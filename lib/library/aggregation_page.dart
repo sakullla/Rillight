@@ -28,6 +28,7 @@ import '../app/routes.dart';
 import '../app/widgets/skeleton.dart';
 import '../app/tv_top_nav.dart';
 import '../app/tv_widgets.dart';
+import '../app/window_chrome.dart';
 import '../app/widgets/app_empty_view.dart';
 import '../app/widgets/option_pill.dart';
 import '../auth/auth_controller.dart';
@@ -2533,9 +2534,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             autofocus: widget.focusNode == null,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) {
-              if (!presentation.isDesktop) {
-                unawaited(RecentSearches.instance.add(_keyword.text));
-              }
+              unawaited(RecentSearches.instance.add(_keyword.text));
               _submit();
             },
             placeholder: l.searchHint,
@@ -2575,6 +2574,54 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     final phoneTop = PhoneShellContentInset.clearedOf(context)
         ? 8.0
         : MediaQuery.viewPaddingOf(context).top + 8;
+    // 桌面覆盖层盖住顶栏:搜索行与标题按钮带同一条中线,两侧让开窗口铬。
+    final hasChrome =
+        context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+    final chromeLeading = hasChrome ? windowChromeLeadingInset() : 0.0;
+    final chromeTrailing = hasChrome ? windowChromeTrailingInset() : 0.0;
+    final inPlace = presentation.isDesktop && !widget.clearOfDesktopBar;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final searchRow = Row(
+      children: [
+        if (showBackButton)
+          CupertinoNavigationBarBackButton(onPressed: () => context.pop()),
+        Expanded(
+          child: Align(
+            alignment: inPlace ? Alignment.center : Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: inPlace ? 720 : double.infinity,
+              ),
+              child: field,
+            ),
+          ),
+        ),
+        if (servers.isNotEmpty) ...[
+          const SizedBox(width: AppSpacing.xxs),
+          AppIconButton(
+            key: const Key('aggregation-search-filters'),
+            tooltip: l.searchServerFilter,
+            selected: _filtersOpen,
+            onPressed: () => setState(() => _filtersOpen = !_filtersOpen),
+            icon: Icon(
+              AppIcons.filter,
+              fill: _filtersOpen || _servers != null
+                  ? AppIcons.filled
+                  : AppIcons.outline,
+              color: _servers == null ? null : scheme.primary,
+            ),
+          ),
+        ],
+        if (widget.onClose != null)
+          AppIconButton(
+            key: SearchOverlay.closeKey,
+            tooltip: '关闭',
+            onPressed: widget.onClose,
+            icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+          ),
+      ],
+    );
     return Container(
       decoration: BoxDecoration(),
       child: Column(
@@ -2582,79 +2629,71 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(
-              presentation.isDesktop ? AppSpacing.page : 16,
+              presentation.isDesktop ? AppSpacing.page + chromeLeading : 16,
               presentation.isDesktop
-                  ? (widget.clearOfDesktopBar ? 64 : 8)
+                  ? (widget.clearOfDesktopBar ? 64 : AppSpacing.xs)
                   : phoneTop,
-              presentation.isDesktop ? AppSpacing.md : 16,
+              presentation.isDesktop ? AppSpacing.md + chromeTrailing : 16,
               6,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    if (showBackButton)
-                      CupertinoNavigationBarBackButton(
-                        onPressed: () => context.pop(),
-                      ),
-                    Expanded(child: field),
-                    if (servers.isNotEmpty) ...[
-                      const SizedBox(width: AppSpacing.xxs),
-                      AppIconButton(
-                        key: const Key('aggregation-search-filters'),
-                        tooltip: l.searchServerFilter,
-                        onPressed: () =>
-                            setState(() => _filtersOpen = !_filtersOpen),
-                        icon: Icon(
-                          AppIcons.filter,
-                          fill: _filtersOpen || _servers != null
-                              ? AppIcons.filled
-                              : AppIcons.outline,
-                          color: _servers == null
-                              ? null
-                              : AppUiTheme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                    ],
-                    if (widget.onClose != null)
-                      AppIconButton(
-                        key: SearchOverlay.closeKey,
-                        tooltip: '关闭',
-                        onPressed: widget.onClose,
-                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
-                      ),
-                  ],
-                ),
+                searchRow,
                 if (_filtersOpen)
                   Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    padding: const EdgeInsets.only(top: AppSpacing.sm),
+                    child: Row(
                       children: [
-                        for (final server in servers)
-                          OptionPill(
-                            key: ValueKey(
-                              'aggregation-search-server-${server.id}',
-                            ),
-                            label: server.displayName,
-                            selected:
-                                _servers == null ||
-                                _servers!.contains(server.id),
-                            onPressed: () {
-                              final selected =
-                                  _servers == null ||
-                                  _servers!.contains(server.id);
-                              _toggleServer(servers, server.id, !selected);
-                            },
+                        Text(
+                          l.searchServerFilter,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final server in servers)
+                                OptionPill(
+                                  key: ValueKey(
+                                    'aggregation-search-server-${server.id}',
+                                  ),
+                                  label: server.displayName,
+                                  selected:
+                                      _servers == null ||
+                                      _servers!.contains(server.id),
+                                  onPressed: () {
+                                    final selected =
+                                        _servers == null ||
+                                        _servers!.contains(server.id);
+                                    _toggleServer(
+                                      servers,
+                                      server.id,
+                                      !selected,
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
               ],
             ),
           ),
+          if (inPlace)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: AppDivider(
+                height: 1,
+                color: scheme.outlineVariant.withValues(alpha: 0.6),
+              ),
+            ),
           Expanded(child: _results(context, visible)),
         ],
       ),
@@ -3069,7 +3108,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   Widget _results(BuildContext context, List<_SearchHit> visible) {
     final l = AppLocalizations.of(context);
     if (_term.isEmpty) {
-      return AppEmptyView(icon: AppIcons.search, message: l.searchEmptyQuery);
+      return _PhoneSearchIdle(onPick: _searchRecent, desktop: true);
     }
     if (_searching && visible.isEmpty) {
       return const Center(child: CupertinoActivityIndicator());
@@ -3078,10 +3117,47 @@ class _AggregationSearchState extends State<_AggregationSearch> {
       return AppEmptyView(icon: AppIcons.search, message: l.searchNoResults);
     }
     final failed = visible.where((row) => row.error != null).length;
+    final total = visible.fold<int>(0, (sum, row) => sum + row.items.length);
+    final theme = AppUiTheme.of(context);
     return ListView(
       key: const PageStorageKey('aggregation-search'),
       children: [
-        const SizedBox(height: AppSpacing.xs),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.page,
+            AppSpacing.lg,
+            AppSpacing.page,
+            AppSpacing.xxs,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                AppIcons.search,
+                size: 16,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Flexible(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: _term, style: theme.textTheme.titleSmall),
+                      if (total > 0)
+                        TextSpan(
+                          text: '  ·  ${l.phoneSearchResultCount(total)}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
         if (failed > 0 && failed < visible.length)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -3107,6 +3183,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
               onTap: (item) {
                 final account = row.account;
                 if (account == null) return;
+                unawaited(RecentSearches.instance.add(_term));
                 openServerItem(context, account: account, item: item);
               },
             ),
@@ -3118,9 +3195,12 @@ class _AggregationSearchState extends State<_AggregationSearch> {
 
 /// 手机搜索页还没输入时:最近搜索的词(可点、可清除);没有记录时是一段引导。
 class _PhoneSearchIdle extends StatefulWidget {
-  const _PhoneSearchIdle({required this.onPick});
+  const _PhoneSearchIdle({required this.onPick, this.desktop = false});
 
   final ValueChanged<String> onPick;
+
+  /// 桌面搜索覆盖层:与搜索框同宽居中,触控行高收回到鼠标尺寸。
+  final bool desktop;
 
   static const recentKey = Key('phone-search-recent');
   static const clearKey = Key('phone-search-recent-clear');
@@ -3181,13 +3261,22 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
             ),
           ],
         );
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.xl,
-          ),
+        final desktop = widget.desktop;
+        final chipHeight = desktop ? 36.0 : 48.0;
+        final list = ListView(
+          padding: desktop
+              ? const EdgeInsets.fromLTRB(
+                  AppSpacing.page,
+                  AppSpacing.xl,
+                  AppSpacing.page,
+                  AppSpacing.xl,
+                )
+              : const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.xl,
+                ),
           children: [
             if (terms.isNotEmpty) ...[
               PhoneSectionHeader(
@@ -3195,7 +3284,7 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
                 trailing: AppButton(
                   key: _PhoneSearchIdle.clearKey,
                   style: AppButtonStyle(
-                    minimumSize: const Size(48, 48),
+                    minimumSize: Size(chipHeight, chipHeight),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     foregroundColor: scheme.onSurfaceVariant,
                   ),
@@ -3222,11 +3311,11 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
                       child: AppSurfaceAction(
                         onTap: () => widget.onPick(term),
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 48),
+                          constraints: BoxConstraints(minHeight: chipHeight),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(
+                            padding: EdgeInsets.symmetric(
                               horizontal: 14,
-                              vertical: 12,
+                              vertical: desktop ? 8 : 12,
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -3259,11 +3348,21 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
                     ),
                 ],
               ),
-              const SizedBox(height: 56),
+              SizedBox(height: desktop ? 72 : 56),
             ] else
-              const SizedBox(height: 96),
+              SizedBox(height: desktop ? 120 : 96),
             guide,
           ],
+        );
+        if (!desktop) return list;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 720 + AppSpacing.page * 2,
+            ),
+            child: list,
+          ),
         );
       },
     );

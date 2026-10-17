@@ -158,11 +158,56 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('wide window shows category navigation and one open pane', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore(const PlayerSettings(volume: 40));
+    await pumpPage(tester, store: store);
+    expect(find.byKey(SettingsPage.navKey), findsOneWidget);
+    // 默认打开外观;关于排在分类最后。
+    expect(find.byKey(SettingsPage.appearanceKey), findsOneWidget);
+    expect(find.byKey(SettingsPage.diskCacheLimitKey), findsNothing);
+    final about = tester.getTopLeft(
+      find.byKey(const ValueKey('settings-section-关于')),
+    );
+    final danmaku = tester.getTopLeft(
+      find.byKey(const ValueKey('settings-section-弹幕配置')),
+    );
+    expect(about.dy, greaterThan(danmaku.dy));
+
+    await expandSection(tester, '播放');
+    expect(find.byKey(SettingsPage.appearanceKey), findsNothing);
+    expect(find.byKey(SettingsPage.diskCacheLimitKey), findsOneWidget);
+    final switches = find.descendant(
+      of: find.byKey(const ValueKey('settings-section-body-播放')),
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w is AppSwitchTile && w.key != const Key('phone-subtitle-original'),
+      ),
+    );
+    expect(switches, findsNWidgets(2));
+    await tester.tap(switches.first);
+    await settle(tester);
+    expect((await store.read()).isSkipIntroEnabled, isFalse);
+
+    // 换到别的分类再回来,已存的值仍然回显。
+    await expandSection(tester, '外观');
+    expect(find.byKey(SettingsPage.diskCacheLimitKey), findsNothing);
+    await expandSection(tester, '播放');
+    expect(tester.widget<AppSwitchTile>(switches.first).value, isFalse);
+    expect((await store.read()).volume, 40);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('sections collapse and skip switches persist independently', (
     tester,
   ) async {
     final store = MemoryPlayerSettingsStore(const PlayerSettings(volume: 40));
     await pumpPage(tester, store: store);
+    // 窄窗口仍是可折叠分组卡。
+    tester.view.physicalSize = const Size(600, 2200);
+    await settle(tester);
+    expect(find.byKey(SettingsPage.navKey), findsNothing);
     expect(find.byKey(SettingsPage.diskCacheLimitKey), findsNothing);
     await expandSection(tester, '播放');
     final switches = find.descendant(
@@ -250,7 +295,8 @@ void main() {
       final field = find.byKey(SettingsPage.danmakuServerFieldKey);
       await tester.ensureVisible(field);
       await tester.enterText(field, 'https://danmaku.example.test');
-      await expandSection(tester, '弹幕配置');
+      // 两栏布局里切到别的分类即离开输入框,与折叠一样提交。
+      await expandSection(tester, '外观');
       expect(find.byKey(SettingsPage.danmakuServerFieldKey), findsNothing);
       expect(
         (await store.read()).danmakuServer,

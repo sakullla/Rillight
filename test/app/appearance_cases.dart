@@ -389,6 +389,46 @@ void main() {
     expect(saved.appearanceStyle, 'light');
   });
 
+  testWidgets(
+    'wide settings show appearance previews that select and persist',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryPlayerSettingsStore();
+      final controller = AppearanceController(store: store);
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          locale: const Locale('zh', 'CN'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          home: AppearanceScope(
+            controller: controller,
+            child: const CupertinoPageScaffold(child: SettingsPage()),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      // 宽窗口默认打开外观,三个选项是缩略窗口而不是选项格。
+      final light = find.byKey(const ValueKey('settings-appearance-light'));
+      expect(light, findsOneWidget);
+      expect(find.byType(PlayerRateCell), findsNothing);
+      expect(tester.getSize(light).width, greaterThan(150));
+
+      await tester.tap(light);
+      await settle(tester);
+      expect(controller.style, AppearanceStyle.light);
+      expect((await store.read()).appearanceStyle, 'light');
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('the settings page appearance dropdown echoes and persists', (
     tester,
   ) async {

@@ -9,6 +9,7 @@ import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
@@ -52,6 +53,12 @@ class SettingsPage extends StatefulWidget {
   static const restoreDefaultsKey = Key('settings-restore-defaults');
   static const tokenVisibilityKey = Key('settings-token-visibility');
   static const columnKey = Key('settings-column');
+  static const navKey = Key('settings-nav');
+
+  /// 窗口不窄于此宽度时改为左侧分类、右侧内容的两栏布局。
+  static const double twoPaneMinWidth = 840;
+  static const double twoPaneMaxWidth = 1120;
+  static const double navWidth = 280;
 
   /// 设置正文限宽,避免标签贴左、控件贴窗沿。
   static const double columnMaxWidth = 680;
@@ -75,6 +82,9 @@ class _SettingsPageState extends State<SettingsPage> {
   PlayerSettings _settings = const PlayerSettings();
   var _loaded = false;
   var _tokenVisible = false;
+
+  /// 宽窗口两栏布局里当前打开的分类标题;null 表示默认分类。
+  String? _selectedSection;
   var _saveRevision = 0;
   Future<void> _pendingWrites = Future<void>.value();
 
@@ -281,6 +291,467 @@ class _SettingsPageState extends State<SettingsPage> {
         widget.showTitle &&
         context.findAncestorWidgetOfExactType<AppShell>() == null;
 
+    final sections = <_SettingsSectionSpec>[
+      _SettingsSectionSpec(
+        icon: AppIcons.info,
+        title: l10n.mobileAboutGroup,
+        subtitle: '$kProductName · $kAppVersion',
+        children: const [UpdateCheck()],
+      ),
+      _SettingsSectionSpec(
+        icon: AppIcons.appearance,
+        title: l10n.settingsAppearance,
+        subtitle: (appearance?.style ?? AppearanceStyle.system).label(l10n),
+        children: [
+          if (nav != null)
+            ListenableBuilder(
+              listenable: nav,
+              builder: (context, _) => AppSwitchTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(l10n.phoneFloatingNav),
+                subtitle: Text(l10n.phoneFloatingNavHint),
+                value: nav.floating,
+                onChanged: (value) => unawaited(nav.setFloating(value)),
+              ),
+            ),
+          Builder(
+            builder: (context) {
+              final current = appearance?.style ?? AppearanceStyle.system;
+              VoidCallback? choose(AppearanceStyle value) => appearance == null
+                  ? null
+                  : () => unawaited(appearance.setStyle(value));
+              if (_TwoPaneScope.of(context)) {
+                return _AppearancePreviews(
+                  key: SettingsPage.appearanceKey,
+                  current: current,
+                  labelOf: (value) => value.label(l10n),
+                  onSelect: choose,
+                );
+              }
+              return _SettingsOptionBlock(
+                key: SettingsPage.appearanceKey,
+                options: [
+                  for (final value in AppearanceStyle.values)
+                    PlayerOption(
+                      key: ValueKey('settings-appearance-${value.name}'),
+                      label: value.label(l10n),
+                      selected: current == value,
+                      onPressed: choose(value),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+      _SettingsSectionSpec(
+        icon: AppIcons.playbackSection,
+        title: l10n.settingsPlayback,
+        subtitle:
+            '${_settings.effectivePlaybackRate}× · ${l10n.settingsCacheSize(effectiveLimit / 1024)}',
+        trailing: AppButton.icon(
+          key: SettingsPage.restoreDefaultsKey,
+          onPressed: _loaded ? _restoreDefaults : null,
+          style: AppButtonStyle(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          ),
+          icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
+          label: Text(l10n.settingsRestoreDefaults),
+          variant: AppButtonVariant.plain,
+        ),
+        children: [
+          PhoneSubtitleSettingsControls(
+            value: _settings.effectivePhoneSubtitles,
+            onChanged: (value) =>
+                unawaited(_save(PlayerSettings(phoneSubtitles: value))),
+          ),
+          const AppDivider(),
+          Padding(
+            key: const Key('settings-playback-rate'),
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l10n.playbackRate,
+                  style: AppUiTheme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                PlayerRateGrid(
+                  selected: _settings.effectivePlaybackRate,
+                  enabled: _loaded,
+                  onSelected: (value) =>
+                      unawaited(_save(PlayerSettings(playbackRate: value))),
+                ),
+              ],
+            ),
+          ),
+          AppSwitchTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(l10n.settingsSkipIntro),
+            subtitle: Text(l10n.settingsSkipIntroHint),
+            value: _settings.isSkipIntroEnabled,
+            onChanged: !_loaded
+                ? null
+                : (value) =>
+                      unawaited(_save(PlayerSettings(skipIntroEnabled: value))),
+          ),
+          AppSwitchTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(l10n.settingsSkipOutro),
+            subtitle: Text(l10n.settingsSkipOutroHint),
+            value: _settings.isSkipOutroEnabled,
+            onChanged: !_loaded
+                ? null
+                : (value) =>
+                      unawaited(_save(PlayerSettings(skipOutroEnabled: value))),
+          ),
+          _SettingsOptionBlock(
+            key: SettingsPage.diskCacheLimitKey,
+            label: l10n.settingsDiskCacheLimit,
+            options: [
+              for (final limit in limitChoices)
+                PlayerOption(
+                  key: ValueKey('settings-cache-$limit'),
+                  label: l10n.settingsCacheSize(limit / 1024),
+                  selected: limit == effectiveLimit,
+                  onPressed: _loaded
+                      ? () => unawaited(
+                          _save(PlayerSettings(diskCacheLimitMiB: limit)),
+                        )
+                      : null,
+                ),
+            ],
+          ),
+          _SettingsOptionBlock(
+            key: SettingsPage.hardwareDecodingKey,
+            label: l10n.settingsHardwareDecoding,
+            options: [
+              for (final mode in HardwareDecodingMode.values)
+                PlayerOption(
+                  key: ValueKey('settings-decoding-${mode.name}'),
+                  label: switch (mode) {
+                    HardwareDecodingMode.auto =>
+                      l10n.settingsHardwareDecodingAuto,
+                    HardwareDecodingMode.on => l10n.settingsHardwareDecodingOn,
+                    HardwareDecodingMode.off =>
+                      l10n.settingsHardwareDecodingOff,
+                  },
+                  selected: mode == decoding,
+                  onPressed: _loaded
+                      ? () => unawaited(
+                          _save(PlayerSettings(hardwareDecoding: mode)),
+                        )
+                      : null,
+                ),
+            ],
+          ),
+          if (backends.length > 1)
+            _SettingsOptionBlock(
+              key: SettingsPage.decoderBackendKey,
+              label: l10n.settingsDecoderBackend,
+              options: [
+                for (final value in backends)
+                  PlayerOption(
+                    key: ValueKey('settings-backend-${value.name}'),
+                    label: _backendLabel(l10n, value),
+                    selected:
+                        value ==
+                        (backends.contains(backend)
+                            ? backend
+                            : HardwareDecoderBackend.auto),
+                    onPressed: _loaded
+                        ? () => unawaited(
+                            _save(PlayerSettings(hardwareDecoder: value)),
+                          )
+                        : null,
+                  ),
+              ],
+            ),
+        ],
+      ),
+      _SettingsSectionSpec(
+        icon: AppIcons.output,
+        title: l10n.playbackOutputSection,
+        subtitle: l10n.settingsOutputSummary,
+        children: [
+          const PlaybackOutputPanel(status: PlaybackOutputStatus.unknown),
+        ],
+      ),
+      _SettingsSectionSpec(
+        icon: AppIcons.danmaku,
+        title: l10n.settingsDanmakuConfiguration,
+        subtitle: l10n.settingsDanmakuConfigurationSummary,
+        trailing: AppButton.icon(
+          key: DanmakuKeys.restoreDefaults,
+          onPressed: _loaded
+              ? () => _saveDanmakuDisplay(const DanmakuDisplaySettings())
+              : null,
+          style: AppButtonStyle(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          ),
+          icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
+          label: Text(l10n.danmakuRestoreDefaults),
+          variant: AppButtonVariant.plain,
+        ),
+        children: [
+          DanmakuDisplayForm(
+            value: _settings.danmakuDisplay ?? const DanmakuDisplaySettings(),
+            onChanged: _loaded ? _saveDanmakuDisplay : (_) {},
+            layout: DanmakuFormLayout.settings,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(
+              top: AppSpacing.lg,
+              bottom: AppSpacing.sm,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.settingsDanmakuService,
+                  style: AppUiTheme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  l10n.settingsDanmakuServiceHint,
+                  style: AppUiTheme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _SettingsField(
+            label: l10n.settingsDanmakuServer,
+            child: AppTextField(
+              key: SettingsPage.danmakuServerFieldKey,
+              controller: _danmakuServerController,
+              focusNode: _danmakuServerFocus,
+              enabled: _loaded,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) {
+                _commitDanmakuService();
+                _danmakuAppIdFocus.requestFocus();
+              },
+              placeholder: l10n.settingsDanmakuServerHint,
+            ),
+          ),
+          _SettingsField(
+            label: l10n.settingsDanmakuAppId,
+            child: AppTextField(
+              key: SettingsPage.danmakuAppIdFieldKey,
+              controller: _danmakuAppIdController,
+              focusNode: _danmakuAppIdFocus,
+              enabled: _loaded,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) {
+                _commitDanmakuService();
+                _danmakuTokenFocus.requestFocus();
+              },
+              placeholder: l10n.settingsDanmakuAppIdHint,
+            ),
+          ),
+          _SettingsField(
+            label: l10n.settingsDanmakuToken,
+            child: AppTextField(
+              key: SettingsPage.danmakuTokenFieldKey,
+              controller: _danmakuTokenController,
+              focusNode: _danmakuTokenFocus,
+              enabled: _loaded,
+              obscureText: !_tokenVisible,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _commitDanmakuService(),
+              placeholder: l10n.settingsDanmakuTokenHint,
+              suffix: AppIconButton(
+                key: SettingsPage.tokenVisibilityKey,
+                tooltip: _tokenVisible
+                    ? l10n.settingsHideToken
+                    : l10n.settingsShowToken,
+                onPressed: () {
+                  setState(() => _tokenVisible = !_tokenVisible);
+                },
+                icon: Icon(
+                  AppIcons.visibility,
+                  fill: _tokenVisible ? AppIcons.filled : AppIcons.outline,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide =
+            !PresentationScope.isPhoneOf(context) &&
+            constraints.maxWidth >= SettingsPage.twoPaneMinWidth;
+        if (wide) {
+          return _twoPane(context, sections, showPageTitle);
+        }
+        return _accordion(context, sections, showPageTitle);
+      },
+    );
+  }
+
+  /// 宽窗口:左侧分类、右侧内容。分类常驻,不必逐个展开找设置。
+  Widget _twoPane(
+    BuildContext context,
+    List<_SettingsSectionSpec> sections,
+    bool showPageTitle,
+  ) {
+    final l10n = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    // 关于放到最后;默认打开外观,而不是一张只有版本号的卡。
+    final ordered = [
+      for (final section in sections)
+        if (section.title != l10n.mobileAboutGroup) section,
+      for (final section in sections)
+        if (section.title == l10n.mobileAboutGroup) section,
+    ];
+    final selected =
+        ordered.where((s) => s.title == _selectedSection).firstOrNull ??
+        ordered.first;
+    final top = _overlayTop(context) + AppSpacing.xl;
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        key: SettingsPage.columnKey,
+        constraints: BoxConstraints(
+          maxWidth: AppViewport.dp(
+            SettingsPage.twoPaneMaxWidth,
+            MediaQuery.sizeOf(context),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: SettingsPage.navWidth,
+              child: ListView(
+                key: SettingsPage.navKey,
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.page,
+                  top,
+                  0,
+                  AppSpacing.xl,
+                ),
+                children: [
+                  if (showPageTitle) ...[
+                    Text(
+                      l10n.settings,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                  ],
+                  for (final section in ordered) ...[
+                    _SettingsNavItem(
+                      key: ValueKey('settings-section-${section.title}'),
+                      icon: section.icon,
+                      title: section.title,
+                      selected: identical(section, selected),
+                      onPressed: () {
+                        FocusScope.of(context).unfocus();
+                        setState(() => _selectedSection = section.title);
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.xxs),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xxl),
+            Expanded(
+              child: ListView(
+                key: ValueKey('settings-pane-${selected.title}'),
+                padding: EdgeInsets.fromLTRB(
+                  0,
+                  top,
+                  AppSpacing.page,
+                  AppSpacing.xxl,
+                ),
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              selected.title,
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (selected.subtitle != null) ...[
+                              const SizedBox(height: AppSpacing.xxs),
+                              Text(
+                                selected.subtitle!,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (selected.trailing != null) selected.trailing!,
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _TwoPaneScope(
+                    child: Container(
+                      key: ValueKey('settings-section-body-${selected.title}'),
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.xl,
+                        AppSpacing.md,
+                        AppSpacing.xl,
+                        AppSpacing.md,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(AppRadii.lg),
+                        border: Border.all(
+                          color: scheme.outlineVariant.withValues(alpha: 0.48),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (
+                            var i = 0;
+                            i < selected.children.length;
+                            i++
+                          ) ...[
+                            if (i > 0) const SizedBox(height: AppSpacing.sm),
+                            selected.children[i],
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 窄窗口与手机:可折叠的分组卡。
+  Widget _accordion(
+    BuildContext context,
+    List<_SettingsSectionSpec> sections,
+    bool showPageTitle,
+  ) {
+    final l10n = AppLocalizations.of(context);
     return ListView(
       padding: EdgeInsets.fromLTRB(
         AppSpacing.page,
@@ -310,318 +781,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: AppSpacing.xl),
                 ],
-                _SettingsSection(
-                  icon: AppIcons.info,
-                  title: l10n.mobileAboutGroup,
-                  subtitle: '$kProductName · $kAppVersion',
-                  children: const [UpdateCheck()],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _SettingsSection(
-                  icon: AppIcons.appearance,
-                  title: l10n.settingsAppearance,
-                  subtitle: (appearance?.style ?? AppearanceStyle.system).label(
-                    l10n,
+                for (var i = 0; i < sections.length; i++) ...[
+                  if (i > 0) const SizedBox(height: AppSpacing.lg),
+                  _SettingsSection(
+                    icon: sections[i].icon,
+                    title: sections[i].title,
+                    subtitle: sections[i].subtitle,
+                    trailing: sections[i].trailing,
+                    children: sections[i].children,
                   ),
-                  children: [
-                    if (nav != null)
-                      ListenableBuilder(
-                        listenable: nav,
-                        builder: (context, _) => AppSwitchTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(l10n.phoneFloatingNav),
-                          subtitle: Text(l10n.phoneFloatingNavHint),
-                          value: nav.floating,
-                          onChanged: (value) =>
-                              unawaited(nav.setFloating(value)),
-                        ),
-                      ),
-                    _SettingsOptionBlock(
-                      key: SettingsPage.appearanceKey,
-                      options: [
-                        for (final value in AppearanceStyle.values)
-                          PlayerOption(
-                            key: ValueKey('settings-appearance-${value.name}'),
-                            label: value.label(l10n),
-                            selected:
-                                (appearance?.style ?? AppearanceStyle.system) ==
-                                value,
-                            onPressed: appearance == null
-                                ? null
-                                : () => unawaited(appearance.setStyle(value)),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _SettingsSection(
-                  icon: AppIcons.playbackSection,
-                  title: l10n.settingsPlayback,
-                  subtitle:
-                      '${_settings.effectivePlaybackRate}× · ${l10n.settingsCacheSize(effectiveLimit / 1024)}',
-                  trailing: AppButton.icon(
-                    key: SettingsPage.restoreDefaultsKey,
-                    onPressed: _loaded ? _restoreDefaults : null,
-                    style: AppButtonStyle(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                      ),
-                    ),
-                    icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
-                    label: Text(l10n.settingsRestoreDefaults),
-                    variant: AppButtonVariant.plain,
-                  ),
-                  children: [
-                    PhoneSubtitleSettingsControls(
-                      value: _settings.effectivePhoneSubtitles,
-                      onChanged: (value) => unawaited(
-                        _save(PlayerSettings(phoneSubtitles: value)),
-                      ),
-                    ),
-                    const AppDivider(),
-                    Padding(
-                      key: const Key('settings-playback-rate'),
-                      padding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.sm,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            l10n.playbackRate,
-                            style: AppUiTheme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          PlayerRateGrid(
-                            selected: _settings.effectivePlaybackRate,
-                            enabled: _loaded,
-                            onSelected: (value) => unawaited(
-                              _save(PlayerSettings(playbackRate: value)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    AppSwitchTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(l10n.settingsSkipIntro),
-                      subtitle: Text(l10n.settingsSkipIntroHint),
-                      value: _settings.isSkipIntroEnabled,
-                      onChanged: !_loaded
-                          ? null
-                          : (value) => unawaited(
-                              _save(PlayerSettings(skipIntroEnabled: value)),
-                            ),
-                    ),
-                    AppSwitchTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(l10n.settingsSkipOutro),
-                      subtitle: Text(l10n.settingsSkipOutroHint),
-                      value: _settings.isSkipOutroEnabled,
-                      onChanged: !_loaded
-                          ? null
-                          : (value) => unawaited(
-                              _save(PlayerSettings(skipOutroEnabled: value)),
-                            ),
-                    ),
-                    _SettingsOptionBlock(
-                      key: SettingsPage.diskCacheLimitKey,
-                      label: l10n.settingsDiskCacheLimit,
-                      options: [
-                        for (final limit in limitChoices)
-                          PlayerOption(
-                            key: ValueKey('settings-cache-$limit'),
-                            label: l10n.settingsCacheSize(limit / 1024),
-                            selected: limit == effectiveLimit,
-                            onPressed: _loaded
-                                ? () => unawaited(
-                                    _save(
-                                      PlayerSettings(diskCacheLimitMiB: limit),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                      ],
-                    ),
-                    _SettingsOptionBlock(
-                      key: SettingsPage.hardwareDecodingKey,
-                      label: l10n.settingsHardwareDecoding,
-                      options: [
-                        for (final mode in HardwareDecodingMode.values)
-                          PlayerOption(
-                            key: ValueKey('settings-decoding-${mode.name}'),
-                            label: switch (mode) {
-                              HardwareDecodingMode.auto =>
-                                l10n.settingsHardwareDecodingAuto,
-                              HardwareDecodingMode.on =>
-                                l10n.settingsHardwareDecodingOn,
-                              HardwareDecodingMode.off =>
-                                l10n.settingsHardwareDecodingOff,
-                            },
-                            selected: mode == decoding,
-                            onPressed: _loaded
-                                ? () => unawaited(
-                                    _save(
-                                      PlayerSettings(hardwareDecoding: mode),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                      ],
-                    ),
-                    if (backends.length > 1)
-                      _SettingsOptionBlock(
-                        key: SettingsPage.decoderBackendKey,
-                        label: l10n.settingsDecoderBackend,
-                        options: [
-                          for (final value in backends)
-                            PlayerOption(
-                              key: ValueKey('settings-backend-${value.name}'),
-                              label: _backendLabel(l10n, value),
-                              selected:
-                                  value ==
-                                  (backends.contains(backend)
-                                      ? backend
-                                      : HardwareDecoderBackend.auto),
-                              onPressed: _loaded
-                                  ? () => unawaited(
-                                      _save(
-                                        PlayerSettings(hardwareDecoder: value),
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                        ],
-                      ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _SettingsSection(
-                  icon: AppIcons.output,
-                  title: l10n.playbackOutputSection,
-                  subtitle: l10n.settingsOutputSummary,
-                  children: [
-                    const PlaybackOutputPanel(
-                      status: PlaybackOutputStatus.unknown,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _SettingsSection(
-                  icon: AppIcons.danmaku,
-                  title: l10n.settingsDanmakuConfiguration,
-                  subtitle: l10n.settingsDanmakuConfigurationSummary,
-                  trailing: AppButton.icon(
-                    key: DanmakuKeys.restoreDefaults,
-                    onPressed: _loaded
-                        ? () => _saveDanmakuDisplay(
-                            const DanmakuDisplaySettings(),
-                          )
-                        : null,
-                    style: AppButtonStyle(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                      ),
-                    ),
-                    icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
-                    label: Text(l10n.danmakuRestoreDefaults),
-                    variant: AppButtonVariant.plain,
-                  ),
-                  children: [
-                    DanmakuDisplayForm(
-                      value:
-                          _settings.danmakuDisplay ??
-                          const DanmakuDisplaySettings(),
-                      onChanged: _loaded ? _saveDanmakuDisplay : (_) {},
-                      layout: DanmakuFormLayout.settings,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        top: AppSpacing.lg,
-                        bottom: AppSpacing.sm,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            l10n.settingsDanmakuService,
-                            style: AppUiTheme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            l10n.settingsDanmakuServiceHint,
-                            style: AppUiTheme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: AppUiTheme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _SettingsField(
-                      label: l10n.settingsDanmakuServer,
-                      child: AppTextField(
-                        key: SettingsPage.danmakuServerFieldKey,
-                        controller: _danmakuServerController,
-                        focusNode: _danmakuServerFocus,
-                        enabled: _loaded,
-                        keyboardType: TextInputType.url,
-                        textInputAction: TextInputAction.next,
-                        onSubmitted: (_) {
-                          _commitDanmakuService();
-                          _danmakuAppIdFocus.requestFocus();
-                        },
-                        placeholder: l10n.settingsDanmakuServerHint,
-                      ),
-                    ),
-                    _SettingsField(
-                      label: l10n.settingsDanmakuAppId,
-                      child: AppTextField(
-                        key: SettingsPage.danmakuAppIdFieldKey,
-                        controller: _danmakuAppIdController,
-                        focusNode: _danmakuAppIdFocus,
-                        enabled: _loaded,
-                        textInputAction: TextInputAction.next,
-                        onSubmitted: (_) {
-                          _commitDanmakuService();
-                          _danmakuTokenFocus.requestFocus();
-                        },
-                        placeholder: l10n.settingsDanmakuAppIdHint,
-                      ),
-                    ),
-                    _SettingsField(
-                      label: l10n.settingsDanmakuToken,
-                      child: AppTextField(
-                        key: SettingsPage.danmakuTokenFieldKey,
-                        controller: _danmakuTokenController,
-                        focusNode: _danmakuTokenFocus,
-                        enabled: _loaded,
-                        obscureText: !_tokenVisible,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _commitDanmakuService(),
-                        placeholder: l10n.settingsDanmakuTokenHint,
-                        suffix: AppIconButton(
-                          key: SettingsPage.tokenVisibilityKey,
-                          tooltip: _tokenVisible
-                              ? l10n.settingsHideToken
-                              : l10n.settingsShowToken,
-                          onPressed: () {
-                            setState(() => _tokenVisible = !_tokenVisible);
-                          },
-                          icon: Icon(
-                            AppIcons.visibility,
-                            fill: _tokenVisible
-                                ? AppIcons.filled
-                                : AppIcons.outline,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ],
             ),
           ),
@@ -667,6 +836,343 @@ PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
         ? patch.danmakuSeriesMemories
         : current.danmakuSeriesMemories,
   );
+}
+
+/// 标记两栏布局的正文区:外观等分类在宽窗口里换用更直观的呈现。
+class _TwoPaneScope extends InheritedWidget {
+  const _TwoPaneScope({required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_TwoPaneScope>() != null;
+
+  @override
+  bool updateShouldNotify(_TwoPaneScope oldWidget) => false;
+}
+
+/// 宽窗口的外观选择:每个选项是一扇缩略窗口,直接看到浅色/深色的样子。
+class _AppearancePreviews extends StatelessWidget {
+  const _AppearancePreviews({
+    super.key,
+    required this.current,
+    required this.labelOf,
+    required this.onSelect,
+  });
+
+  final AppearanceStyle current;
+  final String Function(AppearanceStyle) labelOf;
+  final VoidCallback? Function(AppearanceStyle) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Wrap(
+        spacing: AppSpacing.md,
+        runSpacing: AppSpacing.md,
+        children: [
+          for (final value in AppearanceStyle.values)
+            _AppearancePreviewTile(
+              key: ValueKey('settings-appearance-${value.name}'),
+              style: value,
+              label: labelOf(value),
+              selected: value == current,
+              onPressed: onSelect(value),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AppearancePreviewTile extends StatefulWidget {
+  const _AppearancePreviewTile({
+    super.key,
+    required this.style,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final AppearanceStyle style;
+  final String label;
+  final bool selected;
+  final VoidCallback? onPressed;
+
+  static const double width = 184;
+  static const double height = 116;
+
+  @override
+  State<_AppearancePreviewTile> createState() => _AppearancePreviewTileState();
+}
+
+class _AppearancePreviewTileState extends State<_AppearancePreviewTile> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final selected = widget.selected;
+    final radius = BorderRadius.circular(AppRadii.lg);
+    final preview = switch (widget.style) {
+      AppearanceStyle.light => _mockWindow(AppUiTheme.lightTones),
+      AppearanceStyle.dark => _mockWindow(AppUiTheme.darkTones),
+      AppearanceStyle.system => Row(
+        children: [
+          Expanded(
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.centerLeft,
+                maxWidth: _AppearancePreviewTile.width,
+                child: _mockWindow(AppUiTheme.lightTones),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.centerRight,
+                maxWidth: _AppearancePreviewTile.width,
+                child: _mockWindow(AppUiTheme.darkTones),
+              ),
+            ),
+          ),
+        ],
+      ),
+    };
+    return Semantics(
+      selected: selected,
+      label: widget.label,
+      child: AppSurfaceAction(
+        borderRadius: radius,
+        onTap: widget.onPressed,
+        onHover: (value) => setState(() => _hovered = value),
+        child: SizedBox(
+          width: _AppearancePreviewTile.width,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AnimatedContainer(
+                duration: AppMotion.durationOf(context, AppMotion.fast),
+                curve: AppMotion.standard,
+                height: _AppearancePreviewTile.height,
+                decoration: BoxDecoration(
+                  borderRadius: radius,
+                  border: Border.all(
+                    color: selected
+                        ? scheme.primary
+                        : _hovered
+                        ? scheme.outline
+                        : scheme.outlineVariant,
+                    width: selected ? 2 : 1,
+                  ),
+                ),
+                padding: const EdgeInsets.all(3),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.lg - 3),
+                  child: preview,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                children: [
+                  AnimatedContainer(
+                    duration: AppMotion.durationOf(context, AppMotion.fast),
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: selected
+                          ? scheme.primary
+                          : const Color(0x00000000),
+                      border: Border.all(
+                        color: selected ? scheme.primary : scheme.outline,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: selected
+                        ? Icon(
+                            AppIcons.check,
+                            size: 13,
+                            color: scheme.onPrimary,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    widget.label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 一扇缩略窗口:顶栏、hero 色块与一排海报,按给定色调着色。
+  Widget _mockWindow(Tones tones) {
+    Widget block(double w, double h, Color color, [double r = 3]) => Container(
+      width: w,
+      height: h,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(r),
+      ),
+    );
+    return Container(
+      width: _AppearancePreviewTile.width,
+      color: tones.base,
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              block(18, 5, tones.accent),
+              const SizedBox(width: 4),
+              block(14, 5, tones.surfaceHighest),
+              const Spacer(),
+              block(36, 7, tones.surfaceHigh, 4),
+              const SizedBox(width: 4),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: tones.accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Container(
+            height: 34,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              gradient: LinearGradient(
+                colors: [tones.accentContainer, tones.secondaryContainer],
+              ),
+            ),
+            padding: const EdgeInsets.all(6),
+            alignment: Alignment.bottomLeft,
+            child: block(28, 5, tones.onSurface.withValues(alpha: 0.7)),
+          ),
+          const SizedBox(height: 7),
+          Row(
+            children: [
+              for (var i = 0; i < 5; i++) ...[
+                if (i > 0) const SizedBox(width: 4),
+                Expanded(child: block(0, 30, tones.surfaceHigh)),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 一个设置分类:图标、标题、摘要、标题行操作与正文。两种布局共用。
+class _SettingsSectionSpec {
+  const _SettingsSectionSpec({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    required this.children,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final List<Widget> children;
+}
+
+/// 两栏布局左侧的分类行。选中为强调色浅底与实心图标,悬停给出轻底色。
+class _SettingsNavItem extends StatefulWidget {
+  const _SettingsNavItem({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  State<_SettingsNavItem> createState() => _SettingsNavItemState();
+}
+
+class _SettingsNavItemState extends State<_SettingsNavItem> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final selected = widget.selected;
+    final radius = BorderRadius.circular(AppRadii.md);
+    return Semantics(
+      selected: selected,
+      child: AppSurfaceAction(
+        borderRadius: radius,
+        onTap: widget.onPressed,
+        onHover: (value) => setState(() => _hovered = value),
+        child: AnimatedContainer(
+          duration: AppMotion.durationOf(context, AppMotion.fast),
+          curve: AppMotion.standard,
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            color: selected
+                ? scheme.primaryContainer.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.72 : 1,
+                  )
+                : _hovered
+                ? scheme.surfaceContainerHigh
+                : const Color(0x00000000),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                widget.icon,
+                size: 20,
+                fill: selected ? AppIcons.filled : AppIcons.outline,
+                color: selected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  widget.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: selected
+                        ? scheme.onPrimaryContainer
+                        : scheme.onSurface,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _SettingsSection extends StatelessWidget {

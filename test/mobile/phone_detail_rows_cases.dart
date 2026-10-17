@@ -357,20 +357,23 @@ void main() {
       matching: find.byKey(EpisodePeopleSection.imageKey),
     );
     final poster = tester.getRect(image);
-    final cardWidth = MediaShelf.posterWidthFor(width);
+    // 宽桌面是圆形头像:宽高相等,圆角为半径。
+    final cardWidth = EpisodePeopleSection.desktopAvatarWidth(width);
     expect(poster.width, closeTo(cardWidth, 0.5));
-    expect(poster.height, closeTo(cardWidth * 1.5, 0.5));
+    expect(poster.height, closeTo(cardWidth, 0.5));
     final decoration =
         tester
                 .widget<DecoratedBox>(
-                  find.descendant(
-                    of: image,
-                    matching: find.byType(DecoratedBox),
-                  ),
+                  find
+                      .descendant(
+                        of: image,
+                        matching: find.byType(DecoratedBox),
+                      )
+                      .first,
                 )
                 .decoration
             as BoxDecoration;
-    expect(decoration.borderRadius, BorderRadius.circular(AppRadii.md));
+    expect(decoration.borderRadius, BorderRadius.circular(cardWidth / 2));
     expect(tester.takeException(), isNull);
   });
 
@@ -411,8 +414,11 @@ void main() {
         matching: find.byKey(EpisodePeopleSection.imageKey),
       ),
     );
-    expect(poster.width, closeTo(MediaShelf.posterWidthFor(width), 0.5));
-    expect(poster.height / poster.width, closeTo(1.5, 0.02));
+    expect(
+      poster.width,
+      closeTo(EpisodePeopleSection.desktopAvatarWidth(width), 0.5),
+    );
+    expect(poster.height / poster.width, closeTo(1, 0.02));
     expect(tester.takeException(), isNull);
   });
 

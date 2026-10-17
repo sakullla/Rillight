@@ -52,6 +52,12 @@ class AppShell extends StatefulWidget {
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
   static const topFadeHeight = 36.0;
 
+  /// 窗口不窄于此宽度时,顶栏搜索入口展开为带提示与快捷键的胶囊。
+  static const searchPillMinWidth = 900.0;
+
+  static const librariesNavKey = Key('app-shell-libraries');
+  static Key libraryNavEntryKey(String id) => Key('app-shell-library-$id');
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -292,13 +298,26 @@ class _AppShellState extends State<AppShell> {
                   ),
                   if (_searchOpen)
                     Positioned.fill(
-                      child: Container(
-                        decoration: BoxDecoration(),
-                        child: SafeArea(
-                          child: Padding(
-                            padding: const EdgeInsets.only(
-                              top: AppShell.topBarHeight,
-                            ),
+                      // 搜索面淡入并下落几像素,不再生硬地盖在 hero 上。
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: 1),
+                        duration: AppMotion.durationOf(
+                          context,
+                          AppMotion.normal,
+                        ),
+                        curve: AppMotion.emphasized,
+                        builder: (context, t, child) => Opacity(
+                          opacity: t,
+                          child: Transform.translate(
+                            offset: Offset(0, (1 - t) * -8),
+                            child: child,
+                          ),
+                        ),
+                        child: ColoredBox(
+                          // 实色阅读面连同顶栏一起盖住:搜索行占据顶栏位置,
+                          // 结果之下不再透出首页画面。
+                          color: AppUiTheme.of(context).scaffoldBackgroundColor,
+                          child: SafeArea(
                             child: SearchRouteGuard(
                               onPop: _closeSearch,
                               child: AggregationPage(
@@ -397,6 +416,9 @@ class _TopBar extends StatelessWidget {
     final pageHasHeading = _pageHasHeading(location);
     final showTitle = !item && (!pageHasHeading || scrolled);
     final highContrast = MediaQuery.highContrastOf(context);
+    // 宽窗口用带提示文字的搜索胶囊,窄窗口退回图标。
+    final wideSearch =
+        MediaQuery.sizeOf(context).width >= AppShell.searchPillMinWidth;
     return SizedBox(
       height: height,
       child: Stack(
@@ -526,6 +548,10 @@ class _TopBar extends StatelessWidget {
                           selected: location == AppRoutes.aggregation,
                           onPressed: () => context.go(AppRoutes.aggregation),
                         ),
+                        if (libraries.isNotEmpty) ...[
+                          const SizedBox(width: AppSpacing.xxs),
+                          _LibrariesNav(libraries: libraries),
+                        ],
                         const Spacer(),
                         AppIconButton(
                           key: AppShell.overflowNavKey,
@@ -568,7 +594,15 @@ class _TopBar extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            SearchAction(focusNode: searchFocus),
+                            if (wideSearch)
+                              const SizedBox(width: AppSpacing.xs),
+                            SearchAction(
+                              focusNode: searchFocus,
+                              expanded: wideSearch,
+                              overArtwork: !opaque && !light,
+                            ),
+                            if (wideSearch)
+                              const SizedBox(width: AppSpacing.xs),
                             const SessionActions(),
                             const SizedBox(width: kWindowChromeActionGap),
                           ],
@@ -614,11 +648,88 @@ class _HomeNav extends StatelessWidget {
   }
 }
 
+/// 顶栏「媒体库」:点开下拉列出全部片库,直接跳转,不必先回首页找入口。
+class _LibrariesNav extends StatelessWidget {
+  const _LibrariesNav({required this.libraries});
+
+  final List<MediaItem> libraries;
+
+  static IconData _iconFor(MediaItem library) =>
+      switch (library.collectionTypeNormalized) {
+        'movies' => AppIcons.movie,
+        'tvshows' => AppIcons.series,
+        'photos' => AppIcons.photoLibrary,
+        'music' => AppIcons.music,
+        'boxsets' => AppIcons.boxSet,
+        _ => AppIcons.library,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Builder(
+      builder: (context) => _NavTextButton(
+        buttonKey: AppShell.librariesNavKey,
+        label: l10n.libraries,
+        icon: AppIcons.library,
+        selected: false,
+        trailing: AppIcons.chevronDown,
+        onPressed: () async {
+          final box = context.findRenderObject()! as RenderBox;
+          final origin = box.localToGlobal(Offset(0, box.size.height));
+          final picked = await showAppMenu<String>(
+            context: context,
+            position: RelativeRect.fromLTRB(origin.dx, origin.dy, 0, 0),
+            constraints: const BoxConstraints(maxWidth: 280),
+            items: [
+              for (final library in libraries)
+                AppMenuEntry(
+                  key: AppShell.libraryNavEntryKey(library.id),
+                  value: library.id,
+                  child: Row(
+                    children: [
+                      Icon(
+                        _iconFor(library),
+                        size: 18,
+                        fill: AppIcons.filled,
+                        color: AppUiTheme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          library.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.start,
+                          style: AppUiTheme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: AppUiTheme.of(context)
+                                    .colorScheme
+                                    .onSurface,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          );
+          if (picked != null && context.mounted) {
+            context.push(AppRoutes.library(picked));
+          }
+        },
+      ),
+    );
+  }
+}
+
 class _NavTextButton extends StatelessWidget {
   const _NavTextButton({
     required this.buttonKey,
     required this.label,
     this.icon,
+    this.trailing,
     required this.selected,
     required this.onPressed,
   });
@@ -626,6 +737,7 @@ class _NavTextButton extends StatelessWidget {
   final Key buttonKey;
   final String label;
   final IconData? icon;
+  final IconData? trailing;
   final bool selected;
   final VoidCallback onPressed;
 
@@ -674,6 +786,10 @@ class _NavTextButton extends StatelessWidget {
               const SizedBox(width: 6),
             ],
             Text(label),
+            if (trailing != null) ...[
+              const SizedBox(width: 2),
+              Icon(trailing, size: 18, color: fg),
+            ],
           ],
         ),
       ),

@@ -233,6 +233,9 @@ extension PageCaptures on CaptureSession {
         await tap(AppShell.overflowNavKey);
         await save('home-display');
         await dismiss();
+        await tap(AppShell.librariesNavKey);
+        await save('home-libraries-menu');
+        await dismiss();
         final homeScroll = find
             .descendant(
               of: find.byKey(const PageStorageKey('home-scroll')),
