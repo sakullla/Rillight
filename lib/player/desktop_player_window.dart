@@ -339,6 +339,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   PlayerOpenRequest? get current => _current;
 
   @override
+  bool get playbackOccupied => _opening || _pid != 0 || _current != null;
+
+  @override
   bool get embedsPlayerInCaller => false;
 
   @override
@@ -369,6 +372,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }) {
     final revision = ++_requestRevision;
     _opening = true;
+    if (!_disposed) notifyListeners();
     _control.cancelPendingSpawns();
     return _runInFlight(() async {
       if (_disposed || revision != _requestRevision) return;
@@ -574,7 +578,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         rethrow;
       }
     }).whenComplete(() {
-      if (revision == _requestRevision) _opening = false;
+      if (revision == _requestRevision) {
+        _opening = false;
+        if (!_disposed) notifyListeners();
+      }
     });
   }
 
@@ -605,14 +612,15 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> close() {
-    _requestRevision++;
+    final revision = ++_requestRevision;
     _control.cancelPendingSpawns(includePrepared: true);
     return _runInFlight(() async {
       final epoch = _epoch;
       await _stopProcess();
       await _control.discardPrepared();
-      _opening = false;
+      if (revision == _requestRevision) _opening = false;
       if (_epoch == epoch) _clearWindow();
+      if (!_disposed) notifyListeners();
     });
   }
 
@@ -628,7 +636,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       await _reconcileSnapshot(pid);
       await _control.release(pid);
     }
+    _opening = false;
     _clearWindow();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> _runInFlight(Future<void> Function() action) {

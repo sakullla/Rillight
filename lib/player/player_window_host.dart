@@ -49,6 +49,10 @@ abstract class PlayerWindowHost extends ChangeNotifier {
   PlayerOpenRequest? get current;
   bool get embedsPlayerInCaller;
 
+  /// Opening a player reserves playback before its process/window is ready.
+  /// Pausing never releases this reservation.
+  bool get playbackOccupied => current != null;
+
   /// 宿主产生的、需在主窗口展示的提示;缺省没有。
   Stream<PlayerHostNotice> get notices => const Stream.empty();
 

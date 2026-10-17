@@ -923,9 +923,6 @@ extension PageCaptures on CaptureSession {
       tester.platformDispatcher.clearTextScaleFactorTestValue();
       await advance(350);
     }
-    await tap(const ValueKey('settings-section-关于'));
-    await save('settings-update');
-    await tap(const ValueKey('settings-section-关于'));
     await tap(const ValueKey('settings-section-外观'));
     await save('settings-appearance-expanded');
     await tester.ensureVisible(find.byKey(SettingsPage.appearanceKey));

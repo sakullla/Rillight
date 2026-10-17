@@ -74,6 +74,7 @@ class UpdateController extends ChangeNotifier {
   UpdateDownloadState download = const UpdateDownloadState();
   UpdateActionResult? releaseAction;
   UpdateActionResult? installAction;
+  UpdateActionResult? permissionAction;
   bool openingRelease = false;
   bool installing = false;
   bool requestingPermission = false;
@@ -188,6 +189,7 @@ class UpdateController extends ChangeNotifier {
     final generation = ++_downloadGeneration;
     final token = _cancelToken = CancelToken();
     installAction = null;
+    permissionAction = null;
     download = UpdateDownloadState(
       phase: UpdateDownloadPhase.downloading,
       release: candidate,
@@ -303,6 +305,7 @@ class UpdateController extends ChangeNotifier {
     }
     installing = true;
     installAction = null;
+    permissionAction = null;
     _notify();
     try {
       if (!await _downloader.verify(ready)) {
@@ -340,9 +343,9 @@ class UpdateController extends ChangeNotifier {
     requestingPermission = true;
     _notify();
     try {
-      installAction = await platform.requestInstallPermission();
+      permissionAction = await platform.requestInstallPermission();
     } catch (_) {
-      installAction = const UpdateActionResult(
+      permissionAction = const UpdateActionResult(
         UpdateActionStatus.failed,
         failure: UpdateActionFailure.systemFailure,
       );

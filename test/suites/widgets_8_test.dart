@@ -8,12 +8,16 @@ void main() {
   verifySuiteManifest();
   group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
+    'catalog/catalog_browse_test.dart',
+    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
+  );
+  group(
     'catalog/item_detail_test.dart [part 3]',
     caseEntrypoints['catalog/item_detail_cases.dart#2']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 1]',
-    caseEntrypoints['library/source_detail_route_cases.dart#0']!,
+    'mobile/mobile_performance_timing_test.dart',
+    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
   );
   group(
     'mobile/phone_nav_style_test.dart',
@@ -32,12 +36,8 @@ void main() {
     caseEntrypoints['player/seek_preview_cases.dart']!,
   );
   group(
-    'tv/tv_lan_pair_test.dart [part 3]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
-  );
-  group(
-    'widgets/app_empty_view_test.dart',
-    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
+    'player/subtitle_menu_test.dart',
+    caseEntrypoints['player/subtitle_menu_cases.dart']!,
   );
   group(
     'widgets/scrim_icon_button_test.dart',

@@ -418,7 +418,15 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
-              const UpdateCheck(),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  0,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                ),
+                child: UpdateCheck(),
+              ),
             ],
           ),
         ],

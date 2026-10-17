@@ -49,6 +49,10 @@ import 'providers.dart';
 import 'package:rillight/auth/provider_identity.dart';
 
 import 'danmaku.dart';
+import 'updates.dart';
+import '../../test/app/update_ui_fixture.dart';
+
+import 'package:rillight/app/updates/update_platform_contract.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -239,7 +243,13 @@ void main() {
         );
         final runtime = PlaybackRuntime(auth: auth, history: history);
         final snapshots = MemoryPlaybackSessionSnapshotStore();
+        final updates = UpdateUiFixture(
+          system: config.$1 == 'desktop'
+              ? UpdateOperatingSystem.windows
+              : UpdateOperatingSystem.android,
+        );
         final app = RillightApp(
+          updateController: updates.controller,
           auth: auth,
           environment: config.$2,
           appearance: appearance,
@@ -347,6 +357,7 @@ void main() {
           await capture.save('detail-from-home-ready');
         }
         await capture.pages(app, auth, server, adapter);
+        if (capture.wants('settings')) await capture.updatePages(app, updates);
         if (config.$1 == 'phone' && capture.wants('home')) {
           app.router.go('/');
           await capture.advance(400);
@@ -771,6 +782,7 @@ void main() {
         await capture.advance(500);
         await history.close();
         app.router.dispose();
+        updates.dispose();
         auth.dispose();
         appearance.dispose();
         CaptureProviders.closeClients();

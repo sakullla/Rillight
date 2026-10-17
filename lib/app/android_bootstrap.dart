@@ -18,10 +18,16 @@ import 'package:rillight/auth/auth_controller.dart';
 
 /// Owns startup retries and production auth. No desktop services are created.
 class AndroidBootstrap extends StatefulWidget {
-  const AndroidBootstrap({super.key, this.resolveEnvironment, this.createAuth});
+  const AndroidBootstrap({
+    super.key,
+    this.resolveEnvironment,
+    this.createAuth,
+    this.enableUpdates = false,
+  });
 
   final Future<PresentationEnvironment> Function()? resolveEnvironment;
   final Future<AuthController> Function()? createAuth;
+  final bool enableUpdates;
 
   @override
   State<AndroidBootstrap> createState() => _AndroidBootstrapState();
@@ -100,6 +106,7 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
           : null;
       setState(
         () => _app = RillightApp(
+          enableUpdates: widget.enableUpdates,
           auth: auth,
           environment: environment,
           playerBindings: PlayerBindings(

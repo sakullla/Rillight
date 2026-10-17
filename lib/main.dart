@@ -18,7 +18,7 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isAndroid) {
     configurePaintingImageCache(playerProcess: false);
-    runApp(const AndroidBootstrap());
+    runApp(const AndroidBootstrap(enableUpdates: true));
     return;
   }
   final playerProcess = args.isNotEmpty && args.first == 'player';
@@ -54,6 +54,7 @@ Future<void> main(List<String> args) async {
       builder: (context, child) =>
           WindowChromeHost(brightness: appearance.brightness, child: child!),
       child: RillightApp(
+        enableUpdates: true,
         auth: auth,
         router: router,
         playerBindings: PlayerBindings(

@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'ui/ui.dart';
+import 'updates/update_controller.dart';
+import 'updates/update_scope.dart';
+import 'updates/update_reminder_host.dart';
 
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -27,6 +30,8 @@ class RillightApp extends StatelessWidget {
     this.environment = PresentationEnvironment.desktop,
     this.playerBindings = const PlayerBindings(),
     AppearanceController? appearance,
+    this.enableUpdates = false,
+    this.updateController,
   }) : auth = auth ?? AuthController.memory(),
        appearance = appearance ?? AppearanceController(),
        windowHost = playerBindings.windowHost ?? OverlayPlayerWindowHost() {
@@ -39,71 +44,85 @@ class RillightApp extends StatelessWidget {
   final PlayerBindings playerBindings;
   final AppearanceController appearance;
   final PlayerWindowHost windowHost;
+  final bool enableUpdates;
+  final UpdateController? updateController;
   late final GoRouter router;
 
   @override
-  Widget build(BuildContext context) => AppearanceScope(
-    controller: appearance,
-    child: _SystemBrightnessObserver(
+  Widget build(BuildContext context) => UpdateScopeHost(
+    enabled: enableUpdates,
+    controller: updateController,
+    child: AppearanceScope(
       controller: appearance,
-      child: ListenableBuilder(
-        listenable: appearance,
-        builder: (context, _) {
-          final dark = appearance.brightness == Brightness.dark;
-          final theme = environment.isTv
-              ? (dark ? AppUiTheme.tvDark() : AppUiTheme.tvLight())
-              : environment.isDesktop
-              ? (dark ? AppUiTheme.dark() : AppUiTheme.light())
-              : (dark ? AppUiTheme.phoneDark() : AppUiTheme.phoneLight());
-          Widget app = CupertinoApp.router(
-            title: kProductName,
-            debugShowCheckedModeBanner: false,
-            locale: const Locale('zh', 'CN'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: [
-              AppLocalizations.delegate,
-              ...GlobalCupertinoLocalizations.delegates,
-            ],
-            theme: theme.cupertino,
-            scrollBehavior: environment.isDesktop || environment.isTv
-                ? const AppScrollBehavior()
-                : const PhoneScrollBehavior(),
-            routerConfig: router,
-            builder: (context, child) {
-              Widget content = child ?? const SizedBox.shrink();
-              if (environment.isTv) content = TvStageTheme(child: content);
-              if (environment.isDesktop) {
-                content = DesktopPerformanceHost(
-                  child: _PlayerHostNoticeListener(
-                    host: windowHost,
-                    router: router,
-                    child: _PlayerWindowLayer(
+      child: _SystemBrightnessObserver(
+        controller: appearance,
+        child: ListenableBuilder(
+          listenable: appearance,
+          builder: (context, _) {
+            final dark = appearance.brightness == Brightness.dark;
+            final theme = environment.isTv
+                ? (dark ? AppUiTheme.tvDark() : AppUiTheme.tvLight())
+                : environment.isDesktop
+                ? (dark ? AppUiTheme.dark() : AppUiTheme.light())
+                : (dark ? AppUiTheme.phoneDark() : AppUiTheme.phoneLight());
+            Widget app = CupertinoApp.router(
+              title: kProductName,
+              debugShowCheckedModeBanner: false,
+              locale: const Locale('zh', 'CN'),
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: [
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
+              theme: theme.cupertino,
+              scrollBehavior: environment.isDesktop || environment.isTv
+                  ? const AppScrollBehavior()
+                  : const PhoneScrollBehavior(),
+              routerConfig: router,
+              builder: (context, child) {
+                Widget content = child ?? const SizedBox.shrink();
+                if (environment.isTv) content = TvStageTheme(child: content);
+                if (environment.isDesktop) {
+                  content = DesktopPerformanceHost(
+                    child: _PlayerHostNoticeListener(
                       host: windowHost,
                       router: router,
-                      child: content,
+                      child: _PlayerWindowLayer(
+                        host: windowHost,
+                        router: router,
+                        child: content,
+                      ),
                     ),
+                  );
+                }
+                return AppUiTheme(
+                  data: theme,
+                  child: UpdateReminderHost(
+                    router: router,
+                    playerHost: environment.isDesktop ? windowHost : null,
+                    checkAtStartup: enableUpdates,
+                    child: content,
                   ),
                 );
-              }
-              return AppUiTheme(data: theme, child: content);
-            },
-          );
-          if (environment.isDesktop) {
-            app = PlayerWindowScope(
-              host: windowHost,
-              child: MainWindowCloseGuard(host: windowHost, child: app),
+              },
             );
-          } else if (!environment.isTv) {
-            app = PhoneNavStyleHost(child: app);
-          }
-          return PresentationScope(
-            environment: environment,
-            child: AuthScope(
-              controller: auth,
-              child: PlayerScope(bindings: playerBindings, child: app),
-            ),
-          );
-        },
+            if (environment.isDesktop) {
+              app = PlayerWindowScope(
+                host: windowHost,
+                child: MainWindowCloseGuard(host: windowHost, child: app),
+              );
+            } else if (!environment.isTv) {
+              app = PhoneNavStyleHost(child: app);
+            }
+            return PresentationScope(
+              environment: environment,
+              child: AuthScope(
+                controller: auth,
+                child: PlayerScope(bindings: playerBindings, child: app),
+              ),
+            );
+          },
+        ),
       ),
     ),
   );

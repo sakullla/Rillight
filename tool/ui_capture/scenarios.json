@@ -1851,7 +1851,114 @@
     "feature": "settings",
     "platforms": [
       "desktop",
-      "phone"
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-checking",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-available",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-downloading",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-verifying",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-checksum-failed",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-download-failed",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-ready",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-permission",
+    "feature": "settings",
+    "platforms": [
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-permission-settings",
+    "feature": "settings",
+    "platforms": [
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-install-failed",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-release-failed",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-no-package",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
     ]
   }
 ]

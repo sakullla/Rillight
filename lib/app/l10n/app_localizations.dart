@@ -4333,7 +4333,7 @@ abstract class AppLocalizations {
   /// No description provided for @updateOpenRelease.
   ///
   /// In zh, this message translates to:
-  /// **'前往下载'**
+  /// **'打开 Release 页'**
   String get updateOpenRelease;
 
   /// No description provided for @updateNotes.
@@ -4345,8 +4345,224 @@ abstract class AppLocalizations {
   /// No description provided for @updateOpenFailed.
   ///
   /// In zh, this message translates to:
-  /// **'无法打开浏览器，可复制下方链接前往下载。'**
+  /// **'无法打开 Release 页，请确认已安装浏览器后重试。'**
   String get updateOpenFailed;
+
+  /// No description provided for @updateDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用内下载'**
+  String get updateDownload;
+
+  /// No description provided for @updateCancelDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消下载'**
+  String get updateCancelDownload;
+
+  /// No description provided for @updateNoPackage.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有适用于当前系统及架构的安装包。可打开 Release 页查看。'**
+  String get updateNoPackage;
+
+  /// No description provided for @updateTimeout.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查更新超时，请稍后重试。'**
+  String get updateTimeout;
+
+  /// No description provided for @updateRateLimited.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新服务请求过于频繁，请稍后重试。'**
+  String get updateRateLimited;
+
+  /// No description provided for @updateNoRelease.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时没有可用的正式发布，请稍后重试。'**
+  String get updateNoRelease;
+
+  /// No description provided for @updateInvalidResponse.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新信息无效，无法确认是否有新版。请稍后重试。'**
+  String get updateInvalidResponse;
+
+  /// No description provided for @updatePackageVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装包版本 {version}'**
+  String updatePackageVersion(String version);
+
+  /// No description provided for @updateDownloadingUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在下载 · 已下载 {received}'**
+  String updateDownloadingUnknown(String received);
+
+  /// No description provided for @updateDownloading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在下载 {percent}% · {received} / {total}'**
+  String updateDownloading(String received, String total, int percent);
+
+  /// No description provided for @updateVerifying.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在校验安装包…'**
+  String get updateVerifying;
+
+  /// No description provided for @updateReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装包已通过完整性校验，可继续安装。'**
+  String get updateReady;
+
+  /// No description provided for @updateCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载已取消，可重新下载。'**
+  String get updateCancelled;
+
+  /// No description provided for @updateChecksumFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法通过安装包完整性校验，已禁止安装。请重新下载或打开 Release 页。'**
+  String get updateChecksumFailed;
+
+  /// No description provided for @updateDiskFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法保存安装包，请检查剩余存储空间及目录权限后重试。'**
+  String get updateDiskFailed;
+
+  /// No description provided for @updateDownloadTimeout.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载超时，请重试或打开 Release 页。'**
+  String get updateDownloadTimeout;
+
+  /// No description provided for @updateUnsafePackage.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装包来源不符合官方发布规则，已停止下载。可打开 Release 页。'**
+  String get updateUnsafePackage;
+
+  /// No description provided for @updateDownloadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载失败，请检查网络后重试，或打开 Release 页。'**
+  String get updateDownloadFailed;
+
+  /// No description provided for @updateInstall.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续安装'**
+  String get updateInstall;
+
+  /// No description provided for @updateInstalling.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在交给系统处理…'**
+  String get updateInstalling;
+
+  /// No description provided for @updateWindowsGuide.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续后将打开 Windows 安装程序，请按系统提示确认。如需退出应用，请先结束播放，再通过窗口关闭按钮退出后继续安装。'**
+  String get updateWindowsGuide;
+
+  /// No description provided for @updateMacGuide.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续后请选择安装包保存位置，打开 DMG，将应用拖入“应用程序”并确认替换。如需退出，请先结束播放并正常关闭应用。'**
+  String get updateMacGuide;
+
+  /// No description provided for @updateLinuxGuide.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续后将打开 DEB 安装包，请按软件安装器提示操作。若未能打开，可在文件管理器中找到下方本地文件，使用系统的软件安装器安装。'**
+  String get updateLinuxGuide;
+
+  /// No description provided for @updateAndroidGuide.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续后将打开系统安装页面，请按提示完成。如需允许安装来源，请先授权，再返回此处重试安装。'**
+  String get updateAndroidGuide;
+
+  /// No description provided for @updateFinishPlayback.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先结束并退出播放，再继续安装更新。'**
+  String get updateFinishPlayback;
+
+  /// No description provided for @updateHandedOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'已交给系统安装流程。请按系统提示完成，重新打开应用后确认版本。'**
+  String get updateHandedOff;
+
+  /// No description provided for @updatePermissionRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未允许此应用安装更新，请打开来源授权设置。'**
+  String get updatePermissionRequired;
+
+  /// No description provided for @updateAllowSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开来源授权设置'**
+  String get updateAllowSource;
+
+  /// No description provided for @updatePermissionOpened.
+  ///
+  /// In zh, this message translates to:
+  /// **'已打开来源授权设置。允许后返回此处，再点击“继续安装”；尚未开始安装。'**
+  String get updatePermissionOpened;
+
+  /// No description provided for @updatePermissionDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统未授予所需权限。请确认权限后重试。'**
+  String get updatePermissionDenied;
+
+  /// No description provided for @updateInstallCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'已取消系统操作，尚未确认更新完成。可再次尝试。'**
+  String get updateInstallCancelled;
+
+  /// No description provided for @updateIncompatible.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装包与当前应用身份、签名或版本不兼容，无法安装。可打开 Release 页查看。'**
+  String get updateIncompatible;
+
+  /// No description provided for @updateInstallFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法启动系统安装流程。请按平台指引处理或重试，也可打开 Release 页。'**
+  String get updateInstallFailed;
+
+  /// No description provided for @updateLocalPackage.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地安装包：{path}'**
+  String updateLocalPackage(String path);
+
+  /// No description provided for @updateReminderTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用更新'**
+  String get updateReminderTitle;
+
+  /// No description provided for @updateLater.
+  ///
+  /// In zh, this message translates to:
+  /// **'稍后处理'**
+  String get updateLater;
 }
 
 class _AppLocalizationsDelegate

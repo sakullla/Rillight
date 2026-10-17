@@ -5,8 +5,31 @@ its own client without media-server credentials. `UpdateController` owns the
 candidate and cancellable download session; `UpdateDownloader` checks the same
 Release's SHA256SUMS and rechecks the file before handoff. Downloads live in
 `getTemporaryDirectory()/rillight-updates/session-*`; incomplete files never
-become installable. `SystemUpdatePlatform` consumes these contracts. App startup,
-playback avoidance and the shared settings UI are integrated separately.
+become installable. `SystemUpdatePlatform` consumes these contracts.
+
+The production desktop main and Android bootstrap explicitly enable updates.
+`UpdateScopeHost` owns one controller across appearance changes and navigation;
+ordinary `RillightApp` tests/prototypes stay offline unless given an injected
+controller. `UpdateReminderHost` starts one check after the first frame and
+observes the foreground lifecycle, both requested/committed playback routes and
+desktop opening/open occupancy. Paused playback still defers the reminder. A
+reminder already visible when playback begins is deferred again without marking
+the version acknowledged. A user dismissal acknowledges that version for this
+run, while the settings entry remains available.
+
+Desktop settings, phone About and TV settings consume the same `UpdateCheck`.
+Downloads keep their original candidate when a later check returns another
+release. Unknown total size uses a spinner/received bytes, not a percentage.
+Automatic check failures remain silent; a manual check shows the finite failure
+category and retry. Release failures retain a retry button without URLs or a
+clipboard fallback. Installation instructions are shown before the action, and
+the UI refuses installation while playback is opening/open. The application
+never exits itself for an update; Windows/macOS instructions direct a user who
+needs to exit through the existing normal window close path.
+
+`permissionAction` is distinct from `installAction`: opening Android source
+settings says installation has not begun and requires another install gesture.
+Returning to the foreground neither rechecks releases nor starts installation.
 
 Only user gestures may download, open a Release or start installation. The
 platform adapter accepts the exact official candidate page, reports browser
