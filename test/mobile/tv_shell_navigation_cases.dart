@@ -1,3 +1,7 @@
+import 'tv_server_test_helpers.dart';
+
+import 'package:rillight/auth/tv_server_selection_page.dart';
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
@@ -325,89 +329,91 @@ void main() {
     );
   }, tags: ['integration']);
 
-  testWidgets('TV search back returns home and settings opens private', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(960, 540);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'TV search Back returns home and settings opens consolidated server flow',
+    (tester) async {
+      tester.view.physicalSize = const Size(960, 540);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final server = FakeEmbyServer();
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: const ClientDeviceInfo(
-          clientName: 'test',
-          deviceName: 'tv',
-          deviceId: 'tv-search-private',
-          version: '1',
+      final server = FakeEmbyServer();
+      final auth = AuthController.memory(
+        client: EmbyClient(
+          device: const ClientDeviceInfo(
+            clientName: 'test',
+            deviceName: 'tv',
+            deviceId: 'tv-search-private',
+            version: '1',
+          ),
+          dio: dioForFakeEmby(FakeEmbyAdapter([server])),
         ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-      ),
-    );
-    await tester.runAsync(
-      () => auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      ),
-    );
-    final app = RillightApp(
-      auth: auth,
-      environment: PresentationEnvironment.tv,
-      playerBindings: PlayerBindings(
-        createBackend: () => FakeVideoBackend(),
-        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-        settingsStore: MemoryPlayerSettingsStore(),
-      ),
-    );
-    addTearDown(() async {
-      await tester.pumpWidget(const SizedBox.shrink());
-      app.router.dispose();
-      auth.dispose();
-    });
-    await tester.pumpWidget(app);
-    await settle(tester);
-
-    await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
-    await settle(tester);
-    // 电视不画屏幕返回钮,遥控器返回键回到首页。
-    expect(
-      find.byWidgetPredicate(
-        (widget) => widget is AggregationPage && widget.search,
-      ),
-      findsOneWidget,
-    );
-    await tester.binding.handlePopRoute();
-    await settle(tester);
-    expect(find.byType(TvHomePage), findsOneWidget);
-    expect(
-      tester.widget<TvAction>(find.byKey(const ValueKey('tv-nav-0'))).selected,
-      isTrue,
-    );
-
-    await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
-    await settle(tester);
-    await tester.binding.handlePopRoute();
-    await settle(tester);
-    expect(find.byType(TvHomePage), findsOneWidget);
-    expect(app.router.state.uri.path, '/');
-
-    await tester.tap(find.byKey(const ValueKey('tv-nav-3')));
-    await settle(tester);
-    final sessionList = find.descendant(
-      of: find.byKey(const PageStorageKey('tv-session')),
-      matching: find.byType(Scrollable),
-    );
-    for (final label in ['连接其他服务器', '修改密码', '退出登录']) {
-      await tester.scrollUntilVisible(
-        find.text(label),
-        200,
-        scrollable: sessionList,
       );
-      expect(find.text(label), findsOneWidget);
-    }
-    expect(find.byKey(const Key('tv-session-private')), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
+      await tester.runAsync(
+        () => auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      final app = RillightApp(
+        auth: auth,
+        environment: PresentationEnvironment.tv,
+        playerBindings: PlayerBindings(
+          createBackend: () => FakeVideoBackend(),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          settingsStore: MemoryPlayerSettingsStore(),
+        ),
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+        auth.dispose();
+      });
+      await tester.pumpWidget(app);
+      await settle(tester);
+
+      await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
+      await settle(tester);
+      // 电视不画屏幕返回钮,遥控器返回键回到首页。
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is AggregationPage && widget.search,
+        ),
+        findsOneWidget,
+      );
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.byType(TvHomePage), findsOneWidget);
+      expect(
+        tester
+            .widget<TvAction>(find.byKey(const ValueKey('tv-nav-0')))
+            .selected,
+        isTrue,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
+      await settle(tester);
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.byType(TvHomePage), findsOneWidget);
+      expect(app.router.state.uri.path, '/');
+
+      await tester.tap(find.byKey(const ValueKey('tv-nav-3')));
+      await settle(tester);
+      await tvPress(tester, const Key('tv-settings-servers'));
+      expect(find.byType(TvServerSelectionPage), findsOneWidget);
+      await tvOpenEditor(tester, auth.session!.server.id);
+      for (final key in [
+        'server-editor-account',
+        'server-editor-remote-password',
+        'server-editor-logout',
+      ]) {
+        expect(find.byKey(Key(key)), findsOneWidget);
+      }
+      expect(find.byKey(const Key('tv-session-private')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }

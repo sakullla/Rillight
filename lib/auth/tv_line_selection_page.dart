@@ -1,0 +1,134 @@
+import '../app/l10n/app_localizations.dart';
+import '../app/tv_widgets.dart';
+import '../app/ui/ui.dart';
+import 'server_line_selector.dart';
+import 'server_line_fields.dart';
+import 'server_list_store.dart';
+import 'server_management_widgets.dart';
+import 'tv_server_flow_frame.dart';
+
+class TvLineSelectionPage extends ServerLineSelector {
+  const TvLineSelectionPage({
+    super.key,
+    required super.auth,
+    required super.serverId,
+    required super.onBack,
+    super.onChanged,
+  });
+  @override
+  State<ServerLineSelector> createState() => _TvLineSelectionState();
+}
+
+class _TvLineSelectionState extends ServerLineSelectorState {
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.auth,
+    builder: (context, _) {
+      final l = AppLocalizations.of(context);
+      final server = widget.auth.sources.server(widget.serverId);
+      final actual = widget.auth.sources.connectedLineId(server.id);
+      return TvServerFlowFrame(
+        title: l.serversLines,
+        onBack: back,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              server.displayName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 16),
+            TvChoiceTile(
+              actionKey: const Key('server-line-auto'),
+              autofocus: true,
+              label: l.serversAutomatic,
+              subtitle: l.serversAutomaticHint,
+              selected: server.lineSelection.isAutomatic,
+              onPressed: busy == null
+                  ? () => select(const LineSelection.auto())
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            for (final line in server.lines)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TvChoiceTile(
+                        actionKey: Key('server-line-choice-${line.id}'),
+                        label: serverLineLabel(line),
+                        subtitle:
+                            '${actual == line.id ? '${l.serversActualLine} · ' : ''}${status(l, line)}',
+                        selected: server.lineSelection.fixedLineId == line.id,
+                        onPressed: busy == null
+                            ? () => select(LineSelection.fixed(line.id))
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    TvAction(
+                      key: Key('server-line-check-${line.id}'),
+                      onPressed: busy == null ? () => check(line) : null,
+                      child: Text(
+                        busy == line.id ? l.serversBusy : l.serversCheck,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (error != null) ServerFeedback(error!),
+            Text(l.serversFixedHint),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class TvServerLineFields extends ServerLineFields {
+  const TvServerLineFields({
+    super.key,
+    super.line,
+    required super.onDone,
+    required super.otherLines,
+  });
+  @override
+  State<ServerLineFields> createState() => _TvLineFieldsState();
+}
+
+class _TvLineFieldsState extends ServerLineFieldsState {
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TvInput(
+          key: const Key('server-line-name'),
+          label: l.serversLineName,
+          controller: name,
+          autofocus: true,
+        ),
+        const SizedBox(height: 16),
+        TvInput(
+          key: const Key('server-line-address'),
+          label: l.serversLineAddress,
+          controller: address,
+          keyboardType: TextInputType.url,
+        ),
+        const SizedBox(height: 16),
+        Text(l.serversLineDraftHint),
+        if (error != null) ServerFeedback(error!),
+        const SizedBox(height: 20),
+        TvAction(
+          key: const Key('server-line-done'),
+          onPressed: done,
+          emphasized: true,
+          child: Text(l.serversDone),
+        ),
+      ],
+    );
+  }
+}

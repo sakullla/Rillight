@@ -657,47 +657,7 @@ extension PageCaptures on CaptureSession {
     final server = auth.session!.server;
     final id = server.id;
     final lineId = server.activeLineId!;
-    if (platform != 'tv') {
-      await _modernServerPages(app, auth, id, lineId, adapter);
-      await _backupImportStates(app, auth);
-      return;
-    } else {
-      await tap(const ValueKey('tv-nav-3'));
-      await save('server-manager');
-      await modal(ValueKey('tv-line-add-$id'), 'server-add-line');
-      await modal(ValueKey('tv-line-edit-$id-$lineId'), 'server-edit-line');
-      await tap(ValueKey('tv-server-delete-$id'));
-      await save('server-delete-confirm');
-      await tap(const Key('tv-server-delete-cancel'));
-      await tap(const Key('tv-change-password'));
-    }
-    await save('account-change-password');
-    if (platform == 'tv') {
-      // 电视密码行是 TvInput，文本框在点开后的编辑框里。
-      await _editTvField(ChangePasswordDialog.newPasswordField, 'capture-only');
-      await _editTvField(ChangePasswordDialog.confirmField, 'mismatch');
-    } else {
-      await tester.enterText(
-        find.byKey(ChangePasswordDialog.newPasswordField),
-        'capture-only',
-      );
-      await tester.enterText(
-        find.byKey(ChangePasswordDialog.confirmField),
-        'mismatch',
-      );
-    }
-    await advance(150);
-    await save('account-password-mismatch');
-    await tap(ChangePasswordDialog.cancelKey);
-    await route(app, '/connect?add=1', 'server-add');
-    if (platform != 'tv') {
-      await tap(
-        platform == 'desktop'
-            ? ConnectFormKeys.more
-            : const Key('android-connect-more'),
-      );
-      await save('server-add-advanced');
-    }
+    await _modernServerPages(app, auth, id, lineId, adapter);
     await _backupImportStates(app, auth);
   }
 
@@ -711,6 +671,8 @@ extension PageCaptures on CaptureSession {
     Future<void> open() async {
       if (platform == 'desktop') {
         await tap(SessionActions.serverMenuKey);
+      } else if (platform == 'tv') {
+        await tap(const Key('tv-nav-user'));
       } else {
         app.router.go('/mine');
         await advance(600);
@@ -719,10 +681,13 @@ extension PageCaptures on CaptureSession {
       }
     }
 
-    Future<void> back() => tap(const Key('server-flow-back'));
+    Future<void> back() =>
+        tap(Key(platform == 'tv' ? 'tv-server-back' : 'server-flow-back'));
     Future<void> edit() async {
       await tap(Key('server-more-$id'));
-      await tap(Key('server-action-edit-$id'));
+      await tap(
+        Key(platform == 'tv' ? 'server-more-edit' : 'server-action-edit-$id'),
+      );
     }
 
     await open();
@@ -739,7 +704,7 @@ extension PageCaptures on CaptureSession {
       final remote = adapter.servers.firstWhere(
         (s) => s.baseUrl.toString() == auth.session!.server.baseUrl,
       );
-      await tap(Key('server-line-details-$lineId'));
+      if (platform != 'tv') await tap(Key('server-line-details-$lineId'));
       for (final state in checkStates) {
         if (!shouldCapture(state)) continue;
         adapter.certificateError = state == 'server-check-certificate';
@@ -760,6 +725,7 @@ extension PageCaptures on CaptureSession {
     await back();
     await edit();
     await save('server-editor');
+    if (platform == 'tv') await save('account');
     await save('server-rename');
     await tap(const Key('server-editor-add-line'));
     await save('server-add-line');
@@ -772,52 +738,83 @@ extension PageCaptures on CaptureSession {
     await back();
     await tap(const Key('server-editor-remote-password'));
     await save('account-change-password');
-    await tester.enterText(
-      find.byKey(ChangePasswordDialog.newPasswordField),
-      'capture-only',
-    );
-    await tester.enterText(
-      find.byKey(ChangePasswordDialog.confirmField),
-      'mismatch',
-    );
+    if (platform == 'tv') {
+      await _editTvField(ChangePasswordDialog.newPasswordField, 'capture-only');
+      await _editTvField(ChangePasswordDialog.confirmField, 'mismatch');
+    } else {
+      await tester.enterText(
+        find.byKey(ChangePasswordDialog.newPasswordField),
+        'capture-only',
+      );
+      await tester.enterText(
+        find.byKey(ChangePasswordDialog.confirmField),
+        'mismatch',
+      );
+    }
     await advance(150);
     await save('account-password-mismatch');
     await tap(ChangePasswordDialog.cancelKey);
     await back();
     await tap(Key('server-more-$id'));
-    await tap(Key('server-action-remove-$id'));
+    await tap(
+      Key(platform == 'tv' ? 'server-more-remove' : 'server-action-remove-$id'),
+    );
     await save('server-delete-confirm');
     await tap(const Key('server-remove-cancel'));
-    await tester.enterText(find.byKey(const Key('server-search')), '不存在');
+    if (platform == 'tv') {
+      await _editTvField(const Key('server-search'), '不存在');
+    } else {
+      await tester.enterText(find.byKey(const Key('server-search')), '不存在');
+    }
     await advance(200);
     await save('server-search-empty');
-    await tester.enterText(find.byKey(const Key('server-search')), '');
+    if (platform == 'tv') {
+      await _editTvField(const Key('server-search'), '');
+    } else {
+      await tester.enterText(find.byKey(const Key('server-search')), '');
+    }
     await tap(const Key('server-add'));
     await save('server-add');
-    await tap(const Key('provider-advanced'));
-    await save('server-add-advanced');
-    await tap(const Key('server-add-paste'));
-    await tester.enterText(
-      find.byKey(const Key('server-paste-text')),
-      '名称：家庭影院\n地址：https://home.example.com\n用户：alice\n密码：synthetic\n名称：朋友的影院\n地址：https://friend.example.com\n用户：bob',
-    );
-    await tap(const Key('server-paste-parse'));
-    await save('server-paste-groups');
-    await tap(const Key('server-paste-group-1'));
-    await save('server-paste-preview');
-    await back();
-    await back();
+    if (platform != 'tv') {
+      await tap(const Key('provider-advanced'));
+      await save('server-add-advanced');
+      await tap(const Key('server-add-paste'));
+      await tester.enterText(
+        find.byKey(const Key('server-paste-text')),
+        '名称：家庭影院\n地址：https://home.example.com\n用户：alice\n密码：synthetic\n名称：朋友的影院\n地址：https://friend.example.com\n用户：bob',
+      );
+      await tap(const Key('server-paste-parse'));
+      await save('server-paste-groups');
+      await tap(const Key('server-paste-group-1'));
+      await save('server-paste-preview');
+      await back();
+      await back();
+    } else {
+      await back();
+    }
     if (shouldCapture('server-needs-login') ||
         shouldCapture('server-account-needs-login')) {
       final other = auth.savedServers.last;
       await tap(Key('server-more-${other.id}'));
-      await tap(Key('server-action-edit-${other.id}'));
+      await tap(
+        Key(
+          platform == 'tv'
+              ? 'server-more-edit'
+              : 'server-action-edit-${other.id}',
+        ),
+      );
       await tap(const Key('server-editor-logout'));
       await tap(const Key('server-logout-confirm'));
       await open();
       await save('server-needs-login');
       await tap(Key('server-more-${other.id}'));
-      await tap(Key('server-action-edit-${other.id}'));
+      await tap(
+        Key(
+          platform == 'tv'
+              ? 'server-more-edit'
+              : 'server-action-edit-${other.id}',
+        ),
+      );
       await save('server-account-needs-login');
       await back();
     }
@@ -842,10 +839,14 @@ extension PageCaptures on CaptureSession {
       await save('server-locked-list');
       await tap(Key('server-enter-${protected.id}'));
       await save('server-unlock');
-      await tester.enterText(
-        find.byKey(const Key('server-unlock-password')),
-        'wrong',
-      );
+      if (platform == 'tv') {
+        await _editTvField(const Key('server-unlock-password'), 'wrong');
+      } else {
+        await tester.enterText(
+          find.byKey(const Key('server-unlock-password')),
+          'wrong',
+        );
+      }
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const Key('server-unlock-submit')));
         for (

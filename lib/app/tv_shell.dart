@@ -1,25 +1,18 @@
+import '../auth/tv_server_selection_page.dart';
 import 'updates/update_check.dart';
-import '../auth/provider_connect_dialog.dart';
-import '../media_server/capabilities.dart';
 
 import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
-import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/auth/change_password_dialog.dart';
-import 'package:rillight/auth/line_address_dialog.dart';
-import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 
 import 'package:rillight/home/tv_home_page.dart';
@@ -410,464 +403,44 @@ class _TvLibraries extends StatelessWidget {
   }
 }
 
-/// 设置面板:左侧账户卡与账户操作,右侧外观与服务器线路。
+/// Appearance and application settings remain separate from server editing.
 class _TvSession extends StatelessWidget {
   const _TvSession();
-
-  static Key serverDeleteKey(String serverId) =>
-      ValueKey('tv-server-delete-$serverId');
-
-  static const serverDeleteConfirmKey = Key('tv-server-delete-confirm');
-
-  static const serverDeleteCancelKey = Key('tv-server-delete-cancel');
-
-  static const changePasswordKey = Key('tv-change-password');
-
-  /// 线路切换失败时的原因行;成功或开始新的切换后随控制器清空。
-  static const lineSwitchFailureKey = Key('tv-line-switch-failure');
-
-  static Key lineAddKey(String serverId) => ValueKey('tv-line-add-$serverId');
-
-  static Key lineEditKey(String serverId, String lineId) =>
-      ValueKey('tv-line-edit-$serverId-$lineId');
-
-  static Key lineDeleteKey(String serverId, String lineId) =>
-      ValueKey('tv-line-delete-$serverId-$lineId');
-
-  @override
-  Widget build(BuildContext context) {
-    final auth = AuthScope.of(context), l = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final s = TvDesign.scaleOf(context);
-    final size = MediaQuery.sizeOf(context);
-    final gutter = tvSafeGutter(size.width);
-    return ListenableBuilder(
-      listenable: auth,
-      builder: (context, _) => ListView(
-        key: const PageStorageKey('tv-session'),
-        padding: EdgeInsets.fromLTRB(
-          gutter,
-          TvTopNavBar.reserveOf(context) + 8 * s,
-          gutter,
-          tvSafeVertical(size.height),
-        ),
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 272 * s,
-                child: _TvAccountCard(auth: auth),
-              ),
-              SizedBox(width: 36 * s),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TvSectionTitle(l.mobileAboutGroup),
-                    const UpdateCheck(),
-                    SizedBox(height: TvDesign.sectionGap * s),
-                    TvSectionTitle(l.settingsAppearance),
-                    SizedBox(height: 6 * s),
-                    const TvAppearancePicker(),
-                    SizedBox(height: TvDesign.sectionGap * s),
-                    TvSectionTitle(l.mobileLine),
-                    if (auth.lineSwitchFailure != null)
-                      Padding(
-                        padding: EdgeInsets.only(bottom: 8 * s),
-                        child: Text(
-                          l.lineSwitchFailed(auth.lineSwitchFailure!.detail),
-                          key: _TvSession.lineSwitchFailureKey,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    for (final server in auth.savedServers) ...[
-                      SizedBox(height: 6 * s),
-                      _TvServerCard(auth: auth, server: server),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TvAccountCard extends StatelessWidget {
-  const _TvAccountCard({required this.auth});
-  final AuthController auth;
-
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final s = TvDesign.scaleOf(context);
-    final name = auth.session?.username ?? '';
-    final server = auth.session?.server;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return ListView(
+      key: const PageStorageKey('tv-session'),
+      padding: EdgeInsets.fromLTRB(
+        tvSafeGutter(MediaQuery.sizeOf(context).width),
+        TvTopNavBar.reserveOf(context) + 8,
+        tvSafeGutter(MediaQuery.sizeOf(context).width),
+        32,
+      ),
       children: [
-        Container(
-          padding: EdgeInsets.all(18 * s),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainer,
-            borderRadius: BorderRadius.circular(16 * s),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: (22 * s) * 2,
-                height: (22 * s) * 2,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: scheme.primaryContainer,
-                ),
-                child: Text(
-                  name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: scheme.onPrimaryContainer,
-                  ),
-                ),
-              ),
-              SizedBox(width: 14 * s),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    SizedBox(height: 2 * s),
-                    Text(
-                      [
-                        server?.name ?? '',
-                        server?.activeLine?.hostLabel ?? '',
-                      ].where((v) => v.isNotEmpty).join(' · '),
-                      key: const Key('tv-session-summary'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: 14 * s),
         TvNavTile(
-          icon: AppIcons.add,
-          title: l.mobileAddServer,
-          onPressed: () => context.push('${AppRoutes.connect}?add=1'),
-        ),
-        SizedBox(height: 6 * s),
-        if (auth.client.serviceType == MediaServerType.plex ||
-            auth
-                .client
-                .capabilities[ServiceCapability.changePassword]
-                .isAvailable)
-          TvNavTile(
-            actionKey: _TvSession.changePasswordKey,
-            icon: AppIcons.lock,
-            title: auth.client.serviceType == MediaServerType.plex
-                ? l.providerAccountManage
-                : l.changePassword,
-            onPressed: auth.isBusy
-                ? null
-                : auth.client.serviceType == MediaServerType.plex
-                ? () => showProviderAccountSettings(context)
-                : () => showAppDialog<void>(
-                    context: context,
-                    builder: (dialogContext) =>
-                        ChangePasswordDialog(auth: auth),
-                  ),
+          actionKey: const Key('tv-settings-servers'),
+          icon: AppIcons.server,
+          title: l.serversTitle,
+          onPressed: () => showTvServerSelection(
+            context,
+            auth: AuthScope.of(context),
+            onEntered: () async {
+              CatalogScope.maybeOf(context)?.reload();
+            },
+            onLineChanged: () async {
+              CatalogScope.maybeOf(context)?.reload();
+            },
           ),
-        SizedBox(height: 6 * s),
-        TvNavTile(
-          icon: AppIcons.logout,
-          title: l.logout,
-          destructive: true,
-          chevron: false,
-          onPressed: auth.isBusy ? null : auth.logout,
         ),
+        const SizedBox(height: 28),
+        TvSectionTitle(l.settingsAppearance),
+        const SizedBox(height: 12),
+        const TvAppearancePicker(),
+        const SizedBox(height: 28),
+        TvSectionTitle(l.mobileAboutGroup),
+        const UpdateCheck(),
       ],
-    );
-  }
-}
-
-/// 一台服务器:标题行(名称 + 添加线路 / 删除服务器),下列每条线路。
-/// 线路行本身选中即切换;右侧两个图标按钮编辑/删除,左右键可达。
-class _TvServerCard extends StatelessWidget {
-  const _TvServerCard({required this.auth, required this.server});
-  final AuthController auth;
-  final SavedServer server;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final s = TvDesign.scaleOf(context);
-    final current = auth.session?.server.id == server.id;
-    return Container(
-      padding: EdgeInsets.fromLTRB(16 * s, 12 * s, 12 * s, 12 * s),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(16 * s),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(
-                AppIcons.server,
-                fill: AppIcons.filled,
-                size: 20 * s,
-                color: scheme.primary,
-              ),
-              SizedBox(width: 10 * s),
-              Expanded(
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        '${server.serviceType.name} · ${server.name} · ${server.username}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium,
-                      ),
-                    ),
-                    if (current) ...[
-                      SizedBox(width: 8 * s),
-                      _Tag(label: l.tvSettingsCurrent),
-                    ],
-                  ],
-                ),
-              ),
-              SizedBox(width: 12 * s),
-              TvAction(
-                key: _TvSession.lineAddKey(server.id),
-                variant: TvActionVariant.ghost,
-                leading: const Icon(AppIcons.add, fill: AppIcons.filled),
-                onPressed: auth.isBusy
-                    ? null
-                    : () => _addLine(context, auth, server.id),
-                child: Text(l.addLine),
-              ),
-              SizedBox(width: 4 * s),
-              TvAction(
-                key: _TvSession.serverDeleteKey(server.id),
-                variant: TvActionVariant.ghost,
-                leading: const Icon(AppIcons.delete, fill: AppIcons.filled),
-                onPressed: auth.isBusy
-                    ? null
-                    : () => _confirmDelete(context, auth, server),
-                child: Text(l.deleteServer),
-              ),
-            ],
-          ),
-          SizedBox(height: 6 * s),
-          TvAction(
-            key: Key('tv-provider-login-${server.id}'),
-            onPressed: auth.isBusy
-                ? null
-                : () => showProviderConnect(context, auth, existing: server),
-            child: Text(l.sourceIndependentLogin),
-          ),
-          if (server.serviceType == MediaServerType.plex) ...[
-            SizedBox(height: 6 * s),
-            TvAction(
-              key: Key('tv-provider-home-${server.id}'),
-              onPressed: auth.isBusy
-                  ? null
-                  : () => showProviderConnect(
-                      context,
-                      auth,
-                      existing: server,
-                      home: true,
-                    ),
-              child: Text(l.providerHomeManage),
-            ),
-          ],
-          SizedBox(height: 10 * s),
-          for (final line in server.lines) ...[
-            Row(
-              children: [
-                Expanded(
-                  child: TvChoiceTile(
-                    actionKey: ValueKey('${server.id}-${line.id}'),
-                    label: line.hostLabel,
-                    subtitle: line.address == line.hostLabel
-                        ? null
-                        : line.address,
-                    selected: current && server.activeLine?.id == line.id,
-                    onPressed: auth.isBusy
-                        ? null
-                        : () => auth.switchTo(server.id, lineId: line.id),
-                  ),
-                ),
-                SizedBox(width: 8 * s),
-                TvAction(
-                  key: _TvSession.lineEditKey(server.id, line.id),
-                  variant: TvActionVariant.icon,
-                  onPressed: auth.isBusy
-                      ? null
-                      : () => _editLine(context, auth, server, line),
-                  child: Semantics(
-                    label: l.editLine,
-                    child: const Icon(AppIcons.edit, fill: AppIcons.filled),
-                  ),
-                ),
-                SizedBox(width: 4 * s),
-                TvAction(
-                  key: _TvSession.lineDeleteKey(server.id, line.id),
-                  variant: TvActionVariant.icon,
-                  onPressed: auth.isBusy || server.lines.length <= 1
-                      ? null
-                      : () => _deleteLine(context, auth, server, line),
-                  child: Semantics(
-                    label: l.deleteLine,
-                    child: const Icon(AppIcons.delete, fill: AppIcons.filled),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 6 * s),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// 添加线路:只录地址,不改变当前线路。
-  Future<void> _addLine(
-    BuildContext context,
-    AuthController auth,
-    String serverId,
-  ) async {
-    final address = await showLineAddressDialog(context);
-    if (address == null) {
-      return;
-    }
-    await auth.addLine(serverId, address);
-  }
-
-  /// 修改线路地址:仅地址变化,无 UA 输入项;改的是当前线路时,
-  /// 之后浏览与播放走新地址并刷新目录。
-  Future<void> _editLine(
-    BuildContext context,
-    AuthController auth,
-    SavedServer server,
-    ServerLine line,
-  ) async {
-    final catalog = CatalogScope.maybeOf(context);
-    final address = await showLineAddressDialog(
-      context,
-      initialAddress: line.address,
-    );
-    if (address == null) {
-      return;
-    }
-    final wasActive =
-        auth.session?.server.id == server.id &&
-        auth.session?.server.activeLineId == line.id;
-    final changed = await auth.updateLineAddress(server.id, line.id, address);
-    if (changed && wasActive) {
-      catalog?.reload();
-    }
-  }
-
-  /// 删除线路:只剩一条时入口不可用,控制器同样兜底保留最后一条;
-  /// 删除当前线路后客户端挂到剩余线路并刷新目录。
-  Future<void> _deleteLine(
-    BuildContext context,
-    AuthController auth,
-    SavedServer server,
-    ServerLine line,
-  ) async {
-    final catalog = CatalogScope.maybeOf(context);
-    final wasActive =
-        auth.session?.server.id == server.id &&
-        auth.session?.server.activeLineId == line.id;
-    await auth.deleteLine(server.id, line.id);
-    if (wasActive) {
-      catalog?.reload();
-    }
-  }
-
-  /// 先确认再删除;取消不改动任何内容。删除当前服务器时路由会回登录页。
-  Future<void> _confirmDelete(
-    BuildContext context,
-    AuthController auth,
-    SavedServer server,
-  ) async {
-    final l10n = AppLocalizations.of(context);
-    final confirmed = await showAppDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final s = TvDesign.scaleOf(dialogContext);
-        return AppDialog(
-          title: Text(l10n.deleteServer),
-          content: SizedBox(
-            width: 420 * s,
-            child: Text(l10n.deleteServerConfirmMessage(server.name)),
-          ),
-          actions: [
-            TvAction(
-              key: _TvSession.serverDeleteCancelKey,
-              autofocus: true,
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(l10n.cancelAction),
-            ),
-            TvAction(
-              key: _TvSession.serverDeleteConfirmKey,
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(l10n.deleteServerConfirm),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed == true) {
-      await auth.deleteServer(server.id);
-    }
-  }
-}
-
-class _Tag extends StatelessWidget {
-  const _Tag({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final s = TvDesign.scaleOf(context);
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 8 * s, vertical: 2 * s),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onPrimaryContainer,
-        ),
-      ),
     );
   }
 }

@@ -1,3 +1,7 @@
+import '../mobile/tv_server_test_helpers.dart';
+
+import 'package:rillight/app/tv_widgets.dart';
+
 import '../helpers/cupertino_test_app.dart';
 
 import 'package:dio/dio.dart';
@@ -708,159 +712,31 @@ void main() {
 
   // ---------- tv settings pane ----------
 
-  testWidgets('tv settings pane adds and deletes lines', (tester) async {
-    isolateImageCache();
-    tester.view.physicalSize = const Size(960, 540);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final lan = FakeEmbyServer(baseUrl: Uri.parse('http://tv-lan.test:8096'));
-    final wan = FakeEmbyServer(
-      serverId: lan.serverId,
-      serverName: lan.serverName,
-      baseUrl: Uri.parse('http://tv-wan.test:8096'),
-    );
-    final wan3 = FakeEmbyServer(
-      serverId: lan.serverId,
-      serverName: lan.serverName,
-      baseUrl: Uri.parse('http://tv-wan3.test:8096'),
-    );
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: _device,
-        dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3])),
-      ),
-    );
-    await tester.runAsync(() async {
-      await auth.connect(
-        address: lan.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      await auth.connect(
-        address: wan.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-    });
-
-    final app = RillightApp(
-      auth: auth,
-      environment: PresentationEnvironment.tv,
-      playerBindings: PlayerBindings(
-        createBackend: () => FakeVideoBackend(),
-        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-        settingsStore: MemoryPlayerSettingsStore(),
-      ),
-    );
-    addTearDown(() async {
-      await tester.pumpWidget(const SizedBox.shrink());
-      app.router.dispose();
-    });
-    await tester.pumpWidget(app);
-    await settle(tester);
-
-    FocusNode navFocus(int index) => tester
-        .widget<FocusableActionDetector>(
-          find.descendant(
-            of: find.byKey(ValueKey('tv-nav-$index')),
-            matching: find.byType(FocusableActionDetector),
-          ),
-        )
-        .focusNode!;
-    navFocus(3).requestFocus();
-    FocusManager.instance.applyFocusChangesIfNeeded();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await settle(tester);
-
-    // 设置页是懒构建的 ListView:先滚动到目标再点击。
-    final tvScrollable = find
-        .descendant(
-          of: find.byKey(const PageStorageKey('tv-session')),
-          matching: find.byType(Scrollable),
-        )
-        .first;
-    Future<void> tvTap(Finder finder) async {
-      // 目标可能在当前视口上方:先回到列表顶部再向下找。
-      tester.state<ScrollableState>(tvScrollable).position.jumpTo(0);
-      await settle(tester);
-      await tester.scrollUntilVisible(finder, 200, scrollable: tvScrollable);
-      await settle(tester);
-      await tester.tap(finder);
-      await settle(tester);
-    }
-
-    final serverId = auth.savedServers.single.id;
-
-    // 添加线路:只填地址,不改当前线路。
-    await tvTap(find.byKey(ValueKey('tv-line-add-$serverId')));
-    expect(find.byKey(LineAddressDialog.fieldKey), findsOneWidget);
-    expect(find.text('User-Agent'), findsNothing);
-    await tester.enterText(
-      find.byKey(LineAddressDialog.fieldKey),
-      wan3.baseUrl.toString(),
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await settle(tester);
-    expect(
-      auth.savedServers.single.lines.map((l) => l.address),
-      contains(wan3.baseUrl.toString()),
-    );
-    expect(auth.client.baseUrl, wan.baseUrl);
-
-    // 删除线路:删到只剩一条后入口不可用,删除不执行。
-    ServerLine lineByAddress(String address) {
-      return auth.savedServers.single.lines.firstWhere(
-        (l) => l.address == address,
-      );
-    }
-
-    await tvTap(
-      find.byKey(
-        ValueKey(
-          'tv-line-delete-$serverId-${lineByAddress(lan.baseUrl.toString()).id}',
-        ),
-      ),
-    );
-    expect(auth.savedServers.single.lines, hasLength(2));
-    await tvTap(
-      find.byKey(
-        ValueKey(
-          'tv-line-delete-$serverId-${lineByAddress(wan3.baseUrl.toString()).id}',
-        ),
-      ),
-    );
-    expect(auth.savedServers.single.lines, hasLength(1));
-    final last = auth.savedServers.single.lines.single;
-    await tvTap(find.byKey(ValueKey('tv-line-delete-$serverId-${last.id}')));
-    expect(auth.savedServers.single.lines, hasLength(1));
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
   testWidgets(
-    'tv settings pane explains why a failed line switch kept the line',
+    'TV centralized editor adds and deletes draft lines with remote',
     (tester) async {
       isolateImageCache();
       tester.view.physicalSize = const Size(960, 540);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final lan = FakeEmbyServer(
-        baseUrl: Uri.parse('http://tv-fail-lan.test:8096'),
-      );
+      final lan = FakeEmbyServer(baseUrl: Uri.parse('http://tv-lan.test:8096'));
       final wan = FakeEmbyServer(
         serverId: lan.serverId,
         serverName: lan.serverName,
-        baseUrl: Uri.parse('http://tv-fail-wan.test:8096'),
+        baseUrl: Uri.parse('http://tv-wan.test:8096'),
+      );
+      final wan3 = FakeEmbyServer(
+        serverId: lan.serverId,
+        serverName: lan.serverName,
+        baseUrl: Uri.parse('http://tv-wan3.test:8096'),
       );
       final auth = AuthController.memory(
         client: EmbyClient(
           device: _device,
-          dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
+          dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3])),
         ),
       );
-      addTearDown(auth.dispose);
       await tester.runAsync(() async {
         await auth.connect(
           address: lan.baseUrl.toString(),
@@ -873,7 +749,6 @@ void main() {
           password: 'correct-horse',
         );
       });
-      expect(auth.client.baseUrl, wan.baseUrl);
 
       final app = RillightApp(
         auth: auth,
@@ -891,49 +766,133 @@ void main() {
       await tester.pumpWidget(app);
       await settle(tester);
 
-      final navFocus = tester
-          .widget<FocusableActionDetector>(
-            find.descendant(
-              of: find.byKey(const ValueKey('tv-nav-3')),
-              matching: find.byType(FocusableActionDetector),
-            ),
-          )
-          .focusNode!;
-      navFocus.requestFocus();
-      FocusManager.instance.applyFocusChangesIfNeeded();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await settle(tester);
-
       final serverId = auth.savedServers.single.id;
-      final lanLine = auth.savedServers.single.lines.firstWhere(
-        (line) => line.address == lan.baseUrl.toString(),
+      await tvPress(tester, const Key('tv-nav-user'));
+      await tvOpenEditor(tester, serverId);
+      await tvPress(tester, const Key('server-editor-add-line'));
+      await tvEdit(
+        tester,
+        const Key('server-line-address'),
+        wan3.baseUrl.toString(),
       );
-      lan.publicInfoStatus = 500;
-      lan.publicInfoRawBody = 'upstream timeout';
-
-      final tvScrollable = find
-          .descendant(
-            of: find.byKey(const PageStorageKey('tv-session')),
-            matching: find.byType(Scrollable),
-          )
-          .first;
-      tester.state<ScrollableState>(tvScrollable).position.jumpTo(0);
-      await settle(tester);
-      final lanOption = find.byKey(ValueKey('$serverId-${lanLine.id}'));
-      await tester.scrollUntilVisible(lanOption, 200, scrollable: tvScrollable);
-      await settle(tester);
-      await tester.tap(lanOption);
-      await settle(tester);
-
-      // 原线路与会话保持,失败原因在设置面板内可见。
-      expect(auth.lineSwitchFailure?.detail, '无法连接该线路，请检查连接或重新登录');
+      await tvPress(tester, const Key('server-line-done'));
+      // A draft cannot change the running connection before Save.
+      expect(auth.savedServers.single.lines, hasLength(2));
+      await tvPress(tester, const Key('server-editor-save'));
+      expect(
+        auth.savedServers.single.lines.map((l) => l.address),
+        contains(wan3.baseUrl.toString()),
+      );
       expect(auth.client.baseUrl, wan.baseUrl);
-      expect(auth.session?.server.activeLine?.address, wan.baseUrl.toString());
-      expect(find.byKey(const Key('tv-line-switch-failure')), findsOneWidget);
-      expect(find.textContaining('切换线路失败'), findsOneWidget);
-      expect(find.textContaining('无法连接该线路，请检查连接或重新登录'), findsOneWidget);
+      ServerLine lineByAddress(String address) => auth.savedServers.single.lines
+          .firstWhere((l) => l.address == address);
+      final addedId = lineByAddress(wan3.baseUrl.toString()).id;
+      final beforeOrder = auth.savedServers.single.lines
+          .map((l) => l.id)
+          .toList();
+      await tvOpenEditor(tester, serverId);
+      await tvPress(tester, Key('server-editor-line-more-$addedId'));
+      await tvPress(tester, const Key('server-line-up'));
+      expect(
+        auth.savedServers.single.lines.map((l) => l.id).toList(),
+        beforeOrder,
+      );
+      await tvPress(tester, const Key('server-editor-save'));
+      expect(auth.savedServers.single.lines[1].id, addedId);
+      expect(auth.client.baseUrl, wan.baseUrl);
+      await tvOpenEditor(tester, serverId);
+      for (final address in [lan.baseUrl.toString(), wan3.baseUrl.toString()]) {
+        await tvPress(
+          tester,
+          Key('server-editor-line-more-${lineByAddress(address).id}'),
+        );
+        await tvPress(tester, const Key('server-line-remove'));
+      }
+      expect(auth.savedServers.single.lines, hasLength(3));
+      await tvPress(tester, const Key('server-editor-save'));
+      expect(auth.savedServers.single.lines, hasLength(1));
+      await tvOpenEditor(tester, serverId);
+      final last = auth.savedServers.single.lines.single;
+      expect(
+        tester
+            .widget<TvAction>(
+              find.byKey(Key('server-editor-line-more-${last.id}')),
+            )
+            .onPressed,
+        isNull,
+      );
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
   );
+
+  testWidgets('TV line page explains failure and keeps the running line', (
+    tester,
+  ) async {
+    isolateImageCache();
+    tester.view.physicalSize = const Size(960, 540);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final lan = FakeEmbyServer(
+      baseUrl: Uri.parse('http://tv-fail-lan.test:8096'),
+    );
+    final wan = FakeEmbyServer(
+      serverId: lan.serverId,
+      serverName: lan.serverName,
+      baseUrl: Uri.parse('http://tv-fail-wan.test:8096'),
+    );
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(() async {
+      await auth.connect(
+        address: lan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    expect(auth.client.baseUrl, wan.baseUrl);
+
+    final app = RillightApp(
+      auth: auth,
+      environment: PresentationEnvironment.tv,
+      playerBindings: PlayerBindings(
+        createBackend: () => FakeVideoBackend(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        settingsStore: MemoryPlayerSettingsStore(),
+      ),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    });
+    await tester.pumpWidget(app);
+    await settle(tester);
+
+    await tvPress(tester, const Key('tv-nav-user'));
+    final serverId = auth.savedServers.single.id;
+    final lanLine = auth.savedServers.single.lines.firstWhere(
+      (line) => line.address == lan.baseUrl.toString(),
+    );
+    lan.publicInfoStatus = 500;
+    lan.publicInfoRawBody = 'upstream timeout';
+
+    await tvPress(tester, Key('server-lines-$serverId'));
+    await tvPress(tester, Key('server-line-choice-${lanLine.id}'));
+    // Failed preflight never changes the current configuration or session.
+    expect(auth.client.baseUrl, wan.baseUrl);
+    expect(auth.session?.server.activeLine?.address, wan.baseUrl.toString());
+    expect(find.textContaining('连接失败，原连接已保留'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }

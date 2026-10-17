@@ -15,10 +15,10 @@ class ServerLineFields extends StatefulWidget {
   final List<ServerLine> otherLines;
   final ValueChanged<ServerLine> onDone;
   @override
-  State<ServerLineFields> createState() => _ServerLineFieldsState();
+  State<ServerLineFields> createState() => ServerLineFieldsState();
 }
 
-class _ServerLineFieldsState extends State<ServerLineFields> {
+class ServerLineFieldsState extends State<ServerLineFields> {
   final name = TextEditingController(), address = TextEditingController();
   String? error;
   @override

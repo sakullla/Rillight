@@ -100,89 +100,90 @@ import '../mobile/phone_pages_cases.dart' as case97;
 import '../mobile/phone_player_cases.dart' as case98;
 import '../mobile/phone_player_interaction_cases.dart' as case99;
 import '../mobile/search_cached_refresh_cases.dart' as case100;
-import '../mobile/tv_shelf_focus_cases.dart' as case101;
-import '../mobile/tv_shell_navigation_cases.dart' as case102;
-import '../player/android_seek_cancellation_cases.dart' as case103;
-import '../player/buffer_snapshot_cases.dart' as case104;
-import '../player/cache/cache_contract_cases.dart' as case105;
-import '../player/cache/directory_inventory_cases.dart' as case106;
-import '../player/cache/hls_proxy_timeline_cases.dart' as case107;
-import '../player/cache/media_time_index_cases.dart' as case108;
-import '../player/cache/proxy_progressive_timeline_cases.dart' as case109;
-import '../player/cache/range_lease_index_cases.dart' as case110;
-import '../player/cache_crc32_cases.dart' as case111;
-import '../player/capability_record_cases.dart' as case112;
-import '../player/catalog_preference_negotiation_cases.dart' as case113;
-import '../player/danmaku/dandanplay_client_cases.dart' as case114;
-import '../player/danmaku/danmaku_controller_cases.dart' as case115;
-import '../player/danmaku/danmaku_hash_cases.dart' as case116;
-import '../player/danmaku/danmaku_layout_cases.dart' as case117;
-import '../player/danmaku/danmaku_renderer_cases.dart' as case118;
-import '../player/danmaku/danmaku_settings_cases.dart' as case119;
-import '../player/danmaku/danmaku_timeline_cases.dart' as case120;
-import '../player/desktop_player_page_cases.dart' as case121;
-import '../player/desktop_player_window_host_cases.dart' as case122;
-import '../player/device_profile_cases.dart' as case123;
-import '../player/emby_playback_client_cases.dart' as case124;
-import '../player/ended_navigation_cases.dart' as case125;
-import '../player/hls_prefetch_cases.dart' as case126;
-import '../player/hls_redirect_chain_cases.dart' as case127;
-import '../player/next_episode_prefix_authorization_cases.dart' as case128;
-import '../player/phone_presentation_lifecycle_cases.dart' as case129;
-import '../player/playback_check_in_cases.dart' as case130;
-import '../player/playback_http_proxy_cases.dart' as case131;
-import '../player/playback_image_release_cases.dart' as case132;
-import '../player/playback_metadata_cases.dart' as case133;
-import '../player/playback_overlay_widgets_cases.dart' as case134;
-import '../player/playback_recovery_cases.dart' as case135;
-import '../player/playback_resolver_cases.dart' as case136;
-import '../player/playback_session_cases.dart' as case137;
-import '../player/playback_session_snapshot_cases.dart' as case138;
-import '../player/playback_transport_session_cases.dart' as case139;
-import '../player/playback_wake_lock_cases.dart' as case140;
-import '../player/player_cache_status_cases.dart' as case141;
-import '../player/player_controls_cases.dart' as case142;
-import '../player/player_host_command_cases.dart' as case143;
-import '../player/player_process_control_cases.dart' as case144;
-import '../player/player_process_protocol_cases.dart' as case145;
-import '../player/player_runtime_options_cases.dart' as case146;
-import '../player/player_settings_cases.dart' as case147;
-import '../player/player_startup_cases.dart' as case148;
-import '../player/player_window_cases.dart' as case149;
-import '../player/player_window_launch_cases.dart' as case150;
-import '../player/provider_failed_preparation_recovery_cases.dart' as case151;
-import '../player/provider_part_playback_cases.dart' as case152;
-import '../player/provider_process_boundary_cases.dart' as case153;
-import '../player/provider_scoped_preference_cases.dart' as case154;
-import '../player/provider_transport_cases.dart' as case155;
-import '../player/response_read_ahead_cases.dart' as case156;
-import '../player/rillight_video_backend_cases.dart' as case157;
-import '../player/seek_preview_cases.dart' as case158;
-import '../player/strm_quality_confirmation_cases.dart' as case159;
-import '../player/subtitle_menu_cases.dart' as case160;
-import '../player/subtitle_slots_cases.dart' as case161;
-import '../player/subtitle_viewport_cases.dart' as case162;
-import '../plex/plex_provider_cases.dart' as case163;
-import '../plex/plex_review_regression_cases.dart' as case164;
-import '../settings_page_cases.dart' as case165;
-import '../tv/tv_detail_cases.dart' as case166;
-import '../tv/tv_flow_cases.dart' as case167;
-import '../tv/tv_focus_cases.dart' as case168;
-import '../tv/tv_frame_cases.dart' as case169;
-import '../tv/tv_home_featured_cases.dart' as case170;
-import '../tv/tv_lan_pair_cases.dart' as case171;
-import '../tv/tv_player_controls_cases.dart' as case172;
-import '../widgets/app_button_cases.dart' as case173;
-import '../widgets/app_empty_view_cases.dart' as case174;
-import '../widgets/app_hover_card_cases.dart' as case175;
-import '../widgets/artwork_crop_cases.dart' as case176;
-import '../widgets/backdrop_scrim_cases.dart' as case177;
-import '../widgets/desktop_back_button_cases.dart' as case178;
-import '../widgets/liquid_glass_cases.dart' as case179;
-import '../widgets/media_image_cases.dart' as case180;
-import '../widgets/poster_card_cases.dart' as case181;
-import '../widgets/scrim_icon_button_cases.dart' as case182;
-import '../widgets/skeleton_cases.dart' as case183;
+import '../mobile/tv_server_management_cases.dart' as case101;
+import '../mobile/tv_shelf_focus_cases.dart' as case102;
+import '../mobile/tv_shell_navigation_cases.dart' as case103;
+import '../player/android_seek_cancellation_cases.dart' as case104;
+import '../player/buffer_snapshot_cases.dart' as case105;
+import '../player/cache/cache_contract_cases.dart' as case106;
+import '../player/cache/directory_inventory_cases.dart' as case107;
+import '../player/cache/hls_proxy_timeline_cases.dart' as case108;
+import '../player/cache/media_time_index_cases.dart' as case109;
+import '../player/cache/proxy_progressive_timeline_cases.dart' as case110;
+import '../player/cache/range_lease_index_cases.dart' as case111;
+import '../player/cache_crc32_cases.dart' as case112;
+import '../player/capability_record_cases.dart' as case113;
+import '../player/catalog_preference_negotiation_cases.dart' as case114;
+import '../player/danmaku/dandanplay_client_cases.dart' as case115;
+import '../player/danmaku/danmaku_controller_cases.dart' as case116;
+import '../player/danmaku/danmaku_hash_cases.dart' as case117;
+import '../player/danmaku/danmaku_layout_cases.dart' as case118;
+import '../player/danmaku/danmaku_renderer_cases.dart' as case119;
+import '../player/danmaku/danmaku_settings_cases.dart' as case120;
+import '../player/danmaku/danmaku_timeline_cases.dart' as case121;
+import '../player/desktop_player_page_cases.dart' as case122;
+import '../player/desktop_player_window_host_cases.dart' as case123;
+import '../player/device_profile_cases.dart' as case124;
+import '../player/emby_playback_client_cases.dart' as case125;
+import '../player/ended_navigation_cases.dart' as case126;
+import '../player/hls_prefetch_cases.dart' as case127;
+import '../player/hls_redirect_chain_cases.dart' as case128;
+import '../player/next_episode_prefix_authorization_cases.dart' as case129;
+import '../player/phone_presentation_lifecycle_cases.dart' as case130;
+import '../player/playback_check_in_cases.dart' as case131;
+import '../player/playback_http_proxy_cases.dart' as case132;
+import '../player/playback_image_release_cases.dart' as case133;
+import '../player/playback_metadata_cases.dart' as case134;
+import '../player/playback_overlay_widgets_cases.dart' as case135;
+import '../player/playback_recovery_cases.dart' as case136;
+import '../player/playback_resolver_cases.dart' as case137;
+import '../player/playback_session_cases.dart' as case138;
+import '../player/playback_session_snapshot_cases.dart' as case139;
+import '../player/playback_transport_session_cases.dart' as case140;
+import '../player/playback_wake_lock_cases.dart' as case141;
+import '../player/player_cache_status_cases.dart' as case142;
+import '../player/player_controls_cases.dart' as case143;
+import '../player/player_host_command_cases.dart' as case144;
+import '../player/player_process_control_cases.dart' as case145;
+import '../player/player_process_protocol_cases.dart' as case146;
+import '../player/player_runtime_options_cases.dart' as case147;
+import '../player/player_settings_cases.dart' as case148;
+import '../player/player_startup_cases.dart' as case149;
+import '../player/player_window_cases.dart' as case150;
+import '../player/player_window_launch_cases.dart' as case151;
+import '../player/provider_failed_preparation_recovery_cases.dart' as case152;
+import '../player/provider_part_playback_cases.dart' as case153;
+import '../player/provider_process_boundary_cases.dart' as case154;
+import '../player/provider_scoped_preference_cases.dart' as case155;
+import '../player/provider_transport_cases.dart' as case156;
+import '../player/response_read_ahead_cases.dart' as case157;
+import '../player/rillight_video_backend_cases.dart' as case158;
+import '../player/seek_preview_cases.dart' as case159;
+import '../player/strm_quality_confirmation_cases.dart' as case160;
+import '../player/subtitle_menu_cases.dart' as case161;
+import '../player/subtitle_slots_cases.dart' as case162;
+import '../player/subtitle_viewport_cases.dart' as case163;
+import '../plex/plex_provider_cases.dart' as case164;
+import '../plex/plex_review_regression_cases.dart' as case165;
+import '../settings_page_cases.dart' as case166;
+import '../tv/tv_detail_cases.dart' as case167;
+import '../tv/tv_flow_cases.dart' as case168;
+import '../tv/tv_focus_cases.dart' as case169;
+import '../tv/tv_frame_cases.dart' as case170;
+import '../tv/tv_home_featured_cases.dart' as case171;
+import '../tv/tv_lan_pair_cases.dart' as case172;
+import '../tv/tv_player_controls_cases.dart' as case173;
+import '../widgets/app_button_cases.dart' as case174;
+import '../widgets/app_empty_view_cases.dart' as case175;
+import '../widgets/app_hover_card_cases.dart' as case176;
+import '../widgets/artwork_crop_cases.dart' as case177;
+import '../widgets/backdrop_scrim_cases.dart' as case178;
+import '../widgets/desktop_back_button_cases.dart' as case179;
+import '../widgets/liquid_glass_cases.dart' as case180;
+import '../widgets/media_image_cases.dart' as case181;
+import '../widgets/poster_card_cases.dart' as case182;
+import '../widgets/scrim_icon_button_cases.dart' as case183;
+import '../widgets/skeleton_cases.dart' as case184;
 
 // Import every module once; registering one group calls only its main().
 // Importing widget modules alone does not install Flutter's HTTP mock.
@@ -288,89 +289,90 @@ final caseEntrypoints = <String, void Function()>{
   'mobile/phone_player_cases.dart': case98.main,
   'mobile/phone_player_interaction_cases.dart': case99.main,
   'mobile/search_cached_refresh_cases.dart': case100.main,
-  'mobile/tv_shelf_focus_cases.dart': case101.main,
-  'mobile/tv_shell_navigation_cases.dart': case102.main,
-  'player/android_seek_cancellation_cases.dart': case103.main,
-  'player/buffer_snapshot_cases.dart': case104.main,
-  'player/cache/cache_contract_cases.dart': case105.main,
-  'player/cache/directory_inventory_cases.dart': case106.main,
-  'player/cache/hls_proxy_timeline_cases.dart': case107.main,
-  'player/cache/media_time_index_cases.dart': case108.main,
-  'player/cache/proxy_progressive_timeline_cases.dart': case109.main,
-  'player/cache/range_lease_index_cases.dart': case110.main,
-  'player/cache_crc32_cases.dart': case111.main,
-  'player/capability_record_cases.dart': case112.main,
-  'player/catalog_preference_negotiation_cases.dart': case113.main,
-  'player/danmaku/dandanplay_client_cases.dart': case114.main,
-  'player/danmaku/danmaku_controller_cases.dart': case115.main,
-  'player/danmaku/danmaku_hash_cases.dart': case116.main,
-  'player/danmaku/danmaku_layout_cases.dart': case117.main,
-  'player/danmaku/danmaku_renderer_cases.dart': case118.main,
-  'player/danmaku/danmaku_settings_cases.dart': case119.main,
-  'player/danmaku/danmaku_timeline_cases.dart': case120.main,
-  'player/desktop_player_page_cases.dart': case121.main,
-  'player/desktop_player_window_host_cases.dart': case122.main,
-  'player/device_profile_cases.dart': case123.main,
-  'player/emby_playback_client_cases.dart': case124.main,
-  'player/ended_navigation_cases.dart': case125.main,
-  'player/hls_prefetch_cases.dart': case126.main,
-  'player/hls_redirect_chain_cases.dart': case127.main,
-  'player/next_episode_prefix_authorization_cases.dart': case128.main,
-  'player/phone_presentation_lifecycle_cases.dart': case129.main,
-  'player/playback_check_in_cases.dart': case130.main,
-  'player/playback_http_proxy_cases.dart': case131.main,
-  'player/playback_image_release_cases.dart': case132.main,
-  'player/playback_metadata_cases.dart': case133.main,
-  'player/playback_overlay_widgets_cases.dart': case134.main,
-  'player/playback_recovery_cases.dart': case135.main,
-  'player/playback_resolver_cases.dart': case136.main,
-  'player/playback_session_cases.dart': case137.main,
-  'player/playback_session_snapshot_cases.dart': case138.main,
-  'player/playback_transport_session_cases.dart': case139.main,
-  'player/playback_wake_lock_cases.dart': case140.main,
-  'player/player_cache_status_cases.dart': case141.main,
-  'player/player_controls_cases.dart': case142.main,
-  'player/player_host_command_cases.dart': case143.main,
-  'player/player_process_control_cases.dart': case144.main,
-  'player/player_process_protocol_cases.dart': case145.main,
-  'player/player_runtime_options_cases.dart': case146.main,
-  'player/player_settings_cases.dart': case147.main,
-  'player/player_startup_cases.dart': case148.main,
-  'player/player_window_cases.dart': case149.main,
-  'player/player_window_launch_cases.dart': case150.main,
-  'player/provider_failed_preparation_recovery_cases.dart': case151.main,
-  'player/provider_part_playback_cases.dart': case152.main,
-  'player/provider_process_boundary_cases.dart': case153.main,
-  'player/provider_scoped_preference_cases.dart': case154.main,
-  'player/provider_transport_cases.dart': case155.main,
-  'player/response_read_ahead_cases.dart': case156.main,
-  'player/rillight_video_backend_cases.dart': case157.main,
-  'player/seek_preview_cases.dart': case158.main,
-  'player/strm_quality_confirmation_cases.dart': case159.main,
-  'player/subtitle_menu_cases.dart': case160.main,
-  'player/subtitle_slots_cases.dart': case161.main,
-  'player/subtitle_viewport_cases.dart': case162.main,
-  'plex/plex_provider_cases.dart': case163.main,
-  'plex/plex_review_regression_cases.dart': case164.main,
-  'settings_page_cases.dart': case165.main,
-  'tv/tv_detail_cases.dart': case166.main,
-  'tv/tv_flow_cases.dart': case167.main,
-  'tv/tv_focus_cases.dart': case168.main,
-  'tv/tv_frame_cases.dart': case169.main,
-  'tv/tv_home_featured_cases.dart': case170.main,
-  'tv/tv_lan_pair_cases.dart': case171.main,
-  'tv/tv_player_controls_cases.dart': case172.main,
-  'widgets/app_button_cases.dart': case173.main,
-  'widgets/app_empty_view_cases.dart': case174.main,
-  'widgets/app_hover_card_cases.dart': case175.main,
-  'widgets/artwork_crop_cases.dart': case176.main,
-  'widgets/backdrop_scrim_cases.dart': case177.main,
-  'widgets/desktop_back_button_cases.dart': case178.main,
-  'widgets/liquid_glass_cases.dart': case179.main,
-  'widgets/media_image_cases.dart': case180.main,
-  'widgets/poster_card_cases.dart': case181.main,
-  'widgets/scrim_icon_button_cases.dart': case182.main,
-  'widgets/skeleton_cases.dart': case183.main,
+  'mobile/tv_server_management_cases.dart': case101.main,
+  'mobile/tv_shelf_focus_cases.dart': case102.main,
+  'mobile/tv_shell_navigation_cases.dart': case103.main,
+  'player/android_seek_cancellation_cases.dart': case104.main,
+  'player/buffer_snapshot_cases.dart': case105.main,
+  'player/cache/cache_contract_cases.dart': case106.main,
+  'player/cache/directory_inventory_cases.dart': case107.main,
+  'player/cache/hls_proxy_timeline_cases.dart': case108.main,
+  'player/cache/media_time_index_cases.dart': case109.main,
+  'player/cache/proxy_progressive_timeline_cases.dart': case110.main,
+  'player/cache/range_lease_index_cases.dart': case111.main,
+  'player/cache_crc32_cases.dart': case112.main,
+  'player/capability_record_cases.dart': case113.main,
+  'player/catalog_preference_negotiation_cases.dart': case114.main,
+  'player/danmaku/dandanplay_client_cases.dart': case115.main,
+  'player/danmaku/danmaku_controller_cases.dart': case116.main,
+  'player/danmaku/danmaku_hash_cases.dart': case117.main,
+  'player/danmaku/danmaku_layout_cases.dart': case118.main,
+  'player/danmaku/danmaku_renderer_cases.dart': case119.main,
+  'player/danmaku/danmaku_settings_cases.dart': case120.main,
+  'player/danmaku/danmaku_timeline_cases.dart': case121.main,
+  'player/desktop_player_page_cases.dart': case122.main,
+  'player/desktop_player_window_host_cases.dart': case123.main,
+  'player/device_profile_cases.dart': case124.main,
+  'player/emby_playback_client_cases.dart': case125.main,
+  'player/ended_navigation_cases.dart': case126.main,
+  'player/hls_prefetch_cases.dart': case127.main,
+  'player/hls_redirect_chain_cases.dart': case128.main,
+  'player/next_episode_prefix_authorization_cases.dart': case129.main,
+  'player/phone_presentation_lifecycle_cases.dart': case130.main,
+  'player/playback_check_in_cases.dart': case131.main,
+  'player/playback_http_proxy_cases.dart': case132.main,
+  'player/playback_image_release_cases.dart': case133.main,
+  'player/playback_metadata_cases.dart': case134.main,
+  'player/playback_overlay_widgets_cases.dart': case135.main,
+  'player/playback_recovery_cases.dart': case136.main,
+  'player/playback_resolver_cases.dart': case137.main,
+  'player/playback_session_cases.dart': case138.main,
+  'player/playback_session_snapshot_cases.dart': case139.main,
+  'player/playback_transport_session_cases.dart': case140.main,
+  'player/playback_wake_lock_cases.dart': case141.main,
+  'player/player_cache_status_cases.dart': case142.main,
+  'player/player_controls_cases.dart': case143.main,
+  'player/player_host_command_cases.dart': case144.main,
+  'player/player_process_control_cases.dart': case145.main,
+  'player/player_process_protocol_cases.dart': case146.main,
+  'player/player_runtime_options_cases.dart': case147.main,
+  'player/player_settings_cases.dart': case148.main,
+  'player/player_startup_cases.dart': case149.main,
+  'player/player_window_cases.dart': case150.main,
+  'player/player_window_launch_cases.dart': case151.main,
+  'player/provider_failed_preparation_recovery_cases.dart': case152.main,
+  'player/provider_part_playback_cases.dart': case153.main,
+  'player/provider_process_boundary_cases.dart': case154.main,
+  'player/provider_scoped_preference_cases.dart': case155.main,
+  'player/provider_transport_cases.dart': case156.main,
+  'player/response_read_ahead_cases.dart': case157.main,
+  'player/rillight_video_backend_cases.dart': case158.main,
+  'player/seek_preview_cases.dart': case159.main,
+  'player/strm_quality_confirmation_cases.dart': case160.main,
+  'player/subtitle_menu_cases.dart': case161.main,
+  'player/subtitle_slots_cases.dart': case162.main,
+  'player/subtitle_viewport_cases.dart': case163.main,
+  'plex/plex_provider_cases.dart': case164.main,
+  'plex/plex_review_regression_cases.dart': case165.main,
+  'settings_page_cases.dart': case166.main,
+  'tv/tv_detail_cases.dart': case167.main,
+  'tv/tv_flow_cases.dart': case168.main,
+  'tv/tv_focus_cases.dart': case169.main,
+  'tv/tv_frame_cases.dart': case170.main,
+  'tv/tv_home_featured_cases.dart': case171.main,
+  'tv/tv_lan_pair_cases.dart': case172.main,
+  'tv/tv_player_controls_cases.dart': case173.main,
+  'widgets/app_button_cases.dart': case174.main,
+  'widgets/app_empty_view_cases.dart': case175.main,
+  'widgets/app_hover_card_cases.dart': case176.main,
+  'widgets/artwork_crop_cases.dart': case177.main,
+  'widgets/backdrop_scrim_cases.dart': case178.main,
+  'widgets/desktop_back_button_cases.dart': case179.main,
+  'widgets/liquid_glass_cases.dart': case180.main,
+  'widgets/media_image_cases.dart': case181.main,
+  'widgets/poster_card_cases.dart': case182.main,
+  'widgets/scrim_icon_button_cases.dart': case183.main,
+  'widgets/skeleton_cases.dart': case184.main,
   'aggregation/presentation_cases.dart#0': () => case6.mainShard(0, 3),
   'aggregation/presentation_cases.dart#1': () => case6.mainShard(1, 3),
   'aggregation/presentation_cases.dart#2': () => case6.mainShard(2, 3),
@@ -388,28 +390,28 @@ final caseEntrypoints = <String, void Function()>{
   'mobile/phone_player_cases.dart#1': () => case98.mainShard(1, 4),
   'mobile/phone_player_cases.dart#2': () => case98.mainShard(2, 4),
   'mobile/phone_player_cases.dart#3': () => case98.mainShard(3, 4),
-  'tv/tv_detail_cases.dart#0': () => case166.mainShard(0, 2),
-  'tv/tv_detail_cases.dart#1': () => case166.mainShard(1, 2),
-  'tv/tv_lan_pair_cases.dart#0': () => case171.mainShard(0, 3),
-  'tv/tv_lan_pair_cases.dart#1': () => case171.mainShard(1, 3),
-  'tv/tv_lan_pair_cases.dart#2': () => case171.mainShard(2, 3),
+  'tv/tv_detail_cases.dart#0': () => case167.mainShard(0, 2),
+  'tv/tv_detail_cases.dart#1': () => case167.mainShard(1, 2),
+  'tv/tv_lan_pair_cases.dart#0': () => case172.mainShard(0, 3),
+  'tv/tv_lan_pair_cases.dart#1': () => case172.mainShard(1, 3),
+  'tv/tv_lan_pair_cases.dart#2': () => case172.mainShard(2, 3),
   'library/source_detail_route_cases.dart#0': () => case85.mainShard(0, 3),
   'library/source_detail_route_cases.dart#1': () => case85.mainShard(1, 3),
   'library/source_detail_route_cases.dart#2': () => case85.mainShard(2, 3),
   'catalog/item_detail_cases.dart#0': () => case56.mainShard(0, 3),
   'catalog/item_detail_cases.dart#1': () => case56.mainShard(1, 3),
   'catalog/item_detail_cases.dart#2': () => case56.mainShard(2, 3),
-  'player/playback_http_proxy_cases.dart#0': () => case131.mainShard(0, 4),
-  'player/playback_http_proxy_cases.dart#1': () => case131.mainShard(1, 4),
-  'player/playback_http_proxy_cases.dart#2': () => case131.mainShard(2, 4),
-  'player/playback_http_proxy_cases.dart#3': () => case131.mainShard(3, 4),
-  'player/rillight_video_backend_cases.dart#0': () => case157.mainShard(0, 3),
-  'player/rillight_video_backend_cases.dart#1': () => case157.mainShard(1, 3),
-  'player/rillight_video_backend_cases.dart#2': () => case157.mainShard(2, 3),
-  'player/response_read_ahead_cases.dart#0': () => case156.mainShard(0, 3),
-  'player/response_read_ahead_cases.dart#1': () => case156.mainShard(1, 3),
-  'player/response_read_ahead_cases.dart#2': () => case156.mainShard(2, 3),
-  'player/cache/cache_contract_cases.dart#0': () => case105.mainShard(0, 3),
-  'player/cache/cache_contract_cases.dart#1': () => case105.mainShard(1, 3),
-  'player/cache/cache_contract_cases.dart#2': () => case105.mainShard(2, 3),
+  'player/playback_http_proxy_cases.dart#0': () => case132.mainShard(0, 4),
+  'player/playback_http_proxy_cases.dart#1': () => case132.mainShard(1, 4),
+  'player/playback_http_proxy_cases.dart#2': () => case132.mainShard(2, 4),
+  'player/playback_http_proxy_cases.dart#3': () => case132.mainShard(3, 4),
+  'player/rillight_video_backend_cases.dart#0': () => case158.mainShard(0, 3),
+  'player/rillight_video_backend_cases.dart#1': () => case158.mainShard(1, 3),
+  'player/rillight_video_backend_cases.dart#2': () => case158.mainShard(2, 3),
+  'player/response_read_ahead_cases.dart#0': () => case157.mainShard(0, 3),
+  'player/response_read_ahead_cases.dart#1': () => case157.mainShard(1, 3),
+  'player/response_read_ahead_cases.dart#2': () => case157.mainShard(2, 3),
+  'player/cache/cache_contract_cases.dart#0': () => case106.mainShard(0, 3),
+  'player/cache/cache_contract_cases.dart#1': () => case106.mainShard(1, 3),
+  'player/cache/cache_contract_cases.dart#2': () => case106.mainShard(2, 3),
 };

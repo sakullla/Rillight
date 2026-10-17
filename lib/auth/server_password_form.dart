@@ -27,10 +27,10 @@ class ServerPasswordFields extends StatefulWidget {
   final ServerPasswordDraft? initial;
   final ValueChanged<ServerPasswordDraft> onDone;
   @override
-  State<ServerPasswordFields> createState() => _ServerPasswordFieldsState();
+  State<ServerPasswordFields> createState() => ServerPasswordFieldsState();
 }
 
-class _ServerPasswordFieldsState extends State<ServerPasswordFields> {
+class ServerPasswordFieldsState extends State<ServerPasswordFields> {
   final old = TextEditingController(),
       password = TextEditingController(),
       confirmation = TextEditingController();
@@ -148,10 +148,10 @@ class ServerUnlockForm extends StatefulWidget {
   final DateTime? retryAt;
   final DateTime Function()? clock;
   @override
-  State<ServerUnlockForm> createState() => _ServerUnlockFormState();
+  State<ServerUnlockForm> createState() => ServerUnlockFormState();
 }
 
-class _ServerUnlockFormState extends State<ServerUnlockForm> {
+class ServerUnlockFormState extends State<ServerUnlockForm> {
   final password = TextEditingController();
   Timer? timer;
   DateTime get now => widget.clock?.call() ?? DateTime.now();

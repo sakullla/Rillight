@@ -130,6 +130,26 @@ class ServerEditorState extends State<ServerEditor> {
     }
   }
 
+  /// Account mutation is shared by desktop, phone and TV presentations.
+  Future<void> signOut() async {
+    final l = AppLocalizations.of(context);
+    setState(() => busy = true);
+    try {
+      if (widget.auth.session?.server.id == widget.server.id) {
+        await PlayerWindowScope.maybeOf(context)?.close();
+        await widget.auth.logout();
+      } else {
+        await widget.auth.sources.logoutSource(widget.server.id);
+      }
+      await widget.auth.refreshServers();
+      if (mounted) (widget.onSignedOut ?? widget.onSaved)();
+    } catch (failure) {
+      if (mounted) setState(() => error = serverOperationFailure(l, failure));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   void move(int index, int delta) {
     setState(() {
       final value = lines.removeAt(index);
@@ -208,31 +228,7 @@ class ServerEditorState extends State<ServerEditor> {
           AppButton(
             key: const Key('server-logout-confirm'),
             variant: AppButtonVariant.filled,
-            onPressed: busy
-                ? null
-                : () async {
-                    setState(() => busy = true);
-                    try {
-                      if (widget.auth.session?.server.id == widget.server.id) {
-                        await PlayerWindowScope.maybeOf(context)?.close();
-                        await widget.auth.logout();
-                      } else {
-                        await widget.auth.sources.logoutSource(
-                          widget.server.id,
-                        );
-                      }
-                      await widget.auth.refreshServers();
-                      if (mounted) (widget.onSignedOut ?? widget.onSaved)();
-                    } catch (failure) {
-                      if (mounted) {
-                        setState(
-                          () => error = serverOperationFailure(l, failure),
-                        );
-                      }
-                    } finally {
-                      if (mounted) setState(() => busy = false);
-                    }
-                  },
+            onPressed: busy ? null : signOut,
             child: Text(l.serversSignOut),
           ),
         ],

@@ -51,10 +51,10 @@ class ServerSelectionPage extends StatefulWidget {
   final bool phone;
   final Future<void> Function()? onEntered, onLineChanged;
   @override
-  State<ServerSelectionPage> createState() => _ServerSelectionPageState();
+  State<ServerSelectionPage> createState() => ServerSelectionPageState();
 }
 
-class _ServerSelectionPageState extends State<ServerSelectionPage> {
+class ServerSelectionPageState extends State<ServerSelectionPage> {
   final search = TextEditingController();
   final scroll = ScrollController();
   final Map<String, String> errors = {};

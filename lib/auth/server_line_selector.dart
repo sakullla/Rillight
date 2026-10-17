@@ -21,10 +21,10 @@ class ServerLineSelector extends StatefulWidget {
   final VoidCallback onBack;
   final Future<void> Function()? onChanged;
   @override
-  State<ServerLineSelector> createState() => _ServerLineSelectorState();
+  State<ServerLineSelector> createState() => ServerLineSelectorState();
 }
 
-class _ServerLineSelectorState extends State<ServerLineSelector> {
+class ServerLineSelectorState extends State<ServerLineSelector> {
   String? busy, error;
   final Map<String, ManualCheckResult> checks = {};
   final Set<String> expanded = {};
@@ -59,7 +59,12 @@ class _ServerLineSelectorState extends State<ServerLineSelector> {
       await widget.onChanged?.call();
     } catch (failure) {
       if (mounted) {
-        error = serverOperationFailure(AppLocalizations.of(context), failure);
+        final l = AppLocalizations.of(context);
+        error = serverOperationFailure(
+          l,
+          failure,
+          fallback: l.serversConnectionFailed,
+        );
       }
     } finally {
       if (mounted) setState(() => busy = null);

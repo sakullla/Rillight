@@ -101,6 +101,7 @@ const caseModules = <String>[
   'mobile/phone_player_cases.dart',
   'mobile/phone_player_interaction_cases.dart',
   'mobile/search_cached_refresh_cases.dart',
+  'mobile/tv_server_management_cases.dart',
   'mobile/tv_shelf_focus_cases.dart',
   'mobile/tv_shell_navigation_cases.dart',
   'player/android_seek_cancellation_cases.dart',
