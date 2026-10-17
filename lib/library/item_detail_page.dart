@@ -950,14 +950,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     bool fromBeginning = false,
   }) async {
     try {
+      final request = await DetailSourceScope.playbackRequest(context, itemId);
+      if (!mounted) return;
       await PlayerWindowScope.of(context).open(
         PlayerOpenRequest(
           itemId: itemId,
-          source: DetailSourceScope.command(context, itemId)?.source,
-          libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
-          regionGeneration: DetailSourceScope.maybeOf(context)
-              ?.permit
-              .regionGeneration,
+          source: request.source,
+          libraryId: request.libraryId,
+          regionGeneration: request.regionGeneration,
           autoResume: !fromBeginning && startPosition == null,
           mediaSourceId: _item?.id == itemId && _pickedMediaSource
               ? _mediaSourceId

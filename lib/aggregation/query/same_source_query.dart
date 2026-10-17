@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../auth/source_sessions.dart';
+import '../../library/local_session_permit.dart';
 import '../history/history_writer.dart';
 import 'aggregation_query.dart';
 
@@ -127,10 +128,12 @@ class SameSourceQueryController extends ChangeNotifier {
     if (origin.reference.account.region != scope.region) {
       throw ArgumentError('Cross-region comparison rejected');
     }
-    final permit = query.registry.permit(
+    final permit = permitForAccount(
+      query.registry,
       origin.reference.account,
       libraryId: origin.libraryId,
     );
+    if (permit == null) throw StateError('Source outside allowed scope');
     permit.requireValid();
     // Avoid replacing the origin's session when its service is also selected.
     query.useAccount(origin.reference.account, libraryId: origin.libraryId);
@@ -199,10 +202,12 @@ class SameSourceQueryController extends ChangeNotifier {
     final available = <EpisodeSource>[];
     var uncertainRows = false;
     try {
-      permit = query.registry.permit(
+      permit = permitForAccount(
+        query.registry,
         target.reference.account,
         libraryId: target.libraryId,
       );
+      if (permit == null) throw StateError('Source outside allowed scope');
       while (true) {
         if (!owns()) return;
         final page = await permit

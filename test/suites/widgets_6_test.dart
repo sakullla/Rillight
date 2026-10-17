@@ -15,16 +15,16 @@ void main() {
     caseEntrypoints['auth/login_widgets_cases.dart']!,
   );
   group(
-    'auth/provider_connect_routing_test.dart',
-    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
+    'auth/provider_connect_management_test.dart',
+    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
   );
   group(
     'library/source_detail_route_test.dart [part 3]',
     caseEntrypoints['library/source_detail_route_cases.dart#2']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
+    'mobile/tv_shelf_focus_test.dart',
+    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
   );
   group(
     'player/phone_presentation_lifecycle_test.dart',

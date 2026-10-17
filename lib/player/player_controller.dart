@@ -35,6 +35,7 @@ import '../auth/server_list_store.dart';
 import '../aggregation/history/history_writer.dart';
 import '../aggregation/identity/media_identity.dart';
 import '../aggregation/query/same_source_query.dart';
+import '../library/local_session_permit.dart';
 
 import 'package:rillight/player/playback_switch_preflight.dart';
 export 'package:rillight/player/playback_switch_preflight.dart';
@@ -2474,18 +2475,7 @@ class PlayerController extends ChangeNotifier {
     if (runtime != null && actual != null) {
       // Resolve the concrete next item again: version ids and library membership
       // do not carry over from the previous episode.
-      nextOrigin = await runtime!.resolve(
-        PlayerOpenRequest(
-          itemId: targetId,
-          source: SourceReference(
-            account: actual.source.account,
-            itemId: targetId,
-          ),
-          work: actual.work,
-          libraryId: actual.libraryId,
-          regionGeneration: actual.permit.regionGeneration,
-        ),
-      );
+      nextOrigin = await runtime!.resolveItem(actual, targetId);
       if (_disposed || _revoked || !identical(origin, actual)) return;
       if (nextOrigin.client.baseUrl != actual.client.baseUrl) {
         final lines = runtime!.registry
@@ -3585,6 +3575,14 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     final original = origin!;
+    final permit = permitForAccount(
+      runtime!.registry,
+      reference.account,
+      libraryId: candidate.source.libraryId,
+    );
+    if (permit == null || !permit.isValid) {
+      throw StateError('A permitted confirmed source is required');
+    }
     final target = await runtime!.resolve(
       PlayerOpenRequest(
         itemId: reference.itemId,
@@ -3592,9 +3590,7 @@ class PlayerController extends ChangeNotifier {
         work: candidate.source.reference.item,
         libraryId: candidate.source.libraryId,
         mediaSourceId: version,
-        regionGeneration: runtime!.registry
-            .permit(reference.account, libraryId: candidate.source.libraryId)
-            .regionGeneration,
+        regionGeneration: permit.regionGeneration,
       ),
     );
     await runtime!.requireEquivalent(

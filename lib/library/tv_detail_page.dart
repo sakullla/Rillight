@@ -99,15 +99,18 @@ class _TvDetailPageState extends State<TvDetailPage> {
       if (!mounted || !AuthScope.of(context).isLoggedIn) return;
       final target = c.playTarget;
       if (target == null) return;
+      final request = await DetailSourceScope.playbackRequest(
+        context,
+        target.id,
+      );
+      if (!mounted) return;
       await context.push(
         '/play/${target.id}',
         extra: PlayerOpenRequest(
           itemId: target.id,
-          source: DetailSourceScope.command(context, target.id)?.source,
-          libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
-          regionGeneration: DetailSourceScope.maybeOf(context)
-              ?.permit
-              .regionGeneration,
+          source: request.source,
+          libraryId: request.libraryId,
+          regionGeneration: request.regionGeneration,
           mediaSourceId: c.item?.isSeries == true ? null : c.mediaSourceId,
           autoResume: !fromStart,
         ),

@@ -116,32 +116,43 @@ class PlaybackRuntime {
     SourceReference? source = request.source;
     String? library = request.libraryId;
     if (source == null) {
-      final selected = auth.session?.server;
+      final selected = auth.session;
       if (selected == null) throw StateError('No selected source');
-      final allowed = registry
-          .project(selected.region)
-          .where((s) => s.id == selected.id && s.participates && s.scopeKnown);
-      if (allowed.length != 1 || allowed.single.libraryIds.isEmpty) {
-        throw StateError('Playback library scope is unknown or unavailable');
+      if (selected.server.region == AccessRegion.private &&
+          request.regionGeneration != registry.access.generation) {
+        throw StateError('Private playback route generation was revoked');
       }
-      // Acquiring an account does not select a media source or change auth.
-      final account = await registry.acquireAccount(
-        selected.id,
-        region: selected.region,
-        libraryId: allowed.single.libraryIds.first,
-      );
-      final permit = registry.permit(account);
+      // The selected server's login is independent of aggregation filters.
+      final account = (await registry.ensureSession(selected.server.id))
+          .account;
+      if (!identical(auth.session, selected) ||
+          account.userId != selected.userId ||
+          account.region != selected.server.region) {
+        throw StateError('Playback account changed');
+      }
+      final allowed = registry
+          .project(account.region)
+          .where(
+            (s) => s.id == selected.server.id && s.participates && s.scopeKnown,
+          )
+          .expand((s) => s.libraryIds)
+          .toSet();
+      final permit = registry.permit(account, sessionOnly: true);
       var item = await permit.dispatch((c) => c.getItem(request.itemId));
+      if (item.id != request.itemId) throw StateError('Source item mismatch');
+      library = item.hierarchyParentId ?? item.id;
       final visited = <String>{};
-      while (!allowed.single.libraryIds.contains(item.id)) {
+      // Keep a real aggregation library when it is an ancestor, but an item
+      // outside that browse filter still belongs to this authenticated server.
+      while (allowed.isNotEmpty && !allowed.contains(item.id)) {
         if (!visited.add(item.id) ||
             item.hierarchyParentId == null ||
             visited.length > 32) {
-          throw StateError('Cannot establish playback library membership');
+          break;
         }
         item = await permit.dispatch((c) => c.getItem(item.hierarchyParentId!));
       }
-      library = item.id;
+      if (allowed.contains(item.id)) library = item.id;
       source = SourceReference(
         account: account,
         itemId: request.itemId,
@@ -170,6 +181,7 @@ class PlaybackRuntime {
       throw StateError('Private playback route generation was revoked');
     }
     final item = await permit.dispatch((c) => c.getItem(source!.itemId));
+    if (item.id != source.itemId) throw StateError('Source item mismatch');
     // A library id supplied by a route/IPC message is not membership proof.
     final proofKey =
         '${source.account.configuredServerId}|${source.itemId}|$library';
@@ -215,6 +227,39 @@ class PlaybackRuntime {
     );
   }
 
+  /// A local playback boundary may be a season rather than a library. Rebase
+  /// it for a different episode, while resolve still verifies the same work,
+  /// account and concrete ancestry. Never revive a revoked playback lease.
+  Future<PlaybackOrigin> resolveItem(
+    PlaybackOrigin origin,
+    String itemId, {
+    String? mediaSourceId,
+  }) async {
+    origin.permit.requireValid();
+    var library = origin.libraryId;
+    if (itemId != origin.source.itemId && origin.permit.sessionOnly) {
+      final item = await origin.permit.dispatch((c) => c.getItem(itemId));
+      if (item.id != itemId) throw StateError('Source item mismatch');
+      library = item.hierarchyParentId ?? item.id;
+    }
+    final resolved = await resolve(
+      PlayerOpenRequest(
+        itemId: itemId,
+        source: SourceReference(
+          account: origin.source.account,
+          itemId: itemId,
+          mediaSourceId: mediaSourceId,
+        ),
+        work: origin.work,
+        libraryId: library,
+        mediaSourceId: mediaSourceId,
+        regionGeneration: origin.permit.regionGeneration,
+      ),
+    );
+    origin.permit.requireValid();
+    return resolved;
+  }
+
   PreferenceResolution preference(
     PlaybackOrigin origin,
     MediaItem item,
@@ -235,6 +280,7 @@ class PlaybackRuntime {
       owner: origin.work,
       region: origin.source.account.region,
       candidates: candidates,
+      playbackPermit: origin.permit,
     );
     final previous = result.preference;
     // This is an explicit concrete item from the same server's episode picker,
@@ -248,6 +294,7 @@ class PlaybackRuntime {
         owner: origin.work,
         region: origin.source.account.region,
         candidates: candidates,
+        playbackPermit: origin.permit,
         nextEpisode: true,
         episodeLookups: {
           origin.source.account: EpisodeLookup(

@@ -3,7 +3,6 @@ import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
@@ -848,7 +847,7 @@ void main() {
           expect(extra, isA<PlayerHostOpenItemCommand>());
           final command = extra! as PlayerHostOpenItemCommand;
           expect(command.itemId, 'person-ada');
-          expect(command.libraryId, 'view-movies');
+          expect(command.libraryId, isNull);
           expect(
             command.source?.account.configuredServerId,
             account.configuredServerId,

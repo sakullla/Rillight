@@ -100,25 +100,16 @@ GoRouter createAppRouter({
       } else if (playerState.uri.path.startsWith('/play/') &&
           request is PlayerOpenRequest &&
           request.source != null &&
-          request.source!.itemId == request.itemId &&
-          request.libraryId != null &&
-          request.libraryId!.isNotEmpty) {
-        try {
-          // Selected Auth owns catalog chrome, not an independent actual-source
-          // player. Losing B must not destroy A's still-authorized playback.
-          // Runtime still proves item ancestry; unknown/legacy routes get no
-          // exception to login and revoked A permits cannot use this path.
-          final permit = auth.sources.permit(
-            request.source!.account,
-            libraryId: request.libraryId,
-          );
-          authorizedPlayer =
-              permit.isValid &&
-              (request.source!.account.region != AccessRegion.private ||
-                  request.regionGeneration == permit.regionGeneration);
-        } catch (_) {
-          // Invalid account/scope is not an alternate authentication fallback.
-        }
+          request.source!.itemId == request.itemId) {
+        // Selected Auth owns catalog chrome, not an independent player.
+        // A live local session is enough; an unchecked parent folder must
+        // not bounce playback home. Runtime still proves item ancestry.
+        authorizedPlayer = localSessionAllowsRoute(
+          auth.sources,
+          request.source!.account,
+          libraryId: request.libraryId,
+          regionGeneration: request.regionGeneration,
+        );
       }
       if (!loggedIn &&
           !onConnect &&
@@ -142,14 +133,12 @@ GoRouter createAppRouter({
           (AppRoutes.isItem(state.uri.path) ||
               state.uri.path.startsWith('/shelf/') ||
               AppRoutes.isPerson(state.uri.path))) {
-        final permit = permitForAccount(
+        if (!localSessionAllowsRoute(
           auth.sources,
           command.source!.account,
           libraryId: command.libraryId,
-        );
-        if (permit == null ||
-            !permit.isValid ||
-            command.regionGeneration != permit.regionGeneration) {
+          regionGeneration: command.regionGeneration,
+        )) {
           return environment.isDesktop ? AppRoutes.aggregation : AppRoutes.home;
         }
       }
@@ -615,7 +604,6 @@ Widget _personWorks(GoRouterState state) {
   final source = command?.source;
   final libraryId = command?.libraryId?.trim() ?? '';
   if (source == null) return page;
-  if (libraryId.isEmpty) return const SizedBox.shrink();
   return ServerSessionImages(
     key: ValueKey((
       state.uri.toString(),
@@ -624,7 +612,7 @@ Widget _personWorks(GoRouterState state) {
       libraryId,
     )),
     account: source.account,
-    libraryId: libraryId,
+    libraryId: libraryId.isEmpty ? null : libraryId,
     child: page,
   );
 }

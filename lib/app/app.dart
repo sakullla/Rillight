@@ -17,6 +17,7 @@ import 'package:rillight/app/router.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/library/local_session_permit.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -417,21 +418,20 @@ class _PlayerWindowLayer extends StatelessWidget {
                             secondarySubtitleStreamIndex:
                                 request.secondarySubtitleStreamIndex,
                             onOpenItemDetail: (itemId, {seasonId, command}) {
-                              final permit = command?.source == null
-                                  ? null
-                                  : AuthScope.of(context).sources.permit(
-                                      command!.source!.account,
-                                      libraryId: command.libraryId,
-                                    );
+                              final account = command?.source?.account;
+                              final allowed =
+                                  account == null ||
+                                  localSessionAllowsRoute(
+                                    AuthScope.of(context).sources,
+                                    account,
+                                    libraryId: command?.libraryId,
+                                    regionGeneration: command?.regionGeneration,
+                                  );
                               unawaited(() async {
                                 await host.close();
-                                if (command != null &&
-                                    (permit?.isValid != true ||
-                                        permit?.regionGeneration !=
-                                            command.regionGeneration)) {
-                                  return;
-                                }
-                                if (request.source != null && command == null) {
+                                if (!allowed ||
+                                    (request.source != null &&
+                                        command == null)) {
                                   return;
                                 }
                                 router.push(

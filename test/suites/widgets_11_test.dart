@@ -19,8 +19,8 @@ void main() {
     caseEntrypoints['app/desktop_scroll_cases.dart']!,
   );
   group(
-    'auth/provider_connect_management_test.dart',
-    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
+    'auth/provider_connect_entry_user_agent_test.dart',
+    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
   );
   group(
     'catalog/item_detail_test.dart [part 2]',
@@ -31,8 +31,8 @@ void main() {
     caseEntrypoints['library/album_cases.dart']!,
   );
   group(
-    'mobile/tv_shelf_focus_test.dart',
-    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
+    'mobile/search_cached_refresh_test.dart',
+    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
   );
   group(
     'player/buffer_snapshot_test.dart',

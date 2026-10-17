@@ -772,10 +772,15 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     }
     final actual = _origin;
     if (actual != null) {
+      final account = command.source?.account;
+      // 库 id 和普通区代数可以和正在播放的来源不一致。私有区代数仍必须相同，
+      // 失效的播放许可也不能把详情交回主窗口。
+      final privateGenerationRejected =
+          account?.region == AccessRegion.private &&
+          command.regionGeneration != actual.permit.regionGeneration;
       if (!actual.permit.isValid ||
-          command.source?.account != actual.source.account ||
-          command.libraryId != actual.libraryId ||
-          command.regionGeneration != actual.permit.regionGeneration ||
+          account != actual.source.account ||
+          privateGenerationRejected ||
           command.itemId != actual.work.itemId) {
         return;
       }
@@ -910,16 +915,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           'sequence': sequence,
           'pending': true,
         });
-        final actual = await runtime!.resolve(
-          PlayerOpenRequest(
-            itemId: event['item'] as String,
-            source: decodeSource(
-              Map<String, dynamic>.from(event['source'] as Map),
-            ),
-            work: origin.work,
-            libraryId: origin.libraryId,
-            regionGeneration: origin.permit.regionGeneration,
-          ),
+        final actual = await runtime!.resolveItem(
+          origin,
+          event['item'] as String,
+          mediaSourceId: version,
         );
         final info = await actual.permit.dispatch(
           (_) => origin.client.getPlaybackInfo(itemId: actual.source.itemId),
@@ -1125,17 +1124,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               scope: QueryScope(region: actual.source.account.region),
             );
             actual.permit.requireValid();
-            final current = await runtime!.resolve(
-              PlayerOpenRequest(
-                itemId: command['item'] as String? ?? actual.source.itemId,
-                source: SourceReference(
-                  account: actual.source.account,
-                  itemId: command['item'] as String? ?? actual.source.itemId,
-                ),
-                work: actual.work,
-                libraryId: actual.libraryId,
-                regionGeneration: actual.permit.regionGeneration,
-              ),
+            final current = await runtime!.resolveItem(
+              actual,
+              command['item'] as String? ?? actual.source.itemId,
             );
             final currentDto = await current.permit.dispatch(
               (c) => c.getItem(current.source.itemId),
@@ -1244,33 +1235,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             query.dispose();
           }
         case 'authorizeItem':
-          await runtime!.resolve(
-            PlayerOpenRequest(
-              itemId: command['item'] as String,
-              source: SourceReference(
-                account: actual.source.account,
-                itemId: command['item'] as String,
-              ),
-              work: actual.work,
-              libraryId: actual.libraryId,
-              regionGeneration: actual.permit.regionGeneration,
-            ),
-          );
+          await runtime!.resolveItem(actual, command['item'] as String);
           actual.permit.requireValid();
         case 'inspect':
           final itemId = command['item'] as String;
-          final original = await runtime!.resolve(
-            PlayerOpenRequest(
-              itemId: itemId,
-              source: SourceReference(
-                account: actual.source.account,
-                itemId: itemId,
-              ),
-              work: actual.work,
-              libraryId: actual.libraryId,
-              regionGeneration: actual.permit.regionGeneration,
-            ),
-          );
+          final original = await runtime!.resolveItem(actual, itemId);
           final old = PlaybackOrigin(
             source: original.source,
             work: original.work,

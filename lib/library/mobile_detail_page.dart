@@ -209,6 +209,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     final controller = _controller;
     final item = controller?.item;
     if (controller == null || item == null) return;
+    final request = await DetailSourceScope.playbackRequest(context, itemId);
+    if (!mounted) return;
     final position = startPosition;
     if (position != null && position > Duration.zero) {
       // /play 目前只把 autoResume 交给播放页。在它读取起点前写上章节时间。
@@ -218,11 +220,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       '/play/$itemId',
       extra: PlayerOpenRequest(
         itemId: itemId,
-        source: DetailSourceScope.command(context, itemId)?.source,
-        libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
-        regionGeneration: DetailSourceScope.maybeOf(context)
-            ?.permit
-            .regionGeneration,
+        source: request.source,
+        libraryId: request.libraryId,
+        regionGeneration: request.regionGeneration,
         // The displayed first source is a default, not an explicit choice.
         // Only pin it when the user picked a version or one of its tracks on this page.
         mediaSourceId:

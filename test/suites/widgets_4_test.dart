@@ -15,10 +15,6 @@ void main() {
     caseEntrypoints['auth/phone_server_manager_cases.dart']!,
   );
   group(
-    'catalog/catalog_browse_test.dart',
-    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
-  );
-  group(
     'catalog/catalog_controller_test.dart',
     caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );
@@ -35,8 +31,8 @@ void main() {
     caseEntrypoints['mobile/phone_player_cases.dart#1']!,
   );
   group(
-    'player/subtitle_menu_test.dart',
-    caseEntrypoints['player/subtitle_menu_cases.dart']!,
+    'tv/tv_lan_pair_test.dart [part 3]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
   );
   group(
     'tv/tv_player_controls_test.dart',
@@ -45,5 +41,9 @@ void main() {
   group(
     'widgets/backdrop_scrim_test.dart',
     caseEntrypoints['widgets/backdrop_scrim_cases.dart']!,
+  );
+  group(
+    'widgets/desktop_back_button_test.dart',
+    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
   );
 }

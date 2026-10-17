@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../auth/source_sessions.dart';
+import '../../library/local_session_permit.dart';
 import '../../media_server/errors.dart';
 import '../history/history_writer.dart';
 import '../identity/media_identity.dart';
@@ -418,7 +419,10 @@ class AggregationQueryController extends ChangeNotifier {
   /// Reuse an already-authorized independent registry session (for detail
   /// opened from a query item). This does not attach a global auth client.
   void useAccount(SourceAccount account, {required String libraryId}) {
-    registry.permit(account, libraryId: libraryId).requireValid();
+    final permit = permitForAccount(registry, account, libraryId: libraryId);
+    if (permit == null || !permit.isValid) {
+      throw StateError('Source outside allowed scope');
+    }
     _accounts[account.configuredServerId] = account;
   }
 

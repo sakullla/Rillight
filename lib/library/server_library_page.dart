@@ -49,11 +49,21 @@ Future<void> openServerItem(
     );
   } catch (_) {
     if (!context.mounted) return;
+    int? generation;
+    try {
+      generation = registry.permit(account, sessionOnly: true).regionGeneration;
+    } catch (_) {
+      // No live session: the route gate keeps a sourced page from opening.
+    }
     final router = GoRouter.of(context);
     overlay?.close();
     router.push(
       location,
-      extra: PlayerHostOpenItemCommand(itemId: item.id, source: source),
+      extra: PlayerHostOpenItemCommand(
+        itemId: item.id,
+        source: source,
+        regionGeneration: generation,
+      ),
     );
   }
 }

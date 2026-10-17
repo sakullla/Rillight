@@ -468,7 +468,16 @@ class HistoryWriter implements Listenable {
     required Iterable<PreferenceCandidate> candidates,
     bool nextEpisode = false,
     Map<SourceAccount, EpisodeLookup> episodeLookups = const {},
+    OperationPermit? playbackPermit,
   }) {
+    playbackPermit?.requireValid();
+    bool localPlayback(PreferenceCandidate candidate) =>
+        playbackPermit != null &&
+        playbackPermit.account == owner.account &&
+        playbackPermit.account == candidate.source.account &&
+        playbackPermit.account.region == region &&
+        playbackPermit.libraryId == candidate.libraryId;
+
     bool confirmedEpisode(PreferenceCandidate candidate) {
       final lookup = episodeLookups[candidate.source.account];
       return lookup?.status == EpisodeLookupStatus.confirmed &&
@@ -480,7 +489,7 @@ class HistoryWriter implements Listenable {
         (c) =>
             c.source.mediaSourceId != null &&
             (!nextEpisode || confirmedEpisode(c)) &&
-            _allows(c.source, c.libraryId, region),
+            (localPlayback(c) || _allows(c.source, c.libraryId, region)),
       ),
     );
     final pref =

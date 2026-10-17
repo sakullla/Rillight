@@ -39,7 +39,7 @@ void main() {
     caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
   );
   group(
-    'widgets/app_empty_view_test.dart',
-    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
   );
 }

@@ -21,6 +21,10 @@ import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 
+import 'local_session_permit.dart';
+
+export 'local_session_permit.dart';
+
 /// A detail subtree owns a source lease, never another authentication authority.
 class DetailSourceScope extends InheritedWidget {
   const DetailSourceScope({
@@ -65,8 +69,15 @@ class DetailSourceScope extends InheritedWidget {
     final origin = scope.origin;
     origin.permit.requireValid();
     var libraryId = origin.libraryId;
-    if (!scope.hasLibraryBoundary) {
+    // 更多类似、演职员作品等不是当前条目。用它们自己的父级，
+    // 不要拿当前剧的库 id 去做成员校验。
+    final otherItem =
+        itemId != origin.source.itemId && itemId != origin.work.itemId;
+    if (!scope.hasLibraryBoundary || otherItem) {
       final item = await origin.permit.dispatch((c) => c.getItem(itemId));
+      if (item.id != itemId) {
+        throw StateError('Source item mismatch');
+      }
       libraryId = item.hierarchyParentId ?? item.id;
     }
     origin.permit.requireValid();
@@ -86,11 +97,12 @@ class DetailSourceScope extends InheritedWidget {
     final origin = maybeOf(context);
     if (origin == null) return null;
     origin.permit.requireValid();
+    final sameWork = id == origin.source.itemId || id == origin.work.itemId;
     return PlayerHostOpenItemCommand(
       itemId: id,
       seasonId: seasonId,
       source: SourceReference(account: origin.source.account, itemId: id),
-      libraryId: origin.libraryId,
+      libraryId: sameWork ? origin.libraryId : null,
       regionGeneration: origin.permit.regionGeneration,
     );
   }
@@ -169,23 +181,23 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
           command.source!.itemId != widget.itemId) {
         return;
       }
-      final permit = _permitFor(command);
-      if (permit == null ||
-          command.libraryId == null ||
-          command.regionGeneration != permit.regionGeneration) {
+      final account = command.source!.account;
+      // 普通区只要求当前会话仍有效。私有区代数不对时停在这里，不取条目。
+      if (!localSessionAllowsRoute(
+        widget.auth.sources,
+        account,
+        libraryId: command.libraryId,
+        regionGeneration: command.regionGeneration,
+      )) {
         return;
       }
+      final permit = _permitFor(command);
+      if (permit == null) return;
       permit.requireValid();
-      var item = await permit.dispatch((c) => c.getItem(widget.itemId));
-      final visited = <String>{};
-      while (item.id != command.libraryId) {
-        if (!visited.add(item.id) ||
-            item.hierarchyParentId == null ||
-            visited.length > 32) {
-          return;
-        }
-        item = await permit.dispatch((c) => c.getItem(item.hierarchyParentId!));
-      }
+      final item = await permit.dispatch((c) => c.getItem(widget.itemId));
+      if (item.id != widget.itemId) return;
+      final libraryId = await _libraryFor(permit, item, command.libraryId);
+      if (libraryId == null) return;
       final client = await permit.dispatch(
         (c) async => c.withRequestGuard(permit.requireValid),
       );
@@ -194,7 +206,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       _origin = PlaybackOrigin(
         source: command.source!,
         work: command.source!,
-        libraryId: command.libraryId!,
+        libraryId: libraryId,
         permit: permit,
         client: client,
       );
@@ -204,6 +216,36 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
     } finally {
       if (mounted) setState(() => _resolved = true);
     }
+  }
+
+  /// 当前剧的库 id 能沿父级走到时继续用它。更多类似往往不在那条链上，
+  /// 这时改用本条自己的父级，仍然只走这台服务器的会话。
+  Future<String?> _libraryFor(
+    OperationPermit permit,
+    MediaItem item,
+    String? claimedLibraryId,
+  ) async {
+    Future<bool> reaches(String libraryId) async {
+      var cursor = item;
+      final visited = <String>{};
+      while (cursor.id != libraryId) {
+        if (!visited.add(cursor.id) ||
+            cursor.hierarchyParentId == null ||
+            visited.length > 32) {
+          return false;
+        }
+        cursor = await permit.dispatch(
+          (c) => c.getItem(cursor.hierarchyParentId!),
+        );
+      }
+      return true;
+    }
+
+    final claimed = claimedLibraryId?.trim() ?? '';
+    if (claimed.isNotEmpty && await reaches(claimed)) return claimed;
+    final own = item.hierarchyParentId ?? item.id;
+    if (await reaches(own)) return own;
+    return null;
   }
 
   void _revoked(String serverId) {
@@ -309,10 +351,14 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   }
 
   bool _permitStillAllows(PlayerHostOpenItemCommand command) {
-    final permit = _permitFor(command);
-    return permit != null &&
-        permit.isValid &&
-        command.regionGeneration == permit.regionGeneration;
+    final account = command.source?.account;
+    if (account == null) return false;
+    return localSessionAllowsRoute(
+      widget.auth.sources,
+      account,
+      libraryId: command.libraryId,
+      regionGeneration: command.regionGeneration,
+    );
   }
 
   @override
@@ -366,23 +412,6 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         ],
       ),
     );
-  }
-}
-
-/// 范围许可失败时改用仍有效的会话许可。详情门的打开和后续检查共用这一规则。
-OperationPermit? permitForAccount(
-  SourceSessionRegistry registry,
-  SourceAccount account, {
-  String? libraryId,
-}) {
-  try {
-    return registry.permit(account, libraryId: libraryId);
-  } on StateError {
-    try {
-      return registry.permit(account, libraryId: libraryId, sessionOnly: true);
-    } on StateError {
-      return null;
-    }
   }
 }
 

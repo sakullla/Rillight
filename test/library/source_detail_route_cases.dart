@@ -30,6 +30,7 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/person_works_page.dart';
 import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -801,7 +802,8 @@ void main() {
             ),
             isEmpty,
           );
-          // A stale explicit command must stay denied, never render selected A.
+          // Ordinary generation drift still opens from server B.
+          // Selected Auth A must not receive the item request.
           router.go(
             AppRoutes.item('denied'),
             extra: PlayerHostOpenItemCommand(
@@ -811,13 +813,54 @@ void main() {
               regionGeneration: permit.regionGeneration + 1,
             ),
           );
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 100)),
+          );
           await settle(tester);
-          expect(find.byType(DetailSourceScope), findsNothing);
+          expect(find.byType(DetailSourceScope), findsOneWidget);
+          expect(find.text('b-denied-detail'), findsWidgets);
           expect(
             transport.requests.where(
-              (r) => r.uri.path.contains('/Items/denied'),
+              (r) => r.uri.path.contains('/Items/denied') && r.uri.host == 'a',
             ),
             isEmpty,
+          );
+          expect(
+            transport.requests.where(
+              (r) => r.uri.path.contains('/Items/denied') && r.uri.host == 'b',
+            ),
+            isNotEmpty,
+          );
+          // A live session opens the item when the route has no library id.
+          transport.requests.clear();
+          router.go(
+            AppRoutes.item('parent-only'),
+            extra: PlayerHostOpenItemCommand(
+              itemId: 'parent-only',
+              source: SourceReference(account: b, itemId: 'parent-only'),
+              regionGeneration: permit.regionGeneration,
+            ),
+          );
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 100)),
+          );
+          await settle(tester);
+          expect(find.byType(DetailSourceScope), findsOneWidget);
+          expect(
+            transport.requests.where(
+              (r) =>
+                  r.uri.path.contains('/Items/parent-only') &&
+                  r.uri.host == 'a',
+            ),
+            isEmpty,
+          );
+          expect(
+            transport.requests.where(
+              (r) =>
+                  r.uri.path.contains('/Items/parent-only') &&
+                  r.uri.host == 'b',
+            ),
+            isNotEmpty,
           );
           router.go(
             AppRoutes.item(id),
@@ -968,7 +1011,38 @@ void main() {
       await settle(tester);
       expect(router.state.uri.path, '/item/similar');
       expect(router.state.uri.queryParameters['showComparison'], '0');
+      expect(find.text('b-similar-detail'), findsWidgets);
       expect(find.text('查找同源'), findsNothing);
+      // A similar title does not belong to the current item's own id.
+      // It still opens on server B.
+      transport.requests.clear();
+      router.go(
+        AppRoutes.item('similar', showComparison: false),
+        extra: PlayerHostOpenItemCommand(
+          itemId: 'similar',
+          source: SourceReference(account: account, itemId: 'similar'),
+          libraryId: 'movie',
+          regionGeneration: permit.regionGeneration,
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await settle(tester);
+      expect(find.byType(DetailSourceScope), findsWidgets);
+      expect(find.text('b-similar-detail'), findsWidgets);
+      expect(
+        transport.requests.where(
+          (r) => r.uri.path.contains('/Items/similar') && r.uri.host == 'a',
+        ),
+        isEmpty,
+      );
+      expect(
+        transport.requests.where(
+          (r) => r.uri.path.contains('/Items/similar') && r.uri.host == 'b',
+        ),
+        isNotEmpty,
+      );
       expect(
         tester
             .widgetList<SourceDetailGate>(find.byType(SourceDetailGate))
@@ -976,6 +1050,23 @@ void main() {
             .showComparison,
         isFalse,
       );
+      final personCommand = DetailSourceScope.command(
+        tester.element(find.text('b-similar-detail').first),
+        'actor',
+      );
+      expect(personCommand?.source?.account, account);
+      expect(personCommand?.libraryId, isNull);
+      transport.requests.clear();
+      router.go(AppRoutes.person('actor'), extra: personCommand);
+      await settle(tester);
+      expect(find.byType(PersonWorksPage), findsOneWidget);
+      expect(
+        DetailSourceScope.maybeOf(tester.element(find.byType(PersonWorksPage)))
+            ?.source
+            .account,
+        account,
+      );
+      expect(transport.requests.where((r) => r.uri.host == 'a'), isEmpty);
       router.go(AppRoutes.item('movie'), extra: commandFor('movie'));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),

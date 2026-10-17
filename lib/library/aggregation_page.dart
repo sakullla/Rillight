@@ -319,19 +319,14 @@ class _AggregationPageState extends State<AggregationPage> {
     final query = _query;
     if (query == null) return;
     final command = widget.sourceCommand;
-    if (command?.source != null) {
-      try {
-        final permit = query.registry.permit(
+    if (command?.source != null &&
+        !localSessionAllowsRoute(
+          query.registry,
           command!.source!.account,
           libraryId: command.libraryId,
-        );
-        if (!permit.isValid ||
-            permit.regionGeneration != command.regionGeneration) {
-          return;
-        }
-      } catch (_) {
-        return;
-      }
+          regionGeneration: command.regionGeneration,
+        )) {
+      return;
     }
     _contributors
       ..clear()
@@ -965,9 +960,12 @@ class _AggregationPageState extends State<AggregationPage> {
 }
 
 void _resumeRecord(BuildContext context, WatchRecord record) {
-  final permit = AuthScope.of(context).sources
-      .permit(record.source.account, libraryId: record.libraryId);
-  if (!permit.isValid) return;
+  final permit = permitForAccount(
+    AuthScope.of(context).sources,
+    record.source.account,
+    libraryId: record.libraryId,
+  );
+  if (permit == null || !permit.isValid) return;
   final request = PlayerOpenRequest(
     itemId: record.source.itemId,
     source: record.source,
@@ -989,12 +987,12 @@ void _resumeRecord(BuildContext context, WatchRecord record) {
 }
 
 void _open(BuildContext context, QueryItem item) {
-  final registry = AuthScope.of(context).sources;
-  final permit = registry.permit(
+  final permit = permitForAccount(
+    AuthScope.of(context).sources,
     item.reference.account,
     libraryId: item.libraryId,
   );
-  if (!permit.isValid) return;
+  if (permit == null || !permit.isValid) return;
   SearchOverlayController.maybeOf(context)?.close();
   context.push(
     '/item/${Uri.encodeComponent(item.reference.itemId)}',
@@ -1111,8 +1109,12 @@ class _QueryCardState extends State<_QueryCard> {
   Future<void> _resolve() async {
     try {
       final item = widget.item;
-      final permit = AuthScope.of(context).sources
-          .permit(item.reference.account, libraryId: item.libraryId);
+      final permit = permitForAccount(
+        AuthScope.of(context).sources,
+        item.reference.account,
+        libraryId: item.libraryId,
+      );
+      if (permit == null) return;
       final client = await permit.dispatch(
         (c) async => c.withRequestGuard(permit.requireValid),
       );

@@ -15,6 +15,7 @@ import 'dart:io';
 
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/router.dart';
@@ -125,20 +126,26 @@ class _Client extends EmbyClient {
           ? 'CollectionFolder'
           : id.startsWith('episode')
           ? 'Episode'
-          : id == 'season'
+          : id == 'season' || id == 'season2'
           ? 'Season'
           : id == 'series'
           ? 'Series'
           : 'Movie',
       if (id.startsWith('episode')) ...{
         'SeriesId': 'series',
-        'SeasonId': 'season',
-        'ParentIndexNumber': 1,
+        'SeasonId': id == 'episode-next-season' ? 'season2' : 'season',
+        'ParentIndexNumber': id == 'episode-next-season' ? 2 : 1,
         'IndexNumber': id == 'episode1' ? 1 : 2,
       },
-      if (id == 'season') 'SeriesId': 'series',
+      if (id == 'season' || id == 'season2') 'SeriesId': 'series',
       if (id != 'library' && id != 'season' && id != 'episode-no-parent')
-        'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
+        'ParentId': id == 'episode-next-season'
+            ? 'season2'
+            : id == 'season2'
+            ? 'series'
+            : (id == 'foreign' || id == 'other')
+            ? 'other'
+            : 'library',
       'RunTimeTicks': 120 * kLegacyTicksPerSecond,
       'ProviderIds': {'Tmdb': '1'},
       if (catalogVersions)
@@ -405,6 +412,8 @@ void main() {
   Future<void> setup({
     bool private = false,
     String itemId = 'movie',
+    String libraryId = 'library',
+    bool scopeKnown = true,
     bool trackChoices = false,
     String? preferredSource,
     _Backend? videoBackend,
@@ -428,7 +437,7 @@ void main() {
             username: 'test',
             region: private ? AccessRegion.private : AccessRegion.ordinary,
             libraryIds: const ['library'],
-            scopeKnown: true,
+            scopeKnown: scopeKnown,
             lines: const [
               ServerLine(id: 'line', address: 'https://a'),
               ServerLine(id: 'wrong', address: 'https://wrong'),
@@ -497,8 +506,10 @@ void main() {
       progressInterval: const Duration(milliseconds: 30),
       openRequest: PlayerOpenRequest(
         itemId: itemId,
-        libraryId: 'library',
-        regionGeneration: registry.permit(account).regionGeneration,
+        libraryId: libraryId,
+        regionGeneration: registry
+            .permit(account, sessionOnly: true)
+            .regionGeneration,
         source: SourceReference(account: account, itemId: itemId),
       ),
     );
@@ -962,6 +973,159 @@ void main() {
     final session = await runtime.begin(origin, 'v');
     expect(session.permit.sessionOnly, isTrue);
   });
+
+  cases.test(
+    'local session keeps search and poster playback off the home redirect',
+    () async {
+      await setup();
+      // Search hits and poster play pass the immediate parent, which is often
+      // a folder or season rather than a checked library id.
+      expect(
+        localSessionAllowsRoute(
+          runtime.registry,
+          account,
+          libraryId: 'folder-not-checked',
+        ),
+        isTrue,
+      );
+      expect(
+        localSessionAllowsRoute(
+          runtime.registry,
+          account,
+          libraryId: 'library',
+          regionGeneration: null,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  for (final scope in ['empty', 'excluded', 'disabled', 'unknown']) {
+    cases.test(
+      'selected home playback ignores $scope aggregation scope',
+      () async {
+        await setup(scopeKnown: scope != 'unknown');
+        await auth.restore();
+        if (scope != 'unknown') {
+          await runtime.registry.configureScope(
+            'a',
+            participates: scope != 'disabled',
+            libraryIds: scope == 'excluded' ? {'other-library'} : {},
+          );
+        }
+        expect(auth.isLoggedIn, isTrue);
+        final origin = await runtime.resolve(
+          const PlayerOpenRequest(itemId: 'movie'),
+        );
+        expect(origin.source.account, account);
+        expect(origin.libraryId, 'library');
+        expect(origin.permit.sessionOnly, isTrue);
+        final session = await runtime.begin(origin, 'v');
+        expect(session.permit.isValid, isTrue);
+      },
+    );
+  }
+
+  for (final private in [false, true]) {
+    cases.test(
+      'season-scoped playback changes season on the same work private=$private',
+      () async {
+        await setup(
+          private: private,
+          itemId: 'episode-no-parent',
+          libraryId: 'season',
+        );
+        await controller.start();
+        expect(controller.error, isNull);
+        final first = controller.origin!;
+        expect(first.permit.sessionOnly, isTrue);
+        final next = await first.client.getItem('episode-next-season');
+        await controller.playEpisode(next);
+        expect(controller.itemId, next.id);
+        expect(controller.error, isNull);
+        expect(controller.origin!.libraryId, 'season2');
+        expect(controller.origin!.work, first.work);
+        expect(backend.openCount, 2);
+        await expectLater(
+          runtime.resolveItem(first, 'movie'),
+          throwsStateError,
+        );
+        if (private) {
+          await runtime.registry.access.lock();
+          final count = _Client.allItemRequests.length;
+          await expectLater(
+            runtime.resolveItem(first, next.id),
+            throwsStateError,
+          );
+          expect(_Client.allItemRequests.length, count);
+        }
+      },
+    );
+  }
+
+  cases.test(
+    'local season playback keeps a saved version from its checked library',
+    () async {
+      await setup(itemId: 'episode-no-parent', libraryId: 'season');
+      await runtime.history.savePreference(
+        SourcePreference(
+          owner: SourceReference(account: account, itemId: 'series'),
+          target: SourceReference(
+            account: account,
+            itemId: 'episode-no-parent',
+            mediaSourceId: 'v',
+          ),
+          libraryId: 'library',
+          settings: const PlayerSeriesPreference(mediaSourceName: 'v'),
+        ),
+      );
+      await controller.start();
+      expect(controller.error, isNull);
+      await controller.playEpisode(
+        await controller.client.getItem('episode-next-season'),
+      );
+      expect(controller.error, isNull);
+      expect(controller.resolved?.mediaSource.id, 'v');
+    },
+  );
+
+  cases.test(
+    'private playback route still rejects a stale or locked generation',
+    () async {
+      await setup(private: true);
+      final generation = runtime.registry
+          .permit(account, libraryId: 'library')
+          .regionGeneration;
+      expect(
+        localSessionAllowsRoute(
+          runtime.registry,
+          account,
+          libraryId: 'view-not-checked',
+          regionGeneration: generation,
+        ),
+        isTrue,
+      );
+      expect(
+        localSessionAllowsRoute(
+          runtime.registry,
+          account,
+          libraryId: 'library',
+          regionGeneration: generation + 1,
+        ),
+        isFalse,
+      );
+      await runtime.registry.access.lock();
+      expect(
+        localSessionAllowsRoute(
+          runtime.registry,
+          account,
+          libraryId: 'library',
+          regionGeneration: generation,
+        ),
+        isFalse,
+      );
+    },
+  );
 
   cases.test('membership proof is cached across repeated resolves', () async {
     await setup();
@@ -1802,6 +1966,25 @@ void main() {
     );
   }
 
+  cases.test('confirmed switch keeps a live session when the target library is not checked', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    final original = controller.origin;
+    final comparison = await candidate();
+    await runtime.registry.configureScope(
+      'b',
+      participates: true,
+      libraryIds: {},
+    );
+    await controller.switchConfirmedSource(comparison, 'v2');
+    expect(controller.trackFailure, isNull);
+    expect(controller.switchConfirmation, isNotNull);
+    expect(controller.origin, same(original));
+    expect(controller.error, isNull);
+  });
+
   cases.test('cross-server failed target keeps old history and restores original only under its permit', () async {
     await setup();
     await controller.start();
@@ -2211,6 +2394,52 @@ void main() {
     'timeline': const WatchTimeline(durationTicks: 120 * kLegacyTicksPerSecond)
         .toJson(),
   };
+
+  cases.test(
+    'desktop season-scoped player authorizes and records another season',
+    () async {
+      await setup(itemId: 'episode-no-parent', libraryId: 'season');
+      final ipc = _IpcControl();
+      await desktop(ipc);
+      final envelope = {
+        'pid': ipc.lastPid,
+        'source': encodeSource(controller.openRequest!.source!),
+        'generation': PlayerWindowLaunch.fromArguments(
+          ipc.spawnedArguments.single,
+        ).regionGeneration,
+      };
+      ipc.command = {
+        ...envelope,
+        'sequence': 1,
+        'action': 'authorizeItem',
+        'item': 'episode-next-season',
+      };
+      await _eventually(() => ipc.switchReply != null);
+      expect(ipc.switchReply!['accepted'], isTrue);
+      ipc.event = {
+        ...event(ipc, 1),
+        'source': encodeSource(
+          SourceReference(
+            account: account,
+            itemId: 'episode-next-season',
+            mediaSourceId: 'v',
+          ),
+        ),
+        'item': 'episode-next-season',
+      };
+      await _eventually(() => ipc.receipt != null);
+      expect(ipc.receipt!['accepted'], isTrue);
+      ipc.switchReply = null;
+      ipc.command = {
+        ...envelope,
+        'sequence': 2,
+        'action': 'authorizeItem',
+        'item': 'movie',
+      };
+      await _eventually(() => ipc.switchReply != null);
+      expect(ipc.switchReply!['accepted'], isFalse);
+    },
+  );
 
   cases.test('desktop main writer validates source/generation and rejects old IPC sequences', () async {
     await setup();
