@@ -7,8 +7,8 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'library/external_link_test.dart',
-    caseEntrypoints['library/external_link_cases.dart']!,
+    'auth/line_management_test.dart',
+    caseEntrypoints['auth/line_management_cases.dart']!,
   );
   group(
     'library/person_works_test.dart',
@@ -35,11 +35,11 @@ void main() {
     caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
   );
   group(
-    'mobile/search_cached_refresh_test.dart',
-    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
-  );
-  group(
     'tv/tv_lan_pair_test.dart [part 2]',
     caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
+  );
+  group(
+    'widgets/app_empty_view_test.dart',
+    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
   );
 }

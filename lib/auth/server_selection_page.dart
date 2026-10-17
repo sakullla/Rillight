@@ -64,6 +64,7 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
   final editorKey = GlobalKey<ServerEditorState>();
   final addKey = GlobalKey<ServerAddPanelState>();
   int entryRevision = 0;
+  String? pendingEntry;
   String step = 'list';
   SavedServer? target;
   String destination = 'enter';
@@ -79,6 +80,7 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
   Future<void> register() async {
     for (final server in widget.auth.savedServers) {
       await widget.auth.serverAccess.register(server);
+      await widget.auth.refreshAuthorization(server.id);
     }
     if (mounted) setState(() => ready = true);
   }
@@ -108,9 +110,7 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
   }
 
   void returnToList() {
-    entryRevision++;
-    widget.auth.serverEntry.cancel();
-    if (password?.isCompleted == false) password!.complete(null);
+    cancelEntry();
     if (step == 'list') {
       Navigator.of(context).pop();
       return;
@@ -133,13 +133,36 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
     });
   }
 
+  void cancelEntry() {
+    entryRevision++;
+    widget.auth.serverEntry.cancel();
+    if (password?.isCompleted == false) password!.complete(null);
+    if (pendingEntry != null) pending.remove(pendingEntry);
+    pendingEntry = null;
+  }
+
+  void showFlow(String next, {SavedServer? server}) {
+    cancelEntry();
+    setState(() {
+      target = server;
+      step = next;
+      unlockBusy = false;
+      unlockError = null;
+    });
+  }
+
+  Future<void> finishEntry() async {
+    final onEntered = widget.onEntered;
+    Navigator.of(context).pop();
+    await onEntered?.call();
+  }
+
   void open(SavedServer server, String next) {
-    target = server;
     if (!widget.auth.serverAccess.allows(server.id)) {
       unawaited(enter(server, next: next));
       return;
     }
-    setState(() => step = next);
+    showFlow(next, server: server);
   }
 
   Future<void> enter(
@@ -148,11 +171,11 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
     String? suppliedPassword,
   }) async {
     final l = AppLocalizations.of(context);
-    final revision = ++entryRevision;
+    cancelEntry();
+    final revision = entryRevision;
     var passwordRejected = false;
-    widget.auth.serverEntry.cancel();
-    if (password?.isCompleted == false) password!.complete(null);
     target = server;
+    pendingEntry = server.id;
     destination = next;
     setState(() {
       pending.add(server.id);
@@ -160,52 +183,58 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
       unlockError = null;
     });
     try {
-      final succeeded = await widget.auth.serverEntry.enter<String>(
-        server: server,
-        destination: next,
-        onPasswordRejected: () => passwordRejected = true,
-        requestPassword: () {
-          if (suppliedPassword != null) {
-            setState(() {
-              step = 'unlock';
-              unlockBusy = true;
-            });
-            return Future.value(suppliedPassword);
-          }
-          password = Completer<String?>();
+      Future<String?> requestPassword() {
+        if (suppliedPassword != null) {
           setState(() {
             step = 'unlock';
+            unlockBusy = true;
+          });
+          return Future.value(suppliedPassword);
+        }
+        password = Completer<String?>();
+        setState(() {
+          step = 'unlock';
+          unlockBusy = false;
+        });
+        return password!.future;
+      }
+
+      Future<bool> connect(void Function() guard) async {
+        guard();
+        await widget.auth.switchTo(server.id, guard: guard);
+        guard();
+        return widget.auth.session?.server.id == server.id &&
+            widget.auth.failure == null;
+      }
+
+      Future<void> navigate(String value) async {
+        if (!mounted) return;
+        if (value == 'enter') {
+          await finishEntry();
+        } else {
+          setState(() {
+            step = value;
             unlockBusy = false;
           });
-          return password!.future;
-        },
-        connect: (guard) async {
-          guard();
-          if (next == 'enter' || !widget.auth.serverAccess.allows(server.id)) {
-            await widget.auth.switchTo(server.id, guard: guard);
-            guard();
-            return widget.auth.session?.server.id == server.id &&
-                widget.auth.failure == null;
-          }
-          // Inspect/edit a protected server after a real connection preflight;
-          // do not alter the selected browsing server or close any player.
-          await widget.auth.sources.ensureSession(server.id);
-          guard();
-          return true;
-        },
-        navigate: (value) async {
-          if (!mounted) return;
-          if (value == 'enter') {
-            await widget.onEntered?.call();
-            if (mounted) Navigator.of(context).pop();
-          } else {
-            setState(() {
-              step = value;
-              unlockBusy = false;
-            });
-          }
-        },
-      );
+        }
+      }
+
+      final succeeded = next == 'enter'
+          ? await widget.auth.serverEntry.enter<String>(
+              server: server,
+              destination: next,
+              requestPassword: requestPassword,
+              connect: connect,
+              navigate: navigate,
+              onPasswordRejected: () => passwordRejected = true,
+            )
+          : await widget.auth.serverEntry.authorizeManagement<String>(
+              server: server,
+              destination: next,
+              requestPassword: requestPassword,
+              navigate: navigate,
+              onPasswordRejected: () => passwordRejected = true,
+            );
       if (!succeeded && mounted && revision == entryRevision) {
         if (step == 'unlock' && passwordRejected) {
           setState(() {
@@ -243,7 +272,12 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
         });
       }
     } finally {
-      if (mounted) setState(() => pending.remove(server.id));
+      if (mounted && revision == entryRevision) {
+        setState(() {
+          pending.remove(server.id);
+          pendingEntry = null;
+        });
+      }
     }
   }
 
@@ -263,12 +297,10 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
       return;
     }
     if (action == 'remove') {
-      setState(() {
-        target = server;
-        step = 'remove';
-      });
+      showFlow('remove', server: server);
       return;
     }
+    cancelEntry();
     final ids = widget.auth.savedServers.map((s) => s.id).toList();
     final index = ids.indexOf(server.id),
         next = ids.indexOf(server.id) + (action == 'up' ? -1 : 1);
@@ -342,8 +374,7 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
           onConnected: () async {
             await register();
             if (mounted) {
-              await widget.onEntered?.call();
-              if (context.mounted) Navigator.pop(context);
+              await finishEntry();
             }
           },
           onImport: () {
@@ -431,7 +462,7 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
           scroll: false,
           action: AppButton.icon(
             key: const Key('server-add'),
-            onPressed: () => setState(() => step = 'add'),
+            onPressed: () => showFlow('add'),
             icon: const Icon(AppIcons.add, size: 18),
             label: Text(l.addServer),
             variant: AppButtonVariant.filled,
@@ -508,6 +539,11 @@ class _ServerSelectionPageState extends State<ServerSelectionPage> {
                             ),
                             child: ServerSelectionTile(
                               server: server,
+                              needsLogin:
+                                  widget.auth.hasSavedAuthorization(
+                                    server.id,
+                                  ) ==
+                                  false,
                               focusNode: itemFocus.putIfAbsent(
                                 server.id,
                                 () => FocusNode(),

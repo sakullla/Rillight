@@ -373,6 +373,7 @@ class CaptureAdapter extends FakeEmbyAdapter {
   Completer<void>? catalogGate;
   Completer<void>? detailGate;
   bool failAggregationMirror = false;
+  bool failLineCheck = false;
   final artwork = <String, Uint8List>{};
 
   @override
@@ -381,6 +382,12 @@ class CaptureAdapter extends FakeEmbyAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (failLineCheck && options.uri.path.endsWith('/System/Info/Public')) {
+      throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionError,
+      );
+    }
     // Aliases in this fixture are routes to the same remote server and share
     // issued credentials; independent server identities remain isolated.
     for (final server in servers) {

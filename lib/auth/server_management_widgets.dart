@@ -20,21 +20,23 @@ String serverSafeAddress(String address) {
   ).toString();
 }
 
-String serverOperationFailure(AppLocalizations l, Object error) =>
-    switch (connectionFailure(error).kind) {
-      MediaServerFailureKind.invalidAddress => l.errorInvalidAddress,
-      MediaServerFailureKind.invalidCredentials =>
-        l.providerCredentialsRejected,
-      MediaServerFailureKind.sessionExpired ||
-      MediaServerFailureKind.authorizationExpired => l.serversCheckLogin,
-      MediaServerFailureKind.incompatibleServer => l.serversCheckIdentity,
-      MediaServerFailureKind.certificate => l.providerCertificateFailure,
-      MediaServerFailureKind.forbidden => l.providerPermissionDenied,
-      MediaServerFailureKind.rateLimited => l.providerRateLimited,
-      MediaServerFailureKind.timeout => l.errorTimeout,
-      MediaServerFailureKind.unreachable => l.errorUnreachable,
-      _ => l.serversSaveFailed,
-    };
+String serverOperationFailure(
+  AppLocalizations l,
+  Object error, {
+  String? fallback,
+}) => switch (connectionFailure(error).kind) {
+  MediaServerFailureKind.invalidAddress => l.errorInvalidAddress,
+  MediaServerFailureKind.invalidCredentials => l.providerCredentialsRejected,
+  MediaServerFailureKind.sessionExpired ||
+  MediaServerFailureKind.authorizationExpired => l.serversCheckLogin,
+  MediaServerFailureKind.incompatibleServer => l.serversCheckIdentity,
+  MediaServerFailureKind.certificate => l.providerCertificateFailure,
+  MediaServerFailureKind.forbidden => l.providerPermissionDenied,
+  MediaServerFailureKind.rateLimited => l.providerRateLimited,
+  MediaServerFailureKind.timeout => l.errorTimeout,
+  MediaServerFailureKind.unreachable => l.errorUnreachable,
+  _ => fallback ?? l.serversSaveFailed,
+};
 
 class ServerFeedback extends StatelessWidget {
   const ServerFeedback(this.message, {super.key, this.error = true});
@@ -107,6 +109,7 @@ class ServerSelectionTile extends StatelessWidget {
     this.busy = false,
     this.error,
     this.focusNode,
+    this.needsLogin = false,
     this.canMoveUp = false,
     this.canMoveDown = false,
   });
@@ -116,6 +119,7 @@ class ServerSelectionTile extends StatelessWidget {
   final ValueChanged<String> onAction;
   final String? error;
   final FocusNode? focusNode;
+  final bool needsLogin;
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), theme = AppUiTheme.of(context);
@@ -164,6 +168,8 @@ class ServerSelectionTile extends StatelessWidget {
                               Text(
                                 locked
                                     ? l.serversLocked
+                                    : needsLogin
+                                    ? l.serversNoAccount
                                     : '${server.username} · ${server.activeLine?.hostLabel ?? ''}',
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,

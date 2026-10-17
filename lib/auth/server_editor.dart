@@ -141,6 +141,8 @@ class ServerEditorState extends State<ServerEditor> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final protected = widget.auth.serverAccess.isProtected(widget.server.id);
+    final needsLogin =
+        widget.auth.hasSavedAuthorization(widget.server.id) == false;
     Widget body;
     var title = l.serversEdit;
     Widget? action;
@@ -312,11 +314,13 @@ class ServerEditorState extends State<ServerEditor> {
             title: l.serversAccount,
             children: [
               Text(
-                widget.auth.savedServers
-                        .where((s) => s.id == widget.server.id)
-                        .firstOrNull
-                        ?.username ??
-                    widget.server.username,
+                needsLogin
+                    ? l.serversNoAccount
+                    : widget.auth.savedServers
+                              .where((s) => s.id == widget.server.id)
+                              .firstOrNull
+                              ?.username ??
+                          widget.server.username,
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -343,13 +347,14 @@ class ServerEditorState extends State<ServerEditor> {
                           : () => setState(() => step = 'remotePassword'),
                       child: Text(l.serversRemotePassword),
                     ),
-                  AppButton(
-                    key: const Key('server-editor-logout'),
-                    onPressed: busy
-                        ? null
-                        : () => setState(() => step = 'logout'),
-                    child: Text(l.serversSignOut),
-                  ),
+                  if (!needsLogin)
+                    AppButton(
+                      key: const Key('server-editor-logout'),
+                      onPressed: busy
+                          ? null
+                          : () => setState(() => step = 'logout'),
+                      child: Text(l.serversSignOut),
+                    ),
                 ],
               ),
             ],

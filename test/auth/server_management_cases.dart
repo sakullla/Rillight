@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 
@@ -15,6 +18,7 @@ import 'server_ui_harness.dart';
 import '../helpers/cupertino_test_app.dart';
 
 import 'package:rillight/auth/server_password_form.dart';
+import 'package:rillight/auth/server_access.dart';
 
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -52,6 +56,50 @@ class _EditorFailingStore extends MemoryServerListStore {
   Future<void> save(ServerListSnapshot value) async {
     if (fail) throw StateError('synthetic disk failure');
     await super.save(value);
+  }
+}
+
+// UI orchestration tests use a deterministic verifier; real KDF/password
+// storage boundaries are covered in server_access_cases.dart.
+class _LocalVerifier extends ServerPasswordVerifier {
+  _LocalVerifier() : super(salt: const [], hash: const []);
+  @override
+  Future<bool> matches(String password) async => password == 'local';
+}
+
+class _RevokingAccess extends ServerAccessController {
+  _RevokingAccess()
+    : super(
+        store: MemoryServerAccessStore(),
+        createVerifier: (_) async => _LocalVerifier(),
+      );
+  @override
+  Future<ServerUnlockCandidate?> prepareUnlock(
+    String id,
+    String password,
+  ) async {
+    final candidate = await super.prepareUnlock(id, password);
+    lock(id);
+    return candidate;
+  }
+}
+
+class _EntryGateAdapter extends FakeEmbyAdapter {
+  _EntryGateAdapter(super.servers);
+  String? host;
+  final started = Completer<void>(), release = Completer<void>();
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? stream,
+    Future<void>? cancelled,
+  ) async {
+    if (options.uri.host == host &&
+        options.path.endsWith('/System/Info/Public')) {
+      if (!started.isCompleted) started.complete();
+      await release.future;
+    }
+    return super.fetch(options, stream, cancelled);
   }
 }
 
@@ -114,13 +162,221 @@ void main() {
   AuthController controller({
     CredentialStore? credentials,
     ServerListStore? servers,
+    ServerAccessController? access,
   }) {
     return AuthController(
       client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
       credentials: credentials ?? MemoryCredentialStore(),
       servers: servers ?? MemoryServerListStore(),
+      serverAccess: access,
     );
   }
+
+  test('revoked management candidate cannot reach a destination or publish content access', () async {
+    final access = _RevokingAccess();
+    final auth = controller(access: access);
+    addTearDown(auth.dispose);
+    final saved = _saved('protected', 'protected', ['https://protected.test']);
+    await access.register(saved);
+    await access.setPassword(saved.id, 'local', 'local');
+    var reached = false;
+    final accepted = await auth.serverEntry.authorizeManagement(
+      server: saved,
+      destination: 'edit',
+      requestPassword: () async => 'local',
+      navigate: (_) async {
+        reached = true;
+      },
+    );
+    expect(accepted, isFalse);
+    expect(reached, isFalse);
+    expect(access.allows(saved.id), isFalse);
+  });
+
+  for (final operation in ['edit', 'lines']) {
+    for (final offline in [false, true]) {
+      testWidgets(
+        'protected $operation management keeps current access and works offline=$offline',
+        (tester) async {
+          final access = ServerAccessController(
+            store: MemoryServerAccessStore(),
+            createVerifier: (_) async => _LocalVerifier(),
+          );
+          final auth = controller(access: access);
+          addTearDown(auth.dispose);
+          await tester.runAsync(() async {
+            for (final remote in [second, server]) {
+              await auth.connect(
+                address: remote.baseUrl.toString(),
+                username: 'alice',
+                password: 'correct-horse',
+              );
+              final saved = auth.session!.server;
+              await access.register(saved);
+              await access.setPassword(
+                saved.id,
+                'local',
+                'local',
+                persistReference: (ref) =>
+                    auth.sources.persistProtectionReference(saved.id, ref),
+              );
+            }
+            await auth.refreshServers();
+            await access.unlock(auth.session!.server.id, 'local');
+          });
+          final current = auth.session!.server.id;
+          final other = auth.savedServers.firstWhere((s) => s.id != current);
+          final permit = access.permit(current)!;
+          if (offline) second.publicInfoStatus = 503;
+          final beforeRequests = second.requests.length;
+          await pumpServerSelection(tester, auth);
+          if (operation == 'edit') {
+            await openServerEditor(tester, other.id);
+          } else {
+            await serverUiTap(tester, Key('server-lines-${other.id}'));
+          }
+          await tester.enterText(
+            find.byKey(const Key('server-unlock-password')),
+            'local',
+          );
+          await serverUiTap(tester, const Key('server-unlock-submit'));
+          expect(
+            find.byKey(
+              Key(
+                operation == 'edit' ? 'server-editor-name' : 'server-line-auto',
+              ),
+            ),
+            findsOneWidget,
+          );
+          expect(auth.session!.server.id, current);
+          expect(permit.isValid, isTrue);
+          expect(access.allows(other.id), isFalse);
+          expect(
+            second.requests.length,
+            beforeRequests,
+            reason: 'Local management authorization must not require remote connectivity',
+          );
+          if (operation == 'edit') {
+            await tester.enterText(
+              find.byKey(const Key('server-editor-name')),
+              'discard me',
+            );
+          }
+          await serverUiTap(tester, const Key('server-flow-back'));
+          expect(auth.sources.server(other.id).displayName, other.displayName);
+          expect(auth.session!.server.id, current);
+          expect(permit.isValid, isTrue);
+          expect(access.allows(other.id), isFalse);
+        },
+        tags: ['integration'],
+      );
+    }
+  }
+
+  for (final operation in ['edit', 'lines', 'add', 'remove']) {
+    testWidgets(
+      'opening $operation supersedes a delayed server entry without discarding the new flow',
+      (tester) async {
+        final gate = _EntryGateAdapter([server, second]);
+        adapter = gate;
+        final auth = controller();
+        addTearDown(auth.dispose);
+        await tester.runAsync(() async {
+          for (final remote in [server, second]) {
+            await auth.connect(
+              address: remote.baseUrl.toString(),
+              username: 'alice',
+              password: 'correct-horse',
+            );
+          }
+        });
+        final current = auth.session!.server.id;
+        final oldTarget = auth.savedServers.firstWhere((s) => s.id != current);
+        await pumpServerSelection(tester, auth);
+        gate.host = server.baseUrl.host;
+        await tester.tap(find.byKey(Key('server-enter-${oldTarget.id}')));
+        for (var i = 0; i < 30 && !gate.started.isCompleted; i++) {
+          await tester.pump(const Duration(milliseconds: 10));
+        }
+        expect(gate.started.isCompleted, isTrue);
+        if (operation == 'edit') {
+          await openServerEditor(tester, current);
+          await tester.enterText(
+            find.byKey(const Key('server-editor-name')),
+            'my pending draft',
+          );
+        } else if (operation == 'lines') {
+          await serverUiTap(tester, Key('server-lines-$current'));
+        } else if (operation == 'add') {
+          await serverUiTap(tester, const Key('server-add'));
+        } else {
+          await serverUiTap(tester, Key('server-more-$current'));
+          await serverUiTap(tester, Key('server-action-remove-$current'));
+        }
+        await tester.runAsync(() async {
+          gate.release.complete();
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
+        await settle(tester);
+        final key = switch (operation) {
+          'edit' => 'server-editor-name',
+          'lines' => 'server-line-auto',
+          'add' => 'server-add-paste',
+          _ => 'server-remove-confirm',
+        };
+        expect(find.byKey(Key(key)), findsOneWidget);
+        if (operation == 'edit') {
+          expect(
+            tester.widget<AppTextField>(find.byKey(Key(key))).controller!.text,
+            'my pending draft',
+          );
+        }
+        expect(auth.session!.server.id, current);
+        expect(auth.failure, isNull);
+        expect(
+          auth.sources.server(current).displayName,
+          isNot('my pending draft'),
+        );
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+  }
+
+  testWidgets(
+    'logging out a noncurrent account shows login needed in list and editor',
+    (tester) async {
+      final auth = controller();
+      addTearDown(auth.dispose);
+      await tester.runAsync(() async {
+        for (final remote in [second, server]) {
+          await auth.connect(
+            address: remote.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+        }
+      });
+      final current = auth.session!.server.id;
+      final other = auth.savedServers.firstWhere((s) => s.id != current);
+      await pumpServerSelection(tester, auth);
+      expect(auth.hasSavedAuthorization(other.id), isTrue);
+      await openServerEditor(tester, other.id);
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
+      await tester.tap(find.text('open-servers'));
+      await settle(tester);
+      expect(auth.session!.server.id, current);
+      expect(auth.hasSavedAuthorization(current), isTrue);
+      expect(auth.hasSavedAuthorization(other.id), isFalse);
+      expect(find.text('尚未登录'), findsOneWidget);
+      await openServerEditor(tester, other.id);
+      expect(find.text('尚未登录'), findsOneWidget);
+      expect(find.byKey(const Key('server-editor-account')), findsOneWidget);
+      expect(find.byKey(const Key('server-editor-logout')), findsNothing);
+    },
+    tags: ['integration'],
+  );
 
   test('password and editor configuration commit together and preserve the old state on save failure', () async {
     final store = _EditorFailingStore();

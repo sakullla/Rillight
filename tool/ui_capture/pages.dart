@@ -511,7 +511,7 @@ extension PageCaptures on CaptureSession {
       }
     }
     if (wants('search')) await searchPages(app);
-    if (wants('servers')) await serverPages(app, auth);
+    if (wants('servers')) await serverPages(app, auth, adapter);
     if (platform != 'tv' && wants('settings')) await settingsPages(app);
     if (wants('person')) await personPages(app, server, adapter);
   }
@@ -648,13 +648,17 @@ extension PageCaptures on CaptureSession {
     if (platform == 'desktop') await tap(SearchOverlay.closeKey);
   }
 
-  Future<void> serverPages(RillightApp app, AuthController auth) async {
+  Future<void> serverPages(
+    RillightApp app,
+    AuthController auth,
+    CaptureAdapter adapter,
+  ) async {
     await route(app, '/', 'server-entry');
     final server = auth.session!.server;
     final id = server.id;
     final lineId = server.activeLineId!;
     if (platform != 'tv') {
-      await _modernServerPages(app, auth, id, lineId);
+      await _modernServerPages(app, auth, id, lineId, adapter);
       await _backupImportStates(app, auth);
       return;
     } else {
@@ -702,6 +706,7 @@ extension PageCaptures on CaptureSession {
     AuthController auth,
     String id,
     String lineId,
+    CaptureAdapter adapter,
   ) async {
     Future<void> open() async {
       if (platform == 'desktop') {
@@ -724,6 +729,34 @@ extension PageCaptures on CaptureSession {
     await save('server-manager');
     await tap(Key('server-lines-$id'));
     await save('server-line-selector');
+    const checkStates = [
+      'server-check-certificate',
+      'server-check-permission',
+      'server-check-login',
+      'server-check-offline',
+    ];
+    if (checkStates.any(shouldCapture)) {
+      final remote = adapter.servers.firstWhere(
+        (s) => s.baseUrl.toString() == auth.session!.server.baseUrl,
+      );
+      await tap(Key('server-line-details-$lineId'));
+      for (final state in checkStates) {
+        if (!shouldCapture(state)) continue;
+        adapter.certificateError = state == 'server-check-certificate';
+        adapter.failLineCheck = state == 'server-check-offline';
+        remote.publicInfoStatus = state == 'server-check-permission'
+            ? 403
+            : state == 'server-check-login'
+            ? 401
+            : null;
+        await tap(Key('server-line-check-$lineId'));
+        await save(state);
+      }
+      adapter.certificateError = false;
+      adapter.failLineCheck = false;
+      remote.publicInfoStatus = null;
+      await tap(Key('server-line-check-$lineId'));
+    }
     await back();
     await edit();
     await save('server-editor');
@@ -774,6 +807,20 @@ extension PageCaptures on CaptureSession {
     await save('server-paste-preview');
     await back();
     await back();
+    if (shouldCapture('server-needs-login') ||
+        shouldCapture('server-account-needs-login')) {
+      final other = auth.savedServers.last;
+      await tap(Key('server-more-${other.id}'));
+      await tap(Key('server-action-edit-${other.id}'));
+      await tap(const Key('server-editor-logout'));
+      await tap(const Key('server-logout-confirm'));
+      await open();
+      await save('server-needs-login');
+      await tap(Key('server-more-${other.id}'));
+      await tap(Key('server-action-edit-${other.id}'));
+      await save('server-account-needs-login');
+      await back();
+    }
     if ([
       'server-locked-list',
       'server-unlock',

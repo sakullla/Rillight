@@ -59,6 +59,7 @@ import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
+import '../auth/server_ui_harness.dart';
 
 void main() {
   setUp(isolateImageCache);
@@ -194,6 +195,40 @@ void main() {
     expect(find.byType(TvDetailPage, skipOffstage: false), findsNothing);
     expect(find.byType(TvPlayerPage, skipOffstage: false), findsNothing);
   }
+
+  cases.testWidgets(
+    'phone mine enters another server home while line-only selection stays on mine',
+    (tester) async {
+      final first = FakeEmbyServer();
+      final second = FakeEmbyServer(
+        serverId: 'another-server',
+        baseUrl: Uri.parse('http://another.test:8096'),
+      );
+      final (app, _) = await start(
+        tester,
+        first,
+        extraServers: [second],
+        signedIn: true,
+      );
+      final current = app.auth.session!.server.id;
+      final target = app.auth.savedServers.firstWhere((s) => s.id != current);
+      app.router.go(AppRoutes.mine);
+      await settle(tester);
+      await tester.tap(find.byKey(PhoneMinePage.lineKey));
+      await settle(tester);
+      await serverUiTap(tester, Key('server-lines-$current'));
+      await serverUiTap(tester, const Key('server-line-auto'));
+      expect(app.router.state.uri.path, AppRoutes.mine);
+      await serverUiTap(tester, const Key('server-flow-back'));
+      await serverUiTap(tester, Key('server-enter-${target.id}'));
+      expect(app.router.state.uri.path, AppRoutes.home);
+      expect(app.auth.session!.server.id, target.id);
+      expect(find.byType(PhoneMinePage), findsNothing);
+      expect(find.byType(MobileShell), findsOneWidget);
+      expect(find.byKey(const Key('server-search')), findsNothing);
+    },
+    tags: ['integration'],
+  );
 
   cases.testWidgets(
     'only a real return from background reloads the home catalog',

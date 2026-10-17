@@ -35,12 +35,21 @@ import '../helpers/image_cache_fixture.dart';
 class _SameServerAdapter extends FakeEmbyAdapter {
   _SameServerAdapter(this.endpoints) : super(endpoints);
   final List<FakeEmbyServer> endpoints;
+  bool offline = false;
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
     Stream<Uint8List>? stream,
     Future<void>? cancelled,
   ) {
+    if (offline) {
+      return Future.error(
+        DioException(
+          requestOptions: options,
+          type: DioExceptionType.connectionError,
+        ),
+      );
+    }
     for (final server in endpoints) {
       server.issuedTokens.addAll(
         endpoints
@@ -61,6 +70,70 @@ const _device = ClientDeviceInfo(
 );
 
 void main() {
+  for (final failure in [
+    'certificate',
+    'forbidden',
+    'sessionExpired',
+    'unreachable',
+    'unknown',
+  ]) {
+    testWidgets(
+      'manual line check presents and retains $failure then clears it on recovery',
+      (tester) async {
+        final remote = FakeEmbyServer();
+        final adapter = _SameServerAdapter([remote]);
+        final auth = AuthController.memory(
+          client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+        );
+        addTearDown(auth.dispose);
+        await tester.runAsync(
+          () => auth.connect(
+            address: remote.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          ),
+        );
+        final id = auth.session!.server.id,
+            lineId = auth.session!.server.activeLineId!;
+        await pumpServerSelection(tester, auth);
+        await serverUiTap(tester, Key('server-lines-$id'));
+        await serverUiTap(tester, Key('server-line-details-$lineId'));
+        adapter.certificateError = failure == 'certificate';
+        adapter.offline = failure == 'unreachable';
+        remote.publicInfoStatus = switch (failure) {
+          'forbidden' => 403,
+          'sessionExpired' => 401,
+          'unknown' => 503,
+          _ => null,
+        };
+        await serverUiTap(tester, Key('server-line-check-$lineId'));
+        final label = switch (failure) {
+          'certificate' => '服务器证书校验失败，请检查服务器配置。',
+          'forbidden' => '当前账号无权访问，请检查共享权限或重新授权。',
+          'sessionExpired' => '请重新登录',
+          'unreachable' => '无法连接服务器',
+          _ => '连接失败，可重试或换线',
+        };
+        expect(find.textContaining(label), findsWidgets);
+        expect(find.textContaining('检查于'), findsWidgets);
+        final stored = auth.savedServers.single.lines.single;
+        expect(ServerLine.fromJson(stored.toJson()).checkFailureKind, failure);
+        expect(auth.session!.server.id, id);
+        await serverUiTap(tester, const Key('server-flow-back'));
+        await serverUiTap(tester, Key('server-lines-$id'));
+        expect(find.textContaining(label), findsWidgets);
+        await serverUiTap(tester, Key('server-line-details-$lineId'));
+        adapter.certificateError = false;
+        adapter.offline = false;
+        remote.publicInfoStatus = null;
+        await serverUiTap(tester, Key('server-line-check-$lineId'));
+        expect(find.textContaining(label), findsNothing);
+        expect(find.textContaining('连接正常'), findsWidgets);
+        expect(auth.savedServers.single.lines.single.checkFailureKind, isNull);
+      },
+      tags: ['integration'],
+    );
+  }
   // ---------- controller: add / edit / delete lines ----------
 
   FakeEmbyServer line(String host) {
@@ -521,10 +594,14 @@ void main() {
           serverId: lan.serverId,
           baseUrl: Uri.parse('http://draft-wan.test:8096'),
         );
+        final moved = FakeEmbyServer(
+          serverId: lan.serverId,
+          baseUrl: Uri.parse('http://draft-moved.test:8096'),
+        );
         final auth = AuthController.memory(
           client: EmbyClient(
             device: _device,
-            dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
+            dio: dioForFakeEmby(_SameServerAdapter([lan, wan, moved])),
           ),
         );
         addTearDown(auth.dispose);
@@ -562,6 +639,67 @@ void main() {
         expect(find.byKey(const Key('server-editor-add-line')), findsNothing);
         await serverUiTap(tester, const Key('server-line-auto'));
         expect(auth.savedServers.single.lineSelection.isAutomatic, isTrue);
+
+        // Existing current-line edits stay drafts until impact confirmation.
+        await serverUiTap(tester, const Key('server-flow-back'));
+        final activeId = auth.savedServers.single.activeLineId!;
+        Future<void> editCurrent() async {
+          await openServerEditor(tester, id);
+          await serverUiTap(tester, Key('server-editor-line-$activeId'));
+          await tester.enterText(
+            find.byKey(const Key('server-line-address')),
+            moved.baseUrl.toString(),
+          );
+          await serverUiTap(tester, const Key('server-line-done'));
+          await serverUiTap(tester, const Key('server-editor-save'));
+        }
+
+        await editCurrent();
+        expect(find.byKey(const Key('server-impact-confirm')), findsOneWidget);
+        expect(auth.client.baseUrl, lan.baseUrl);
+        await serverUiTap(tester, const Key('server-flow-back'));
+        expect(find.text(moved.baseUrl.toString()), findsOneWidget);
+        await serverUiTap(tester, const Key('server-flow-back'));
+        expect(
+          auth.savedServers.single.activeLine!.address,
+          lan.baseUrl.toString(),
+        );
+
+        await editCurrent();
+        moved.publicInfoStatus = 503;
+        await serverUiTap(tester, const Key('server-impact-confirm'));
+        expect(auth.client.baseUrl, lan.baseUrl);
+        expect(find.text(moved.baseUrl.toString()), findsOneWidget);
+        expect(find.byKey(const Key('server-editor-save')), findsOneWidget);
+        moved.publicInfoStatus = null;
+        await serverUiTap(tester, const Key('server-editor-save'));
+        await serverUiTap(tester, const Key('server-impact-confirm'));
+        expect(auth.client.baseUrl, moved.baseUrl);
+        expect(auth.savedServers.single.activeLineId, activeId);
+
+        // Removing a standby line is draft-only; after save the final line's
+        // menu cannot remove it (desktop keyboard and phone share this control).
+        await openServerEditor(tester, id);
+        final standbyId = auth.savedServers.single.lines
+            .firstWhere((l) => l.id != activeId)
+            .id;
+        await serverUiTap(tester, Key('server-editor-line-more-$standbyId'));
+        await tester.tap(find.text('移除这条线路'));
+        await settle(tester);
+        expect(auth.savedServers.single.lines, hasLength(2));
+        expect(find.byKey(Key('server-editor-line-$standbyId')), findsNothing);
+        await serverUiTap(tester, const Key('server-editor-save'));
+        expect(auth.savedServers.single.lines, hasLength(1));
+        expect(auth.client.baseUrl, moved.baseUrl);
+        await openServerEditor(tester, id);
+        expect(
+          tester
+              .widget<AppMenuButton<String>>(
+                find.byKey(Key('server-editor-line-more-$activeId')),
+              )
+              .onSelected,
+          isNull,
+        );
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],

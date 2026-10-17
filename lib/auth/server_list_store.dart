@@ -76,10 +76,12 @@ class ServerLine {
     required this.address,
     this.nickname,
     this.checkStatus = 'unknown',
+    this.checkFailureKind,
     this.checkedAt,
   });
 
   final String checkStatus;
+  final String? checkFailureKind;
   final DateTime? checkedAt;
 
   final String? nickname;
@@ -100,6 +102,7 @@ class ServerLine {
     'address': address,
     if (nickname != null) 'nickname': nickname,
     'checkStatus': checkStatus,
+    if (checkFailureKind != null) 'checkFailureKind': checkFailureKind,
     'checkedAt': checkedAt?.toIso8601String(),
   };
 
@@ -118,6 +121,7 @@ class ServerLine {
       nickname: _storedString(json, 'nickname'),
       checkStatus:
           _storedString(json, 'checkStatus', nullable: false) ?? 'unknown',
+      checkFailureKind: _storedString(json, 'checkFailureKind'),
       checkedAt: _storedDate(json, 'checkedAt'),
     );
   }
@@ -127,12 +131,18 @@ class ServerLine {
     String? address,
     String? nickname,
     String? checkStatus,
+    String? checkFailureKind,
     DateTime? checkedAt,
   }) {
     return ServerLine(
       id: id ?? this.id,
       address: address ?? this.address,
       nickname: nickname ?? this.nickname,
+      checkFailureKind:
+          checkFailureKind ??
+          (checkStatus != null || address != null && address != this.address
+              ? null
+              : this.checkFailureKind),
       checkStatus:
           checkStatus ??
           (address != null && address != this.address

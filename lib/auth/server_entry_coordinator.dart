@@ -17,6 +17,42 @@ class ServerEntryCoordinator {
     required Future<bool> Function(void Function() guard) connect,
     required Future<void> Function(T destination) navigate,
     void Function()? onPasswordRejected,
+  }) => _authorize(
+    server: server,
+    destination: destination,
+    requestPassword: requestPassword,
+    connect: connect,
+    navigate: navigate,
+    onPasswordRejected: onPasswordRejected,
+    publishContentAccess: true,
+  );
+
+  /// Authorize only this management destination, including offline repair.
+  /// Never publishes a content permit or locks the currently used server.
+  Future<bool> authorizeManagement<T>({
+    required SavedServer server,
+    required T destination,
+    required Future<String?> Function() requestPassword,
+    required Future<void> Function(T destination) navigate,
+    void Function()? onPasswordRejected,
+  }) => _authorize(
+    server: server,
+    destination: destination,
+    requestPassword: requestPassword,
+    connect: (_) async => true,
+    navigate: navigate,
+    onPasswordRejected: onPasswordRejected,
+    publishContentAccess: false,
+  );
+
+  Future<bool> _authorize<T>({
+    required SavedServer server,
+    required T destination,
+    required Future<String?> Function() requestPassword,
+    required Future<bool> Function(void Function() guard) connect,
+    required Future<void> Function(T destination) navigate,
+    required bool publishContentAccess,
+    void Function()? onPasswordRejected,
   }) async {
     final revision = ++_revision;
     void guard() {
@@ -40,8 +76,11 @@ class ServerEntryCoordinator {
       }
       if (!await connect(guard)) return false;
       guard();
-      if (candidate != null && !access.commitUnlock(candidate)) return false;
-      access.didEnter(server.id);
+      if (candidate != null && !candidate.isValid) return false;
+      if (publishContentAccess) {
+        if (candidate != null && !access.commitUnlock(candidate)) return false;
+        access.didEnter(server.id);
+      }
       await navigate(destination);
       return true;
     } finally {

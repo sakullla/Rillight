@@ -2026,5 +2026,53 @@
       "desktop",
       "phone"
     ]
+  },
+  {
+    "id": "server-check-certificate",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-check-permission",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-check-login",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-check-offline",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-needs-login",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-account-needs-login",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
   }
 ]

@@ -301,6 +301,18 @@ class SourceSessionRegistry {
       value.cloudCredentialRef == server.cloudCredentialRef &&
       value.resourceCredentialRef == server.resourceCredentialRef;
 
+  /// Local authorization projection, independent of the selected browsing
+  /// session. This does not contact the server or grant content access.
+  Future<bool> hasStoredAuthorization(String id) async {
+    final server = _servers.where((s) => s.id == id).firstOrNull;
+    if (server == null) return false;
+    final value = await credentials.read(id);
+    return value != null &&
+        value.accessToken.isNotEmpty &&
+        value.userId.isNotEmpty &&
+        _credentialsMatch(server, value);
+  }
+
   List<SavedServer> _servers = [];
   String? _lastServerId;
   final Map<String, SourceSession> _sessions = {};
@@ -2409,6 +2421,7 @@ class SourceSessionRegistry {
               (l) => l.id == line.id
                   ? l.copyWith(
                       checkStatus: status.name,
+                      checkFailureKind: failureKind?.name,
                       checkedAt: result.checkedAt,
                     )
                   : l,

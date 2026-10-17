@@ -5,6 +5,8 @@ import 'auth_controller.dart';
 import 'server_flow_frame.dart';
 import 'server_list_store.dart';
 import 'server_management_widgets.dart';
+import 'source_sessions.dart';
+import '../media_server/errors.dart';
 
 class ServerLineSelector extends StatefulWidget {
   const ServerLineSelector({
@@ -24,7 +26,7 @@ class ServerLineSelector extends StatefulWidget {
 
 class _ServerLineSelectorState extends State<ServerLineSelector> {
   String? busy, error;
-  final Map<String, String> checks = {};
+  final Map<String, ManualCheckResult> checks = {};
   final Set<String> expanded = {};
   int revision = 0;
   @override
@@ -68,25 +70,40 @@ class _ServerLineSelectorState extends State<ServerLineSelector> {
     final l = AppLocalizations.of(context);
     setState(() => busy = line.id);
     try {
-      await widget.auth.sources.check(widget.serverId, lineId: line.id);
+      checks[line.id] = await widget.auth.sources.check(
+        widget.serverId,
+        lineId: line.id,
+      );
       await widget.auth.refreshServers();
     } catch (failure) {
-      checks[line.id] = serverOperationFailure(l, failure);
+      error = serverOperationFailure(l, failure);
     } finally {
       if (mounted) setState(() => busy = null);
     }
   }
 
   String status(AppLocalizations l, ServerLine line) {
-    final at = line.checkedAt?.toLocal();
+    final result = checks[line.id];
+    final at = (result?.checkedAt ?? line.checkedAt)?.toLocal();
     if (at == null) return l.serversNotChecked;
-    final label = switch (line.checkStatus) {
-      'success' || 'available' || 'online' => l.serversCheckPassed,
-      'identityMismatch' => l.serversCheckIdentity,
-      'needsLogin' => l.serversCheckLogin,
-      'unknown' => l.serversCheckUnknown,
-      _ => l.serversCheckFailed,
-    };
+    final failureKind =
+        result?.failureKind ??
+        MediaServerFailureKind.values
+            .where((kind) => kind.name == line.checkFailureKind)
+            .firstOrNull;
+    final label = failureKind != null
+        ? serverOperationFailure(
+            l,
+            MediaServerException(failureKind),
+            fallback: l.serversCheckFailed,
+          )
+        : switch (result?.status.name ?? line.checkStatus) {
+            'success' || 'available' || 'online' => l.serversCheckPassed,
+            'identityMismatch' => l.serversCheckIdentity,
+            'needsLogin' => l.serversCheckLogin,
+            'unknown' => l.serversCheckUnknown,
+            _ => l.serversCheckFailed,
+          };
     return '$label · ${l.serversCheckedAt} ${at.month}/${at.day} ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
   }
 
@@ -140,7 +157,7 @@ class _ServerLineSelectorState extends State<ServerLineSelector> {
                 ),
                 subtitle: Text(
                   actual == line.id
-                      ? l.serversActualLine
+                      ? '${l.serversActualLine}${line.checkedAt == null ? '' : '\n${status(l, line)}'}'
                       : line.checkedAt == null
                       ? l.serversNotChecked
                       : status(l, line),
@@ -171,10 +188,6 @@ class _ServerLineSelectorState extends State<ServerLineSelector> {
                     children: [
                       Text(serverSafeAddress(line.address)),
                       const SizedBox(height: 8),
-                      Text(
-                        checks[line.id] ?? status(l, line),
-                        style: AppUiTheme.of(context).textTheme.bodySmall,
-                      ),
                       AppButton(
                         key: Key('server-line-check-${line.id}'),
                         onPressed: busy == null ? () => check(line) : null,

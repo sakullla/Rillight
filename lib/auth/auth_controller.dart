@@ -143,11 +143,33 @@ class AuthController extends ChangeNotifier {
 
   String? _revokedSelectionId;
   bool _refreshingSelection = false;
+  final Map<String, bool> _savedAuthorization = {};
+  final Map<String, int> _authorizationReads = {};
+  bool? hasSavedAuthorization(String id) => _savedAuthorization[id];
+  Future<void> refreshAuthorization(String id) async {
+    final revision = (_authorizationReads[id] ?? 0) + 1;
+    _authorizationReads[id] = revision;
+    bool? available;
+    try {
+      available = await sources.hasStoredAuthorization(id);
+    } catch (_) {
+      // An unreadable credential store is unknown, not proof of logout.
+    }
+    if (_disposed || _authorizationReads[id] != revision) return;
+    if (available == null) {
+      _savedAuthorization.remove(id);
+    } else {
+      _savedAuthorization[id] = available;
+    }
+    notifyListeners();
+  }
 
   Future<void> refreshServers() async {
     final snapshot = await servers.load();
     if (_disposed) return;
     _savedServers = snapshot.servers;
+    await Future.wait(snapshot.servers.map((s) => refreshAuthorization(s.id)));
+    if (_disposed) return;
     final selected = _session;
     if (selected != null) {
       final current = _serverById(selected.server.id);
@@ -164,6 +186,7 @@ class AuthController extends ChangeNotifier {
   }
 
   void _sourceChanged(String id) {
+    if (!_disposed) unawaited(refreshAuthorization(id));
     if (_session?.server.id != id || _busy || _refreshingSelection) return;
     try {
       _selectionGuard?.call();
@@ -619,6 +642,11 @@ class AuthController extends ChangeNotifier {
       connectDraft = null;
     } catch (error) {
       if (!_ownsActivation(generation)) return;
+      try {
+        guard?.call();
+      } on StateError {
+        return;
+      }
       _failure = connectionFailure(error);
       if (lineId != null) {
         _lineSwitchFailure = LineSwitchFailure(
