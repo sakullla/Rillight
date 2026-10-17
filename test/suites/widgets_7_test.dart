@@ -7,39 +7,40 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/playback_runtime_test.dart [part 2]',
-    caseEntrypoints['aggregation/playback_runtime_cases.dart#1']!,
+    'app/desktop_performance_host_test.dart',
+    caseEntrypoints['app/desktop_performance_host_cases.dart']!,
+  );
+  group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
+  group(
+    'auth/library_counts_test.dart',
+    caseEntrypoints['auth/library_counts_cases.dart']!,
   );
   group(
-    'app/content_theme_test.dart',
-    caseEntrypoints['app/content_theme_cases.dart']!,
+    'auth/provider_connect_entry_user_agent_test.dart',
+    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
   );
   group(
-    'auth/change_password_test.dart',
-    caseEntrypoints['auth/change_password_cases.dart']!,
+    'home/home_page_test.dart',
+    caseEntrypoints['home/home_page_cases.dart']!,
   );
   group(
-    'home/shelf_hover_clip_test.dart',
-    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+    'mobile/phone_pages_test.dart [part 2]',
+    caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'library/episode_row_test.dart',
-    caseEntrypoints['library/episode_row_cases.dart']!,
+    'mobile/search_cached_refresh_test.dart',
+    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
   );
   group(
-    'mobile/detail_route_identity_test.dart',
-    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
+    'settings_page_test.dart',
+    caseEntrypoints['settings_page_cases.dart']!,
   );
   group(
-    'mobile/phone_pages_test.dart [part 1]',
-    caseEntrypoints['mobile/phone_pages_cases.dart#0']!,
+    'tv/tv_lan_pair_test.dart [part 1]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
   );
   group(
-    'player/player_cache_status_test.dart',
-    caseEntrypoints['player/player_cache_status_cases.dart']!,
-  );
-  group(
-    'player/player_controls_test.dart',
-    caseEntrypoints['player/player_controls_cases.dart']!,
+    'widgets/skeleton_test.dart',
+    caseEntrypoints['widgets/skeleton_cases.dart']!,
   );
 }

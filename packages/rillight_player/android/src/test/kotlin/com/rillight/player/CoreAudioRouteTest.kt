@@ -6,6 +6,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreAudioRouteTest {
+    @Test fun removedOrPartlyUnknownRouteCannotRetainCompressedOutput() {
+        val hdmi = RouteDevice(7, 8, setOf(12, 14))
+        assertEquals(AudioSinkCapability(2, 0, false),
+            routeCapability(emptyList(), setOf(7), 12, 14) { true })
+        assertEquals(AudioSinkCapability(2, 0, false),
+            routeCapability(listOf(hdmi), setOf(7, 8), 12, 14) { true })
+    }
+
     @Test fun routeRefreshCannotReenableARejectedFormatOnTheSameRoute() {
         val reported = AudioSinkCapability(6, 31, true)
         assertEquals(AudioSinkCapability(6, 30, false), reported.withoutFormats(1))

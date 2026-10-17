@@ -353,6 +353,27 @@ class PlayerController extends ChangeNotifier {
   /// 快照保留,交由宿主用主进程会话代发 Stopped。
   bool sessionExpired = false;
   int _reportFailureStreak = 0;
+  Map<String, Object?>? _lastProgressFailure;
+  Map<String, Object?>? _lastCleanupFailure;
+
+  /// Safe diagnostics: never include a server address, credential or raw error.
+  Map<String, Object?> get progressSyncDiagnostics => {
+    'failed': progressSyncFailed,
+    'persistent': progressSyncPersistent,
+    'lastFailure': _lastProgressFailure,
+    'pendingCleanupCount': _pendingResourceCleanup.length,
+    'lastCleanupFailure': _lastCleanupFailure,
+  };
+
+  Map<String, Object?> _syncFailure(String stage, Object? failure) => {
+    'stage': stage,
+    'kind': failure is MediaServerException
+        ? failure.kind.name
+        : failure is TimeoutException
+        ? 'timeout'
+        : 'local',
+    if (failure is MediaServerException) 'statusCode': failure.statusCode,
+  };
   bool _disposed = false;
   bool _sessionStarted = false;
   final PlaybackCoordinator _operations = PlaybackCoordinator();
@@ -782,8 +803,9 @@ class PlayerController extends ChangeNotifier {
         }
         _cleanupSnapshots.remove(lease);
       });
-    } catch (_) {
-      progressSyncFailed = true;
+    } catch (failure) {
+      // Cleanup has its own retry record; it does not undo reported progress.
+      _lastCleanupFailure = _syncFailure('release', failure);
       if (!_cleanupSnapshots.containsKey(lease)) {
         await _persistFailedPreparation(lease);
       }
@@ -1111,6 +1133,22 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> togglePlay() async {
+    final restoring = _restoring;
+    if (loading && restoring != null && !_backgroundReleased) {
+      final revision = _lifecycleRevision;
+      _playAfterRestore = true;
+      await restoring;
+      if (_playAfterRestore &&
+          revision == _lifecycleRevision &&
+          !_disposed &&
+          !loading &&
+          !_backgroundReleased &&
+          error == null) {
+        _playAfterRestore = false;
+        if (!isPlaying) await togglePlay();
+      }
+      return;
+    }
     if (loading || error != null || _backgroundReleased) {
       return;
     }
@@ -1137,10 +1175,18 @@ class PlayerController extends ChangeNotifier {
   }
 
   bool _backgroundReleased = false;
+  bool _playAfterRestore = false;
   Uri? _suspendedServer;
   String? _suspendedUser;
   String? _suspendedToken;
   int _suspendedTicks = 0;
+  PlaybackInfo? _lastPlaybackInfo;
+  PlaybackInfo? _suspendedPreparation;
+  List<PlaybackMediaSource>? _suspendedSources;
+  ResolvedPlayback? _suspendedPlayback;
+  Duration? _suspendedStreamOrigin;
+  int _openingStartTicks = 0;
+  bool _openingPositionObserved = false;
   bool _suspendedAtEnd = false;
   Future<void>? _suspending;
   Future<void>? _suspendRetirement;
@@ -1151,7 +1197,7 @@ class PlayerController extends ChangeNotifier {
   bool get backgroundReleased => _backgroundReleased;
 
   /// Android hosts call this on a real background transition, not rotation.
-  /// Release media promptly; the existing session owns bounded Stopped/reporting.
+  /// Pause a ready native session, retaining bounded cache when supported.
   Future<void> suspendPlayback() {
     _lifecycleRevision++;
     return _suspending ??= _suspendPlayback().whenComplete(
@@ -1161,16 +1207,45 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> _suspendPlayback() async {
     if (_disposed || _backgroundReleased) return;
+    _playAfterRestore = false;
     _backgroundReleased = true;
     _suspendedServer = client.baseUrl;
     _suspendedUser = client.userId;
     _suspendedToken = client.accessToken;
-    _suspendedTicks = ticksFromDuration(position);
+    _suspendedTicks = loading && !_openingPositionObserved
+        ? _openingStartTicks
+        : ticksFromDuration(position);
     _suspendedAtEnd = playbackEnded || state.phase == PlaybackPhase.ended;
+    final preparation = _lastPlaybackInfo;
+    final playback = resolved;
+    if (!loading &&
+        !_suspendedAtEnd &&
+        backend is VideoBackendSuspension &&
+        preparation != null &&
+        playback != null &&
+        identical(preparation.resources, playback.resources) &&
+        !(playback.resources?.isReleased ?? false) &&
+        !playback.isTranscode &&
+        !playback.mediaSource.isInfiniteStream) {
+      // Loading clears before optional subtitles and Playing reporting finish.
+      // Retain only the completed preparation/playback pair; otherwise stopping
+      // releases its lease and restoration must negotiate a fresh stream.
+      _suspendedPreparation = preparation;
+      _suspendedPlayback = playback;
+      _suspendedStreamOrigin = _streamOrigin;
+      _suspendedSources = List.of(mediaSources);
+    }
     isPlaying = false;
-    final stopped = _stopSession();
+    final stopped = _stopSession(
+      retainResources: _suspendedPreparation != null,
+    );
     _beginOperation();
-    final retirement = _operations.interrupt(backend.stop, ensureRetired: true);
+    final retirement = _operations.interrupt(
+      backend is VideoBackendSuspension
+          ? (backend as VideoBackendSuspension).suspend
+          : backend.stop,
+      ensureRetired: true,
+    );
     _suspendRetirement = retirement;
     _suspendReleasePending = false;
     try {
@@ -1195,7 +1270,7 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  /// Recreate a released native session at its saved position, always paused.
+  /// Restore the retained session (or reopen interrupted startup), paused.
   /// A changed identity must re-enter through the authentication/player host.
   Future<void> restorePlayback() {
     final existing = _restoring;
@@ -1234,6 +1309,8 @@ class PlayerController extends ChangeNotifier {
         client.userId != _suspendedUser ||
         client.accessToken != _suspendedToken) {
       sessionExpired = true;
+      await _operations.interrupt(backend.stop, ensureRetired: true);
+      await _stopSession();
       _emit();
       return;
     }
@@ -1278,6 +1355,14 @@ class PlayerController extends ChangeNotifier {
     }
     final operation = _beginOperation();
     if (operation == null) return;
+    final preparation = _suspendedPreparation;
+    final playback = _suspendedPlayback;
+    final sources = _suspendedSources;
+    final streamOrigin = _suspendedStreamOrigin;
+    _suspendedPreparation = null;
+    _suspendedPlayback = null;
+    _suspendedSources = null;
+    _suspendedStreamOrigin = null;
     await _open(
       operation: operation,
       startTicks: _suspendedTicks,
@@ -1285,6 +1370,10 @@ class PlayerController extends ChangeNotifier {
       subtitle: subtitleStreamIndex,
       subtitleOff: subtitleStreamIndex == null,
       startPaused: true,
+      preparedInfo: preparation,
+      preparedPlayback: playback,
+      preparedSources: sources,
+      preparedStreamOrigin: streamOrigin,
     );
   }
 
@@ -4242,6 +4331,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation) || event.sessionId != operation!.id) return;
       switch (event.kind) {
         case VideoEventKind.position:
+          _openingPositionObserved = true;
           final skip = activeSkipSegment;
           final prompt = skipPromptVisible;
           final offered = nextEpisode;
@@ -4265,8 +4355,11 @@ class PlayerController extends ChangeNotifier {
             if (session != null && !session.actuallyStarted) {
               session.actuallyStarted = true;
               unawaited(
-                _persistObservation(session).catchError((Object _) {
-                  _markProgressSyncFailed(persistent: true);
+                _persistObservation(session).catchError((Object failure) {
+                  if (_ownsSession(session)) {
+                    _lastProgressFailure = _syncFailure('observation', failure);
+                    _markProgressSyncFailed(persistent: true);
+                  }
                 }),
               );
             }
@@ -4348,6 +4441,10 @@ class PlayerController extends ChangeNotifier {
               _reportProgress(eventName: isPlaying ? 'Unpause' : 'Pause'),
             );
           }
+        case VideoEventKind.interrupted:
+          _pauseIntent = true;
+          _userPausedPrefix = true;
+          unawaited(_discardNextPrefix());
         case VideoEventKind.completed:
           if (event.value == true) {
             if (loading) {
@@ -4536,6 +4633,9 @@ class PlayerController extends ChangeNotifier {
     int? requestedBitrate,
     bool strictTracks = false,
     PlaybackInfo? preparedInfo,
+    ResolvedPlayback? preparedPlayback,
+    List<PlaybackMediaSource>? preparedSources,
+    Duration? preparedStreamOrigin,
   }) async {
     if (!_accepts(operation)) {
       await _releasePrepared(preparedInfo?.resources);
@@ -4550,6 +4650,9 @@ class PlayerController extends ChangeNotifier {
 
     PlaybackResourceLease? preparing;
     _pauseIntent = startPaused;
+    _openingStartTicks = startTicks;
+    _openingPositionObserved = false;
+    _lastPlaybackInfo = null;
     loading = true;
     state.phase = PlaybackPhase.loading;
     state.buffering = false;
@@ -4585,6 +4688,7 @@ class PlayerController extends ChangeNotifier {
       // allocate a transcode, select a server track, or fail on the default
       // version's playback capability before the chosen version is known.
       var sources =
+          preparedSources ??
           info?.mediaSources ??
           (requestClient is PlaybackMetadataProvider
               ? (_takeStartupVersions(itemId) ??
@@ -4791,16 +4895,20 @@ class PlayerController extends ChangeNotifier {
         for (final source in info.mediaSources)
           if (!sources.any((metadata) => metadata.id == source.id)) source,
       ];
-      final resolvedNext = client.resolvePlayback(
-        info: info,
-        itemId: itemId,
-        mediaSourceId: chosenId,
-        forceTranscode: forceTranscode,
-      );
+      final resolvedNext =
+          preparedPlayback ??
+          client.resolvePlayback(
+            info: info,
+            itemId: itemId,
+            mediaSourceId: chosenId,
+            forceTranscode: forceTranscode,
+          );
       if (!_accepts(operation)) return;
-      final next = resolvedNext == null
-          ? null
-          : await _expandStrm(operation, resolvedNext);
+      final next =
+          preparedPlayback ??
+          (resolvedNext == null
+              ? null
+              : await _expandStrm(operation, resolvedNext));
       if (!_accepts(operation)) return;
       if (next == null) {
         if (compatibilityReason != null) {
@@ -4882,15 +4990,25 @@ class PlayerController extends ChangeNotifier {
       stage('native open');
       // The transcoding URL already includes StartTimeTicks. Seeking the core
       // to the same absolute time lands inside a playlist that starts at 0.
-      _streamOrigin = next.filmTimeline != null
-          ? next.streamOrigin ?? (throw StateError('Unknown film Part offset'))
-          : next.startsAtRequestedPosition
-          ? durationFromTicks(boundedStartTicks)
-          : Duration.zero;
+      _streamOrigin =
+          preparedStreamOrigin ??
+          (next.filmTimeline != null
+              ? next.streamOrigin ??
+                    (throw StateError('Unknown film Part offset'))
+              : next.startsAtRequestedPosition
+              ? durationFromTicks(boundedStartTicks)
+              : Duration.zero);
       await _operations.run(operation, () async {
         await backend.open(
           VideoOpenRequest(
             sessionId: operation.id,
+            cacheIdentity: jsonEncode([
+              client.userId,
+              itemId,
+              next.mediaSource.id,
+              activeLineId,
+              _streamOrigin.inMicroseconds,
+            ]),
             url: next.streamUrl,
             playMethod: next.playMethod,
             isInfiniteStream: next.mediaSource.isInfiniteStream,
@@ -4908,9 +5026,7 @@ class PlayerController extends ChangeNotifier {
             // Android tunneling requires play intent while opening its paired
             // audio/video codecs. Keep this output hold on desktop sinks.
             holdPlaybackForSettings: !Platform.isAndroid,
-            start: next.startsAtRequestedPosition
-                ? Duration.zero
-                : durationFromTicks(boundedStartTicks) - _streamOrigin,
+            start: durationFromTicks(boundedStartTicks) - _streamOrigin,
             authorization: next.authorization,
             credentialOrigin: client.baseUrl,
             credentialHeaders:
@@ -4990,7 +5106,7 @@ class PlayerController extends ChangeNotifier {
               : backend.selectedAudioIndex;
         }
         if (!_accepts(operation)) return;
-        if (!startPaused && !backend.isPlaying) await backend.play();
+        if (!_pauseIntent && !backend.isPlaying) await backend.play();
         if (!_accepts(operation)) return;
         isPlaying = backend.isPlaying;
         // The ordinary player's source is confirmed by the successful native
@@ -5057,7 +5173,7 @@ class PlayerController extends ChangeNotifier {
         () => _restoreSessionSubtitleSlots(next, current: ownsSlots),
         accepts: ownsSubtitle,
       );
-      if (isRecovering) {
+      if (isRecovering || preparedPlayback != null) {
         // Reporting is independent of whether the native stream is usable.
         unawaited(started);
       } else {
@@ -5078,6 +5194,7 @@ class PlayerController extends ChangeNotifier {
       }
       if (!_accepts(operation)) return;
       stage('ready');
+      _lastPlaybackInfo = info;
       loading = false;
       state.updatePlaying(isPlaying);
       // 续播落在片头/片尾或最后几分钟时,loading 期间的 position 不会弹出
@@ -5699,10 +5816,10 @@ class PlayerController extends ChangeNotifier {
       _writeSnapshot(session, report);
     } on MediaServerException catch (failure) {
       if (!_ownsSession(session) || !_accepts(operation)) return;
-      _onReportFailed(failure);
-    } catch (_) {
+      _onReportFailed(failure, stage: 'playing');
+    } catch (failure) {
       if (!_ownsSession(session) || !_accepts(operation)) return;
-      _onReportFailed(null);
+      _onReportFailed(failure, stage: 'playing');
     }
     if (!_ownsSession(session)) return;
     _progressTimer?.cancel();
@@ -5761,23 +5878,39 @@ class PlayerController extends ChangeNotifier {
         if (sent) {
           await reportOutcomeSink?.call(report, observationSequence, false);
         }
-        _onReportFailed(failure);
+        _onReportFailed(failure, stage: sent ? 'progress' : 'observation');
       }
-    } catch (_) {
+    } catch (failure) {
       if (_ownsSession(session)) {
         if (sent) {
           await reportOutcomeSink?.call(report, observationSequence, false);
         }
-        _onReportFailed(null);
+        _onReportFailed(failure, stage: sent ? 'progress' : 'observation');
       }
     }
   }
 
-  Future<void> _stopSession({int? positionTicks, bool played = false}) {
+  Future<void> _stopSession({
+    int? positionTicks,
+    bool played = false,
+    bool retainResources = false,
+  }) {
     _progressTimer?.cancel();
     _progressTimer = null;
     final session = _session;
-    if (session == null) return _awaitPendingStopped();
+    if (session == null) {
+      final retained = _suspendedPreparation;
+      _suspendedPreparation = null;
+      _suspendedPlayback = null;
+      _suspendedSources = null;
+      _suspendedStreamOrigin = null;
+      return () async {
+        // Reporting must retire its progress snapshot before lease cleanup
+        // removes it, including a Back gesture during pending suspension.
+        await _awaitPendingStopped();
+        await _releasePrepared(retained?.resources);
+      }();
+    }
     final report = _currentReport(positionTicks: positionTicks);
     session.report = report;
     if (_scopedPlayback && session.actuallyStarted) {
@@ -5786,7 +5919,8 @@ class PlayerController extends ChangeNotifier {
           session,
           finalObservation: true,
           played: played,
-        ).catchError((Object _) {
+        ).catchError((Object failure) {
+          _lastProgressFailure = _syncFailure('finalObservation', failure);
           progressSyncFailed = true;
         }),
       );
@@ -5795,7 +5929,9 @@ class PlayerController extends ChangeNotifier {
     _session = null;
     checkIn.stop();
     _sessionStarted = false;
-    return _trackStopped(_doSendStopped(session, report));
+    return _trackStopped(
+      _doSendStopped(session, report, retainResources: retainResources),
+    );
   }
 
   Future<void> _awaitPendingStopped() async {
@@ -5812,16 +5948,21 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> _doSendStopped(
     PlaybackSession session,
-    PlaybackReport report,
-  ) async {
+    PlaybackReport report, {
+    bool retainResources = false,
+  }) async {
+    await _writeSnapshot(session, report, stopping: true);
     try {
       await session.observations.timeout(stoppedTimeout);
       await session
-          .enqueue(() => session.client.stopPlayback(report))
+          .enqueue(() => session.client.reportStopped(report))
           .timeout(stoppedTimeout);
       if (!session.ownsCredentials) return;
       if (_session == null &&
-          (_operations.current?.id == session.id || _backgroundReleased)) {
+          _snapshotOwner == session.id &&
+          (_operations.current?.id == session.id ||
+              _operations.isClosed ||
+              _backgroundReleased)) {
         _onReportSucceeded();
       }
       await _enqueueSnapshot(() async {
@@ -5832,7 +5973,13 @@ class PlayerController extends ChangeNotifier {
             snapshot?.baseUrl == session.baseUrl &&
             snapshot?.userId == session.userId) {
           final pending = snapshot!.pendingCleanups;
-          if (pending.isEmpty) {
+          if (!retainResources || session.resources != null) {
+            // Progress is already committed. A crash from here must retry
+            // cleanup only, never replay an old Stopped position.
+            await snapshotStore.write(
+              snapshot.withPendingCleanups(pending, cleanupOnly: true),
+            );
+          } else if (pending.isEmpty) {
             await snapshotStore.delete();
           } else {
             await snapshotStore.write(
@@ -5843,22 +5990,38 @@ class PlayerController extends ChangeNotifier {
       });
     } on MediaServerException catch (failure) {
       if (_session == null &&
+          _snapshotOwner == session.id &&
           session.ownsCredentials &&
           (_operations.current?.id == session.id ||
               _operations.isClosed ||
               _backgroundReleased)) {
-        _onReportFailed(failure);
+        _onReportFailed(failure, stage: 'stopped');
       }
-    } catch (_) {
+    } catch (failure) {
       if (_session == null &&
+          _snapshotOwner == session.id &&
           session.ownsCredentials &&
           (_operations.current?.id == session.id ||
               _operations.isClosed ||
               _backgroundReleased)) {
-        _onReportFailed(null);
+        _onReportFailed(failure, stage: 'stopped');
       }
     } finally {
-      await _releasePrepared(session.resources);
+      if (!retainResources) {
+        await _releasePrepared(
+          session.resources ??
+              PlaybackResourceLease(
+                id: report.playSessionId,
+                itemId: report.itemId,
+                mediaSourceId: report.mediaSourceId,
+                release: () async {
+                  if (session.ownsCredentials) {
+                    await session.client.releasePlayback(report);
+                  }
+                },
+              ),
+        );
+      }
       final watch = session.watchSession;
       if (watch != null) runtime?.history.endSession(watch);
       final frozen = session.frozenStop;
@@ -5871,13 +6034,14 @@ class PlayerController extends ChangeNotifier {
     _clearProgressSyncFailed();
   }
 
-  /// [failure] 为 null 表示超时。
-  void _onReportFailed(MediaServerException? failure) {
+  void _onReportFailed(Object? failure, {required String stage}) {
+    _lastProgressFailure = _syncFailure(stage, failure);
     if (_operations.isClosed || _disposed) {
       progressSyncFailed = true;
       return;
     }
-    if (failure?.kind == MediaServerFailureKind.sessionExpired) {
+    if (failure is MediaServerException &&
+        failure.kind == MediaServerFailureKind.sessionExpired) {
       _progressTimer?.cancel();
       _progressTimer = null;
       _progressFailBannerTimer?.cancel();
@@ -5910,17 +6074,26 @@ class PlayerController extends ChangeNotifier {
     });
   }
 
-  void _writeSnapshot(PlaybackSession session, PlaybackReport report) {
+  Future<void> _writeSnapshot(
+    PlaybackSession session,
+    PlaybackReport report, {
+    bool stopping = false,
+  }) {
     final baseUrl = session.baseUrl;
     final userId = session.userId;
-    if (!_ownsSession(session) ||
+    bool ownsSnapshot() => stopping
+        ? !session.revoked &&
+              session.ownsCredentials &&
+              (_snapshotOwner == null || _snapshotOwner! <= session.id)
+        : _ownsSession(session);
+    if (!ownsSnapshot() ||
         baseUrl == null ||
         userId == null ||
         userId.isEmpty) {
-      return;
+      return Future.value();
     }
     final snapshot = PlaybackSessionSnapshot(
-      serviceType: client.serviceType,
+      serviceType: session.client.serviceType,
       itemId: report.itemId,
       mediaSourceId: report.mediaSourceId,
       playSessionId: report.playSessionId,
@@ -5942,14 +6115,12 @@ class PlayerController extends ChangeNotifier {
       regionGeneration:
           origin?.permit.regionGeneration ?? openRequest?.regionGeneration,
     );
-    unawaited(
-      _enqueueSnapshot(() async {
-        if (_ownsSession(session)) {
-          _snapshotOwner = session.id;
-          await _replaceSnapshotPreservingCleanup(snapshot);
-        }
-      }),
-    );
+    return _enqueueSnapshot(() async {
+      if (ownsSnapshot()) {
+        _snapshotOwner = session.id;
+        await _replaceSnapshotPreservingCleanup(snapshot);
+      }
+    });
   }
 
   /// 空闲时立刻执行(内存实现即时生效),忙时按序排队;任何失败吞掉。
@@ -6681,6 +6852,7 @@ class PlayerController extends ChangeNotifier {
             mediaSourceName: source.name,
           ),
         ),
+        playbackPermit: actual.permit,
       );
       return;
     }

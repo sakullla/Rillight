@@ -25,11 +25,14 @@ class FakePlex {
   int? errorStatus;
   String? errorMessage;
   Completer<void>? pollGate, metadataGate;
+  Completer<void>? stoppedReportGate;
+  Completer<void>? playingReportGate;
   int refreshes = 0, stops = 0;
   String? redirectTo;
   String pinToken = cloudToken;
   bool expireCloud = false;
   bool failStops = false;
+  bool remuxDecision = false;
   bool expireHome = false;
   bool includeOwnedResource = false;
   String secondAudioCodec = 'aac';
@@ -395,7 +398,7 @@ class FakePlex {
             ...source,
             'index': 0,
             'codec': 'h264',
-            'decision': 'transcode',
+            'decision': remuxDecision ? 'copy' : 'transcode',
             'location': 'segments-video',
           });
         }
@@ -437,6 +440,7 @@ class FakePlex {
                   if (decisionBitrateKbps != null)
                     'bitrate': decisionBitrateKbps,
                   'id': media['id'],
+                  if (remuxDecision) 'videoDecision': 'copy',
                   'selected': true,
                   'Part': [
                     {
@@ -492,6 +496,8 @@ class FakePlex {
       return r.response.close();
     }
     if (path == '/:/timeline') {
+      if (q['state'] == 'playing') await playingReportGate?.future;
+      if (q['state'] == 'stopped') await stoppedReportGate?.future;
       final offset = int.tryParse(q['time'] ?? '');
       if (q['ratingKey'] != '42' ||
           offset == null ||

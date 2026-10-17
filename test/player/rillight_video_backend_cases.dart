@@ -120,6 +120,8 @@ class _PendingOpenCoreDriver extends _CoreDriver {
 }
 
 class _WarmHandoffCoreDriver extends _CoreDriver {
+  _WarmHandoffCoreDriver({this.initialRange = 'bytes=0-65535'});
+  final String initialRange;
   Future<void> _read(String range) async {
     final client = HttpClient();
     try {
@@ -137,7 +139,7 @@ class _WarmHandoffCoreDriver extends _CoreDriver {
   Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
     final result = await super.open(value);
     emit('duration', 60000);
-    await _read('bytes=0-65535');
+    await _read(initialRange);
     return result;
   }
 
@@ -450,61 +452,72 @@ void main() {
     },
   );
 
-  cases.test(
-    'network recovery holds desktop output until saved settings are restored',
-    () async {
-      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      upstream.listen((request) async {
-        request.response.statusCode = HttpStatus.serviceUnavailable;
-        await request.response.close();
-      });
-      final first = _CoreDriver();
-      final recovered = _CoreDriver();
-      var creates = 0;
-      final backend = RillightVideoBackend(
-        mediaHeaderTimeout: const Duration(milliseconds: 800),
-        sourceStallTimeout: const Duration(milliseconds: 150),
-        waitForRetry: _retryImmediately,
-        settingsStore: MemoryPlayerSettingsStore(),
-        diskCacheDirectory: isolatedCache,
-        createPlayer: () async => creates++ == 0 ? first : recovered,
-      );
-      final client = HttpClient();
-      addTearDown(() async {
-        client.close(force: true);
-        await backend.dispose();
-        await upstream.close(force: true);
-      });
-      await backend.open(
-        VideoOpenRequest(
-          sessionId: 32,
-          url: Uri.parse('http://127.0.0.1:${upstream.port}/movie'),
-          holdPlaybackForSettings: true,
-        ),
-      );
-      await backend.setVolume(25);
-      await backend.setRate(1.25);
-      await backend.play();
-      // A failed demuxer request supplies the real transport failure state.
-      final response = await (await client.headUrl(first.request!.url)).close();
-      expect(response.statusCode, HttpStatus.serviceUnavailable);
-      await response.drain<void>();
-      final finished = backend.events
-          .firstWhere(
-            (event) =>
-                event.kind == VideoEventKind.buffering && event.value == false,
-          )
-          .timeout(const Duration(seconds: 8));
-      first.emit('error', 'synthetic network failure');
-      await finished;
-      expect(recovered.request!.paused, isTrue);
-      expect(
-        recovered.commands,
-        containsAllInOrder(['audio', 'volume', 'rate', 'play']),
-      );
-      expect((await backend.diagnostics())['playbackActive'], isTrue);
-    },
-  );
+  for (final interrupted in [false, true]) {
+    cases.test(
+      'network recovery restores settings and respects interruption=$interrupted',
+      () async {
+        final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        upstream.listen((request) async {
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+          await request.response.close();
+        });
+        final first = _CoreDriver();
+        final recovered = _CoreDriver();
+        var creates = 0;
+        final backend = RillightVideoBackend(
+          mediaHeaderTimeout: const Duration(milliseconds: 800),
+          sourceStallTimeout: const Duration(milliseconds: 150),
+          waitForRetry: _retryImmediately,
+          settingsStore: MemoryPlayerSettingsStore(),
+          diskCacheDirectory: isolatedCache,
+          createPlayer: () async => creates++ == 0 ? first : recovered,
+        );
+        final client = HttpClient();
+        addTearDown(() async {
+          client.close(force: true);
+          await backend.dispose();
+          await upstream.close(force: true);
+        });
+        await backend.open(
+          VideoOpenRequest(
+            sessionId: 32,
+            url: Uri.parse('http://127.0.0.1:${upstream.port}/movie'),
+            holdPlaybackForSettings: true,
+          ),
+        );
+        await backend.setVolume(25);
+        await backend.setRate(1.25);
+        await backend.play();
+        // A failed demuxer request supplies the real transport failure state.
+        final response = await (await client.headUrl(first.request!.url))
+            .close();
+        expect(response.statusCode, HttpStatus.serviceUnavailable);
+        await response.drain<void>();
+        final finished = backend.events
+            .firstWhere(
+              (event) =>
+                  event.kind == VideoEventKind.buffering &&
+                  event.value == false,
+            )
+            .timeout(const Duration(seconds: 8));
+        if (interrupted) first.emit('interruption', 'audioFocus');
+        first.emit('error', 'synthetic network failure');
+        await finished;
+        expect(recovered.request!.paused, isTrue);
+        expect(
+          recovered.commands,
+          containsAllInOrder([
+            'audio',
+            'volume',
+            'rate',
+            if (!interrupted) 'play',
+          ]),
+        );
+        if (interrupted) expect(recovered.commands, isNot(contains('play')));
+        expect((await backend.diagnostics())['playbackActive'], !interrupted);
+      },
+    );
+  }
 
   cases.test(
     'slow recovery headers do not trigger premature startup source renewal',
@@ -1394,6 +1407,264 @@ void main() {
       expect(backend.bufferSnapshot.unknownReason, isNot('stopped'));
     },
   );
+
+  cases.test(
+    'ready lock wake retains the decoder and rebinds event identity',
+    () async {
+      final driver = _CoreDriver();
+      var creates = 0;
+      final backend = RillightVideoBackend(
+        diskCacheDirectory: isolatedCache,
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async {
+          creates++;
+          return driver;
+        },
+      );
+      addTearDown(backend.dispose);
+      Future<void> open(int session) => backend.open(
+        VideoOpenRequest(
+          sessionId: session,
+          cacheIdentity: 'one-video',
+          url: Uri.parse('http://127.0.0.1:9/video'),
+          startPaused: session > 1,
+          start: session == 1 ? Duration.zero : const Duration(seconds: 12),
+        ),
+      );
+      await open(1);
+      final positioned = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.position,
+      );
+      driver.emit('position', 12000);
+      await positioned;
+      final nativeSession = driver.request!.session;
+      await backend.suspend();
+      expect(driver.disposed, isFalse);
+      expect((await backend.diagnostics())['nativeRetained'], isTrue);
+      await open(2);
+      expect(creates, 1);
+      expect(driver.request!.session, nativeSession);
+      expect(backend.position, const Duration(seconds: 12));
+      expect(backend.isPlaying, isFalse);
+      final resumedEvent = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.position,
+      );
+      await backend.play();
+      driver.emit('position', 13000);
+      expect((await resumedEvent).sessionId, 2);
+      await backend.stop();
+      expect(driver.disposed, isTrue);
+      expect((await backend.diagnostics())['transportAttached'], isFalse);
+    },
+  );
+
+  for (final tagged in [true, false]) {
+    cases.test(
+      'native lock wake renews the URL and preserves cached bytes tagged=$tagged',
+      () async {
+        const total = 64 * 1024 * 1024;
+        var expired = false;
+        final tokens = <String?>[];
+        final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        upstream.listen((request) async {
+          final token = request.uri.queryParameters['token'];
+          tokens.add(token);
+          if (expired && token == 'old') {
+            request.response.statusCode = HttpStatus.forbidden;
+          } else {
+            final match = RegExp(r'^bytes=(\d+)-(\d+)$')
+                .firstMatch(request.headers.value('range')!)!;
+            final start = int.parse(match[1]!);
+            final end = int.parse(match[2]!).clamp(start, total - 1);
+            request.response.statusCode = HttpStatus.partialContent;
+            request.response.headers.set(
+              'content-range',
+              'bytes $start-$end/$total',
+            );
+            if (tagged) request.response.headers.set('etag', '"same-video"');
+            request.response.contentLength = end - start + 1;
+            request.response.add(List.filled(end - start + 1, 9));
+          }
+          await request.response.close();
+        });
+        final driver = _CoreDriver();
+        var creates = 0;
+        final backend = RillightVideoBackend(
+          diskCacheDirectory: isolatedCache,
+          settingsStore: MemoryPlayerSettingsStore(),
+          createPlayer: () async {
+            creates++;
+            return driver;
+          },
+        );
+        final client = HttpClient();
+        addTearDown(() async {
+          client.close(force: true);
+          await backend.dispose();
+          await upstream.close(force: true);
+        });
+        Future<void> open(int session) => backend.open(
+          VideoOpenRequest(
+            sessionId: session,
+            cacheIdentity: 'same-account/video/part',
+            url: Uri.parse(
+              'http://127.0.0.1:${upstream.port}/video?token=${session == 1 ? 'old' : 'new'}',
+            ),
+            startPaused: true,
+            start: const Duration(seconds: 12),
+          ),
+        );
+        Future<void> read(int start, int end) async {
+          final request = await client.getUrl(driver.request!.url);
+          request.headers.set('range', 'bytes=$start-$end');
+          final response = await request.close();
+          expect(response.statusCode, HttpStatus.partialContent);
+          final length = await response.fold<int>(0, (count, bytes) {
+            expect(bytes.every((byte) => byte == 9), isTrue);
+            return count + bytes.length;
+          });
+          expect(length, end - start + 1);
+        }
+
+        await open(1);
+        // Exceed the small-prefix cache to exercise retained response bytes.
+        await read(0, 2 * 1024 * 1024 - 1);
+        final nativeRequest = driver.request;
+        await backend.suspend();
+        expired = true;
+        final previousRequests = tokens.length;
+        await open(2);
+        expect(creates, 1);
+        expect(driver.request, same(nativeRequest));
+        expect(driver.disposed, isFalse);
+        expect(backend.position, const Duration(seconds: 12));
+        expect(backend.isPlaying, isFalse);
+        await read(0, 2 * 1024 * 1024 - 1);
+        expect(tokens, hasLength(previousRequests));
+        expect((await backend.diagnostics())['memoryHitBytes'], greaterThan(0));
+        await read(total - 65536, total - 1);
+        expect(tokens.skip(previousRequests), isNotEmpty);
+        expect(tokens.skip(previousRequests), everyElement('new'));
+      },
+    );
+
+    cases.test(
+      'suspend retains downloaded bytes across paused reopen tagged=$tagged',
+      () async {
+        const total = 4 * 1024 * 1024;
+        var offline = false;
+        var requestsWhileOffline = 0;
+        final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        upstream.listen((request) async {
+          if (offline) {
+            requestsWhileOffline++;
+            request.response.statusCode = 503;
+          } else {
+            final match = RegExp(r'^bytes=(\d+)-(\d+)$')
+                .firstMatch(request.headers.value('range')!)!;
+            final start = int.parse(match[1]!);
+            final end = int.parse(match[2]!);
+            request.response.statusCode = 206;
+            request.response.headers.set(
+              'content-range',
+              'bytes $start-$end/$total',
+            );
+            if (tagged) request.response.headers.set('etag', '"same-video"');
+            request.response.contentLength = end - start + 1;
+            request.response.add(List.filled(end - start + 1, 9));
+          }
+          await request.response.close();
+        });
+        final drivers = <_WarmHandoffCoreDriver>[];
+        final backend = RillightVideoBackend(
+          diskCacheDirectory: isolatedCache,
+          settingsStore: MemoryPlayerSettingsStore(),
+          createPlayer: () async {
+            final driver = _WarmHandoffCoreDriver(
+              initialRange: 'bytes=0-2097151',
+            );
+            drivers.add(driver);
+            return driver;
+          },
+        );
+        addTearDown(() async {
+          await backend.dispose();
+          await upstream.close(force: true);
+        });
+        Future<void> open(int session) => backend.open(
+          VideoOpenRequest(
+            sessionId: session,
+            cacheIdentity: 'account/item/version/part',
+            url: Uri.parse(
+              'http://127.0.0.1:${upstream.port}/video?session=$session',
+            ),
+            start: Duration(seconds: session == 1 ? 0 : 12),
+            startPaused: session != 1,
+          ),
+        );
+        await open(1);
+        final route = drivers.single.request!.url;
+        await backend.suspend();
+        await backend
+            .suspend(); // Native and Flutter lifecycle can both signal pause.
+        expect(drivers.single.disposed, isFalse);
+        final suspended = await backend.diagnostics();
+        expect(suspended['transportAttached'], isTrue);
+        expect(suspended['memoryBytes'], greaterThan(0));
+        offline = true;
+        await open(2).timeout(const Duration(seconds: 5));
+        expect(drivers.last.request!.url, route);
+        expect(drivers.last.request!.start, const Duration(seconds: 12));
+        expect(drivers.last.request!.paused, isTrue);
+        expect(
+          requestsWhileOffline,
+          0,
+          reason: 'The cached prefix must play without downloading again',
+        );
+        expect((await backend.diagnostics())['memoryHitBytes'], greaterThan(0));
+        await backend.suspend();
+        await backend.stop();
+        expect((await backend.diagnostics())['transportAttached'], isFalse);
+        expect(backend.bufferSnapshot.unknownReason, 'stopped');
+      },
+    );
+  }
+
+  for (final change in ['source', 'credentials', 'dynamic', 'stop']) {
+    cases.test('suspended cache is not reused after $change changes', () async {
+      final drivers = <_CoreDriver>[];
+      final backend = RillightVideoBackend(
+        diskCacheDirectory: isolatedCache,
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async {
+          final driver = _CoreDriver();
+          drivers.add(driver);
+          return driver;
+        },
+      );
+      addTearDown(backend.dispose);
+      Future<void> open(bool changed) => backend.open(
+        VideoOpenRequest(
+          sessionId: changed ? 2 : 1,
+          url: Uri.parse('http://127.0.0.1:9/video'),
+          cacheIdentity: changed && change == 'source' ? 'other' : 'same',
+          credentialHeaders: {
+            'Token': changed && change == 'credentials' ? 'new' : 'old',
+          },
+          isInfiniteStream: changed && change == 'dynamic',
+        ),
+      );
+      await open(false);
+      final previousRoute = drivers.single.request!.url;
+      await backend.suspend();
+      if (change == 'stop') await backend.stop();
+      await open(true);
+      expect(drivers.last.request!.url, isNot(previousRoute));
+      await backend.suspend();
+      await backend.dispose();
+      expect((await backend.diagnostics())['transportAttached'], isFalse);
+    });
+  }
 
   cases.test(
     'stop releases the previous transport before the next open',

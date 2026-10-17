@@ -14,14 +14,14 @@ runs:
       id: msys2
       uses: msys2/setup-msys2@v2
       with:
-        msystem: MINGW64
+        msystem: UCRT64
         install: >-
           git make diffutils
-          mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-ninja mingw-w64-x86_64-meson
-          mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
-          mingw-w64-x86_64-fontconfig mingw-w64-x86_64-freetype
-          mingw-w64-x86_64-fribidi mingw-w64-x86_64-harfbuzz
+          mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-meson
+          mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+          mingw-w64-ucrt-x86_64-fontconfig mingw-w64-ucrt-x86_64-freetype
+          mingw-w64-ucrt-x86_64-fribidi mingw-w64-ucrt-x86_64-harfbuzz mingw-w64-ucrt-x86_64-zlib
 
     - name: Identify native toolchain for the SDK cache
       id: toolchain
@@ -32,16 +32,16 @@ runs:
       id: sdk-cache
       uses: actions/cache/restore@v5
       with:
-        path: ${{ runner.temp }}/rillight-windows-sdk
-        key: windows-media-sdk-${{ runner.arch }}-${{ steps.toolchain.outputs.packages }}-${{ hashFiles('packages/rillight_player/native/*core_dependencies*', 'packages/rillight_player/native/build_windows_dependencies.py', 'packages/rillight_player/native/build_subtitle_unicode.py', 'packages/rillight_player/native/patches/**') }}
+        path: ${{ runner.temp }}/rillight-windows-ucrt64-sdk
+        key: windows-media-sdk-ucrt64-${{ runner.arch }}-${{ steps.toolchain.outputs.packages }}-${{ hashFiles('packages/rillight_player/native/*core_dependencies*', 'packages/rillight_player/native/build_windows_dependencies.py', 'packages/rillight_player/native/build_subtitle_unicode.py', 'packages/rillight_player/native/patches/**') }}
 
     - name: Build Windows SDK and candidate core
       shell: pwsh
       env:
         MSYS_ROOT: ${{ steps.msys2.outputs.msys2-location }}
       run: |
-        $prefix = Join-Path $env:RUNNER_TEMP 'rillight-windows-sdk'
-        $work = Join-Path $env:RUNNER_TEMP 'rillight-windows-sdk-work'
+        $prefix = Join-Path $env:RUNNER_TEMP 'rillight-windows-ucrt64-sdk'
+        $work = Join-Path $env:RUNNER_TEMP 'rillight-windows-ucrt64-sdk-work'
         python packages/rillight_player/native/build_windows_dependencies.py `
           --prefix "$prefix" --work "$work" --msys-root "$env:MSYS_ROOT"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -51,7 +51,7 @@ runs:
       if: steps.sdk-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v5
       with:
-        path: ${{ runner.temp }}/rillight-windows-sdk
+        path: ${{ runner.temp }}/rillight-windows-ucrt64-sdk
         key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
 
     - name: Install dependencies

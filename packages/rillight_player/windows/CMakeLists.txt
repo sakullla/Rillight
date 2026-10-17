@@ -27,6 +27,11 @@ foreach(runtime IN LISTS CORE_RUNTIME)
   if(name STREQUAL "rillight_core.dll" OR name STREQUAL "librillight_core.dll")
     set(CORE_DLL_FOUND TRUE)
   endif()
+  # MINGW64 and UCRT64 packages can preserve identical DLL timestamps despite
+  # different bytes. install(FILES) alone can leave an old CRT in the bundle.
+  install(CODE "file(COPY_FILE \"${runtime}\"
+    \"$<TARGET_FILE_DIR:${BINARY_NAME}>/${name}\" ONLY_IF_DIFFERENT)"
+    COMPONENT Runtime)
 endforeach()
 if(NOT CORE_DLL_FOUND)
   message(FATAL_ERROR "The verified SDK has no rillight_core.dll")

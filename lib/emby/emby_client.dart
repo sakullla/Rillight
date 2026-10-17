@@ -116,13 +116,16 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
   @override
   AccountResourceAuthentication? get accountAuthentication => null;
   final Map<String, PlaybackResourceLease> _resources = {};
+  static final Expando<bool> _encodingResources = Expando<bool>();
   PlaybackResourceLease _resourceLease(
     String sessionId, {
     String? itemId,
     String? mediaSourceId,
+    bool encodingRequired = false,
   }) {
     final base = baseUrl!, user = userId!, token = accessToken!;
-    return _resources.putIfAbsent('$base|$user|$sessionId', () {
+    final key = '$base|$user|$sessionId';
+    final lease = _resources.putIfAbsent(key, () {
       final frozen = EmbyClient(device: device, dio: _dio)
         ..attachSession(
           baseUrl: base,
@@ -130,11 +133,17 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
           userId: user,
           userAgent: userAgent,
         );
-      return PlaybackResourceLease(
+      late final PlaybackResourceLease resource;
+      resource = PlaybackResourceLease(
         id: sessionId,
         itemId: itemId,
         mediaSourceId: mediaSourceId,
         release: () async {
+          // PlaybackInfo advertises a fallback TranscodingUrl even for direct
+          // playback. It has not started an encoder. Ordinary users may be
+          // forbidden from DELETE ActiveEncodings, so call it only after an
+          // actual transcode selection (or transcode crash compensation).
+          if (_encodingResources[resource] != true) return;
           await frozen._requestJson(
             'DELETE',
             '/Videos/ActiveEncodings',
@@ -143,9 +152,13 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
               'PlaySessionId': sessionId,
             },
           );
+          _encodingResources[resource] = false;
         },
       );
+      return resource;
     });
+    if (encodingRequired && !lease.isReleased) _encodingResources[lease] = true;
+    return lease;
   }
 
   @override
@@ -154,7 +167,10 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
         report.playSessionId.isEmpty) {
       return;
     }
-    await _resourceLease(report.playSessionId).release();
+    await _resourceLease(
+      report.playSessionId,
+      encodingRequired: true,
+    ).release();
   }
 
   @override
@@ -200,6 +216,11 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
       forceTranscode: forceTranscode,
     );
     if (result == null) return null;
+    if (result.isTranscode && info.resources != null) {
+      // Prepared metadata can arrive through a different guarded client.
+      // Activate the actual originating lease, keeping its frozen owner.
+      _encodingResources[info.resources!] = true;
+    }
     final authorization = ResourceAuthorization(
       headersByOrigin: {baseUrl!.origin: sessionHeaders},
       publicHeaders: {'User-Agent': userAgent},

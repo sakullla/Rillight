@@ -222,7 +222,11 @@ class PlaybackHttpProxy {
   int _responseReadAheadSequence = 0;
 
   int get upstreamBytes => _upstreamBytes;
-  void refreshSourceUrl(Uri route, Uri url) {
+  void refreshSourceUrl(
+    Uri route,
+    Uri url, {
+    bool preserveBufferedResponse = false,
+  }) {
     if (_closed ||
         dynamicSource ||
         !sessionBuffering ||
@@ -238,7 +242,8 @@ class PlaybackHttpProxy {
       throw StateError('Invalid media renewal route');
     }
     _refreshedUrls[resource.identity] = url;
-    if (_bufferedResponse?.key == resource.identity) {
+    if (!preserveBufferedResponse &&
+        _bufferedResponse?.key == resource.identity) {
       _discardBufferedResponse();
     }
     _prefetchAuthenticationStatus = null;
@@ -266,6 +271,17 @@ class PlaybackHttpProxy {
   }
 
   void resumeAfterDiskRecovery() => _readAhead?.resumeAfterDiskRecovery();
+
+  /// Backgrounding releases sockets but keeps already published response bytes.
+  /// Untagged bytes remain isolated to their original immutable response.
+  Future<void> suspend() async {
+    setPlaybackActive(false);
+    cancelPendingReads();
+    await Future.wait(
+      _responseReadAheads.map((response) => response.finish()).toList(),
+    );
+  }
+
   Future<void> retryReadAhead() async {
     if (_closed) return;
     final previous = _readAhead;

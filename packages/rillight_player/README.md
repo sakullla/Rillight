@@ -46,6 +46,19 @@ Android also enables the additive external-audio-speed API: AudioTrack applies
 tempo with pitch preservation to source-rate PCM, so speed changes preserve
 video/RPU and audio queues. Its clock reports source-sample media duration;
 desktop adapters retain the default FFmpeg atempo path.
+Android retains a ready decoder and its bounded transport cache across temporary
+background suspension; interrupted startup still reopens. This does not preserve
+the session after process death. Audio route polling keeps the last observed
+route while paused and checks it against connected devices, because
+[AudioRouting](https://developer.android.com/reference/android/media/AudioRouting)
+returns no route for paused tracks. API 36 uses all routed devices and their
+common capabilities. Reapplying the current track does not flush queued audio.
+[AudioTrack.ERROR_DEAD_OBJECT](https://developer.android.com/reference/android/media/AudioTrack#ERROR_DEAD_OBJECT)
+allows one PCM sink recreation; invalidated compressed output falls back to PCM.
+Audio focus loss and headphone removal retain pause intent through recovery,
+consistent with the [audio focus guidance](https://developer.android.com/media/optimize/audio-focus).
+These policy checks do not establish physical Bluetooth/HDMI sound, surround
+channel ordering, or device-switch latency; those require target-device checks.
 Android's owned custom I/O also manages its own bounded read windows. Its SDK
 patch skips FFmpeg's cross-track network-buffer tuning for custom AVIO, while
 retaining the sample indexes, timestamps and edit lists. Short forward gaps
@@ -85,9 +98,17 @@ The CMake target fails closed when the SDK marker or libraries are missing.
 credentials. Record actual window frames, audio output and GPU behavior
 separately from native control events. The tag workflow builds the SDK with
 `native/build_windows_dependencies.py --prefix SDK --work WORK --msys-root MSYS2`,
-using MSYS2 MinGW64. It caches the media dependencies, verifies cache hits and
+using MSYS2 UCRT64. It caches the media dependencies, verifies cache hits and
 rebuilds the candidate core. The builder generates library hashes automatically;
 no SDK URL or SHA256 repository variables are needed.
+
+Install the `mingw-w64-ucrt-x86_64-*` packages listed in
+`.github/actions/windows-build/action.yml` (including zlib). Local compiler,
+CMake and Meson defaults use `C:/msys64/ucrt64/bin`. When migrating an existing
+MSYS2 installation, use a fresh SDK prefix: old or unmarked SDKs are rejected
+instead of mixing MSVCRT and UCRT DLLs. Build scripts isolate compiler caches
+in a `ucrt64` work subdirectory. The SDK manifest records `msystem: UCRT64`,
+and dependency collection rejects DLLs importing `msvcrt.dll`.
 
 ### Android
 

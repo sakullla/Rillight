@@ -14,6 +14,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_server/playback.dart';
 
 import 'fake_emby_server.dart';
 
@@ -188,6 +189,51 @@ void main() {
     );
     return emby;
   }
+
+  test('direct playback never calls forbidden encoder cleanup', () async {
+    final emby = await signedInClient();
+    server.releaseEncodingStatus = 403;
+    final info = await emby.getPlaybackInfo(itemId: 'movie-up');
+    final playback = emby.resolvePlayback(info: info, itemId: 'movie-up')!;
+    expect(playback.isTranscode, isFalse);
+    await playback.resources!.release();
+    expect(playback.resources!.isReleased, isTrue);
+    expect(
+      server.requests.where((r) => r.contains('ActiveEncodings')),
+      isEmpty,
+    );
+  });
+
+  test('selected transcode preserves cleanup failure and retries the original encoding', () async {
+    final emby = await signedInClient();
+    server.items
+        .firstWhere((item) => item.id == 'movie-transcode')
+        .mediaStreams = const [
+      FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+      FakeMediaStream(index: 1, type: 'Audio', codec: 'aac'),
+    ];
+    final info = await emby.getPlaybackInfo(
+      itemId: 'movie-transcode',
+      forceTranscode: true,
+    );
+    final resolver = emby.withRequestGuard(() {});
+    final playback = resolver.resolvePlayback(
+      info: info,
+      itemId: 'movie-transcode',
+      forceTranscode: true,
+    )!;
+    expect(playback.playMethod, PlayMethod.transcode);
+    server.releaseEncodingStatus = 503;
+    await expectLater(
+      playback.resources!.release(),
+      throwsA(isA<MediaServerException>()),
+    );
+    expect(playback.resources!.isReleased, isFalse);
+    server.releaseEncodingStatus = null;
+    await playback.resources!.release();
+    expect(playback.resources!.isReleased, isTrue);
+    expect(server.releasedPlaybackSessions, contains(info.playSessionId));
+  });
 
   test('Public Info returns server id and name', () async {
     final info = await client().getPublicInfo(server.baseUrl);

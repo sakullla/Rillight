@@ -31,6 +31,7 @@ class RillightVideoBackend extends VideoBackend
         VideoBackendTranscodeSubtitles,
         VideoBackendTrackSupport,
         VideoBackendSourceRenewal,
+        VideoBackendSuspension,
         VideoBackendNativeOverlay,
         VideoBackendOutputReport {
   // Native presentation is optional; the other platform views retain their
@@ -123,6 +124,8 @@ class RillightVideoBackend extends VideoBackend
   }
 
   PlaybackTransportSession? _transport;
+  bool _transportSuspended = false;
+  bool _nativeRetained = false;
   Uri? _mediaRoute;
   DateTime? _sourceRenewalRequestedAt;
   int _sourceRenewalCount = 0;
@@ -350,6 +353,8 @@ class RillightVideoBackend extends VideoBackend
       ...?active?.localDiagnostics,
       'openPhase': _openPhase,
       'transportAttached': active != null,
+      'transportSuspended': _transportSuspended,
+      'nativeRetained': _nativeRetained,
       'transportDiagnosticsStatus': diagnosticStatus,
       'backendSessionId': _sessionId,
       'coreSession': _coreSession,
@@ -513,20 +518,91 @@ class RillightVideoBackend extends VideoBackend
 
   @override
   Future<void> open(VideoOpenRequest request) async {
+    final reuseTransport = _canResumeTransport(request);
+    final reuseNative =
+        reuseTransport &&
+        _nativeRetained &&
+        _opened &&
+        (request.start - position).abs() <= const Duration(seconds: 1);
     ++_recoveryEpoch;
     _recovering = false;
     _lastOpenRequest = request;
     _wantsPlayback = !request.startPaused;
+    if (reuseNative) {
+      // Stable media identity can carry a renewed signed URL. Update uncached
+      // reads before resuming the decoder, retaining its buffered response.
+      await _transport!.refreshSourceUrl(
+        _mediaRoute!,
+        request.url,
+        preserveBufferedResponse: true,
+      );
+      _sessionId = request.sessionId;
+      _transportSuspended = false;
+      _nativeRetained = false;
+      final snapshot = bufferSnapshot;
+      bufferSnapshot = BufferSnapshot(
+        sessionId: request.sessionId,
+        resourceId: snapshot.resourceId,
+        representationVersion: snapshot.representationVersion,
+        trackVersion: snapshot.trackVersion,
+        sequence: ++_bufferSequence,
+        ranges: snapshot.ranges,
+        byteCoverage: snapshot.byteCoverage,
+        unknownReason: snapshot.unknownReason,
+      );
+      _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, _generation);
+      // The native Activity already restored the mounted output surface.
+      // Keep its paused decoder, queues, tracks and exact media position.
+      if (_phonePresentationEnabled) await configurePhonePresentation(true);
+      await _command(request.startPaused ? 'pause' : 'play');
+      isPlaying = !request.startPaused;
+      final generation = _generation;
+      _diagnosticsTimer = Timer.periodic(const Duration(milliseconds: 250), (
+        _,
+      ) {
+        unawaited(_refreshDiagnostics(generation));
+      });
+      return;
+    }
     _selectedSubtitleUri = null;
     _selectedSubtitleServerIndex = null;
     _selectedSubtitleTitle = null;
     _secondarySelectedSubtitleUri = null;
     _secondarySelectedSubtitleServerIndex = null;
     _secondarySelectedSubtitleTitle = null;
-    await _open(request);
+    await _open(request, reuseTransport: reuseTransport);
   }
 
-  Future<void> _open(VideoOpenRequest request) async {
+  bool _canResumeTransport(VideoOpenRequest request) {
+    final previous = _lastOpenRequest;
+    if (!_transportSuspended ||
+        _transport == null ||
+        _mediaRoute == null ||
+        previous == null ||
+        previous.dynamicSource ||
+        request.dynamicSource ||
+        previous.playMethod != request.playMethod ||
+        previous.credentialOrigin != request.credentialOrigin ||
+        previous.cacheIdentity != request.cacheIdentity ||
+        (request.cacheIdentity == null && previous.url != request.url) ||
+        !mapEquals(previous.headers, request.headers) ||
+        !mapEquals(previous.credentialHeaders, request.credentialHeaders)) {
+      return false;
+    }
+    final oldAuth = previous.authorization;
+    final newAuth = request.authorization;
+    if (oldAuth == null || newAuth == null) return oldAuth == newAuth;
+    return mapEquals(oldAuth.publicHeaders, newAuth.publicHeaders) &&
+        oldAuth.headersByOrigin.length == newAuth.headersByOrigin.length &&
+        oldAuth.headersByOrigin.entries.every(
+          (entry) => mapEquals(entry.value, newAuth.headersByOrigin[entry.key]),
+        );
+  }
+
+  Future<void> _open(
+    VideoOpenRequest request, {
+    bool reuseTransport = false,
+  }) async {
     if (_disposed) throw StateError('Player backend disposed');
     final generation = ++_generation;
 
@@ -590,7 +666,12 @@ class RillightVideoBackend extends VideoBackend
     _emit(VideoEventKind.cacheSpeed, 0.0, generation);
     _openPhase = 'retiringPrevious';
 
-    await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: false);
+    await _stopSession(
+      keepAndroidPlayer: true,
+      releaseRetainedSnapshot: false,
+      retainTransport: reuseTransport,
+    );
+    _transportSuspended = false;
     if (_disposed || generation != _generation) return;
     CorePlayer? attemptedPlayer;
     try {
@@ -600,32 +681,35 @@ class RillightVideoBackend extends VideoBackend
           await (_settingsStore ??= await openPlayerSettingsStore()).read();
       _openPhase = 'transport';
 
-      final transport = await PlaybackTransportSession.start(
-        origin: request.credentialOrigin,
-        authorization: request.authorization,
-        headers: request.credentialHeaders.isNotEmpty
-            ? request.credentialHeaders
-            : request.headers,
-        cacheRoot: _diskCacheDirectory ?? PlayerDiskCache.defaultDirectory(),
-        memoryLimitBytes: 8 * 1024 * 1024,
-        pendingLimitBytes: defaultCachePendingBytes,
-        diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
-          settings,
-        ),
-        // Forward prefetch follows the user's disk budget on every platform.
-        // RAM retention and pending transfers have independent bounds above.
-        readAheadBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
-          settings,
-        ),
-        dynamicSource: request.dynamicSource,
-        sessionBuffering: true,
-        // Keep the validated response alive across cache windows on desktop
-        // too; restarting every 32 MiB repeatedly pays origin header latency.
-        continuousTransfers: true,
-        readAheadConcurrency: 1,
-        mediaHeaderTimeout: mediaHeaderTimeout,
-        waitForRetry: waitForRetry,
-      );
+      final transport =
+          _transport ??
+          await PlaybackTransportSession.start(
+            origin: request.credentialOrigin,
+            authorization: request.authorization,
+            headers: request.credentialHeaders.isNotEmpty
+                ? request.credentialHeaders
+                : request.headers,
+            cacheRoot:
+                _diskCacheDirectory ?? PlayerDiskCache.defaultDirectory(),
+            memoryLimitBytes: 8 * 1024 * 1024,
+            pendingLimitBytes: defaultCachePendingBytes,
+            diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+              settings,
+            ),
+            // Forward prefetch follows the user's disk budget on every platform.
+            // RAM retention and pending transfers have independent bounds above.
+            readAheadBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+              settings,
+            ),
+            dynamicSource: request.dynamicSource,
+            sessionBuffering: true,
+            // Keep the validated response alive across cache windows on desktop
+            // too; restarting every 32 MiB repeatedly pays origin header latency.
+            continuousTransfers: true,
+            readAheadConcurrency: 1,
+            mediaHeaderTimeout: mediaHeaderTimeout,
+            waitForRetry: waitForRetry,
+          );
       if (_disposed || generation != _generation) {
         await transport.close();
         return;
@@ -636,11 +720,25 @@ class RillightVideoBackend extends VideoBackend
       // transport yields its single producer to uncached index/track probes.
       // Opening needs read-ahead even when output is held for settings restore.
       // Apply the user's pause intent once the first frame is ready below.
-      await transport.setPlaybackActive(true);
       _openPhase = 'register';
 
-      final sealed = await transport.register(request.url);
+      final Uri sealed;
+      if (reuseTransport) {
+        sealed = _mediaRoute!;
+        await transport.refreshSourceUrl(
+          sealed,
+          request.url,
+          preserveBufferedResponse: true,
+        );
+      } else {
+        sealed = await transport.register(request.url);
+      }
       _mediaRoute = sealed;
+      // A paused foreground return can read its retained bytes on demand;
+      // do not restart speculative downloads before the user presses play.
+      await transport.setPlaybackActive(
+        !reuseTransport || !request.startPaused,
+      );
       final warmed = request.warmedPrefix;
       if (warmed != null && warmed.isNotEmpty) {
         try {
@@ -808,6 +906,11 @@ class RillightVideoBackend extends VideoBackend
         _emit(VideoEventKind.completed, event.value == true, generation);
       case 'error':
         isPlaying = false;
+        if (_transportSuspended) {
+          _nativeRetained = false;
+          _opened = false;
+          return;
+        }
         final failedTransport = _transport;
         if (failedTransport != null) {
           unawaited(() async {
@@ -833,6 +936,7 @@ class RillightVideoBackend extends VideoBackend
           _noteOutput(Map<String, dynamic>.from(sample), generation);
         }
       case 'interruption':
+        _wantsPlayback = false;
         isPlaying = false;
         final transport = _transport;
         if (transport != null) {
@@ -844,6 +948,7 @@ class RillightVideoBackend extends VideoBackend
             }
           }());
         }
+        _emit(VideoEventKind.interrupted, event.value, generation);
         _emit(VideoEventKind.playing, false, generation);
       default:
         break;
@@ -1083,7 +1188,8 @@ class RillightVideoBackend extends VideoBackend
 
   Future<void> _refreshDiagnostics(int generation) async {
     final transport = _transport;
-    if (_diagnosticsBusy ||
+    if (_transportSuspended ||
+        _diagnosticsBusy ||
         _cacheTrackPending > 0 ||
         transport == null ||
         generation != _generation) {
@@ -1358,6 +1464,7 @@ class RillightVideoBackend extends VideoBackend
     _sourceRenewalCount++;
     _lastOpenRequest = VideoOpenRequest(
       sessionId: request.sessionId,
+      cacheIdentity: request.cacheIdentity,
       url: url,
       start: request.start,
       headers: request.headers,
@@ -1525,9 +1632,12 @@ class RillightVideoBackend extends VideoBackend
   Future<void> _stopSession({
     required bool keepAndroidPlayer,
     required bool releaseRetainedSnapshot,
+    bool retainTransport = false,
   }) async {
     _diagnosticsTimer?.cancel();
     _diagnosticsTimer = null;
+    _nativeRetained = false;
+    if (retainTransport) await _transport?.suspend();
     await _coreEvents?.cancel();
     _coreEvents = null;
     final player = _player;
@@ -1541,7 +1651,11 @@ class RillightVideoBackend extends VideoBackend
       }
     }
     final transport = _transport;
-    _transport = null;
+    if (!retainTransport) {
+      _transport = null;
+      _transportSuspended = false;
+      _mediaRoute = null;
+    }
     // Opening the next item already published a reconnecting snapshot.
     // Only an explicit stop or dispose replaces that with an empty one.
     if (releaseRetainedSnapshot) {
@@ -1555,7 +1669,7 @@ class RillightVideoBackend extends VideoBackend
       _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, _generation);
     }
     _releasePlaybackImages();
-    await transport?.close();
+    if (!retainTransport) await transport?.close();
   }
 
   /// The desktop playback process owns a 16 MiB image cache. Android keeps
@@ -1569,6 +1683,41 @@ class RillightVideoBackend extends VideoBackend
     final painting = PaintingBinding.instance.imageCache;
     painting.clear();
     painting.clearLiveImages();
+  }
+
+  @override
+  Future<void> suspend() async {
+    if (_disposed || _transportSuspended) return;
+    if (_lastOpenRequest?.dynamicSource != false) {
+      await stop();
+      return;
+    }
+    ++_recoveryEpoch;
+    _recovering = false;
+    if (_opened && _player != null) {
+      // A temporary interruption is a pause. Retaining the decoder avoids
+      // network probes and a second first-frame wait on lock/wake.
+      await pause();
+      _diagnosticsTimer?.cancel();
+      _diagnosticsTimer = null;
+      _nativeRetained = true;
+      _transportSuspended = _transport != null;
+      _emit(VideoEventKind.cacheSpeed, 0.0, _generation);
+      return;
+    }
+    ++_generation;
+    _opened = false;
+    _wantsPlayback = false;
+    isPlaying = false;
+    // Cancel readers and prefetch before retiring a decoder blocked on IO.
+    await _transport?.suspend();
+    await _stopSession(
+      keepAndroidPlayer: true,
+      releaseRetainedSnapshot: false,
+      retainTransport: true,
+    );
+    _transportSuspended = _transport != null;
+    _emit(VideoEventKind.cacheSpeed, 0.0, _generation);
   }
 
   @override

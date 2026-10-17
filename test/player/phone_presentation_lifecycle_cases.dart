@@ -88,6 +88,61 @@ class _Presentation implements VideoBackendPhonePresentation {
 
 void main() {
   testWidgets(
+    'native resume after Flutter resume restores a suspended player',
+    (tester) async {
+      final c = _Controller(), p = _Presentation();
+      final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+      addTearDown(lifecycle.dispose);
+      p.phonePresentation.value = {
+        'session': 'one',
+        'foreground': false,
+        'shouldSuspend': true,
+      };
+      await lifecycle.settled;
+      expect(c.suspends, 1);
+      lifecycle.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await lifecycle.settled;
+      expect(
+        c.restores,
+        0,
+        reason: 'Native still blocks open before its resume callback',
+      );
+      p.phonePresentation.value = {
+        'session': 'one',
+        'foreground': true,
+        'shouldSuspend': false,
+      };
+      await lifecycle.settled;
+      expect(c.restores, 1);
+      p.phonePresentation.value = {
+        'session': 'one',
+        'foreground': true,
+        'shouldSuspend': false,
+        'generation': 2,
+      };
+      await lifecycle.settled;
+      expect(
+        c.restores,
+        1,
+        reason: 'Ordinary presentation updates must not reopen media',
+      );
+    },
+  );
+
+  testWidgets(
+    'screenshot overlay and inactive return keep the current session',
+    (tester) async {
+      final c = _Controller(), p = _Presentation();
+      final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+      addTearDown(lifecycle.dispose);
+      lifecycle.didChangeAppLifecycleState(AppLifecycleState.inactive);
+      lifecycle.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await lifecycle.settled;
+      expect(c.suspends, 0);
+    },
+  );
+
+  testWidgets(
     'native transition and PiP retain the same paused/playing session',
     (tester) async {
       final c = _Controller(), p = _Presentation();

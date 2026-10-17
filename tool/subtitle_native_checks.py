@@ -15,6 +15,8 @@ def main():
     parser.add_argument('--build', type=Path, default=ROOT / 'build/subtitle-native-checks')
     args = parser.parse_args()
     sdk, build = args.sdk.resolve(), args.build.resolve()
+    if sys.platform == "win32":
+        build = build / "ucrt64"
     sys.path.insert(0, str(NATIVE))
     from verify_core_dependencies import verify
     platform = 'windows-x64' if sys.platform == 'win32' else ('macos-universal' if sys.platform == 'darwin' else 'linux-x64')
@@ -22,7 +24,7 @@ def main():
     if errors:
         raise RuntimeError('\n'.join(errors))
     env = os.environ.copy()
-    candidates = [sdk / 'bin', Path('C:/msys64/mingw64/bin')] if sys.platform == 'win32' else [sdk / 'bin']
+    candidates = [sdk / 'bin', Path('C:/msys64/ucrt64/bin')] if sys.platform == 'win32' else [sdk / 'bin']
     env['PATH'] = os.pathsep.join(map(str, candidates)) + os.pathsep + env.get('PATH', '')
     env['LD_LIBRARY_PATH'] = str(sdk / 'lib') + os.pathsep + env.get('LD_LIBRARY_PATH', '')
     env['DYLD_LIBRARY_PATH'] = str(sdk / 'lib')
@@ -43,7 +45,7 @@ def main():
             return completed.stdout
         configure = [cmake, '-S', NATIVE, '-B', build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Debug', f'-DRILLIGHT_CORE_PREFIX={sdk.as_posix()}']
         if sys.platform == 'win32':
-            configure += ['-DCMAKE_C_COMPILER=C:/msys64/mingw64/bin/gcc.exe', '-DCMAKE_CXX_COMPILER=C:/msys64/mingw64/bin/g++.exe']
+            configure += ['-DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe', '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe']
         run(configure)
         run([cmake, '--build', build, '--target', 'rillight_core_ass_test', 'rillight_bitmap_subtitle_test', '--parallel', '4'])
         pattern = 'rillight_core_(ass_composition|subtitle_presentation|mov_text)|rillight_bitmap_subtitle'

@@ -63,6 +63,11 @@ internal class PhonePipPolicy {
     fun suspend() {
         entering = false; active = false; returning = false; playing = false; ready = false; blocked = true; mediaBound = false; revision++
     }
+    fun pipUnavailable() {
+        // A denied/stale PiP callback cannot veto ordinary foreground media.
+        if (!foreground) { suspend(); return }
+        entering = false; active = false; returning = false; revision++
+    }
     fun resume() {
         foreground = true; returning = false; blocked = false
         // Foreground is a fact, not a new request. A denied in-flight entry's

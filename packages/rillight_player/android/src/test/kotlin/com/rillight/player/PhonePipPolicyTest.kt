@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PhonePipPolicyTest {
+    @Test fun deniedOrStalePipCannotBlockForegroundContinuePlayback() {
+        val p = ready()
+        p.pipUnavailable()
+        assertTrue(p.canOpenMedia()); assertFalse(p.blocked); assertTrue(p.playing)
+        p.foreground = false
+        p.pipUnavailable()
+        assertTrue(p.blocked); assertFalse(p.canOpenMedia()); assertFalse(p.playing)
+    }
     private fun ready() = PhonePipPolicy().apply { bind("one"); enabled = true; ready = true; playing = true }
     @Test fun activePipMediaStopBindAndReadyKeepsWindowButRevokesOldControls() {
         val p = ready(); p.foreground = false; p.mode(true)

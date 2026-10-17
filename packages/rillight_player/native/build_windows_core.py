@@ -16,6 +16,8 @@ import shutil
 import subprocess
 
 from build_core_dependencies import remove_enhancement_runtime
+from build_windows_dependencies import (
+    require_ucrt_compiler, copy_runtime_dependencies, record_libraries)
 from verify_core_dependencies import SPEC, verify
 
 
@@ -42,11 +44,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, required=True)
     parser.add_argument("--build", type=Path, required=True)
-    parser.add_argument("--mingw-bin", type=Path, default=Path("C:/msys64/mingw64/bin"))
+    parser.add_argument("--mingw-bin", type=Path, default=Path("C:/msys64/ucrt64/bin"))
     args = parser.parse_args()
     if platform.system() != "Windows":
         parser.error("the Windows core must be built and loaded on Windows")
-    prefix, build, toolchain = args.prefix.resolve(), args.build.resolve(), args.mingw_bin.resolve()
+    prefix, build, toolchain = args.prefix.resolve(), (args.build / "ucrt64").resolve(), args.mingw_bin.resolve()
     if prefix == build or prefix in build.parents or build in prefix.parents:
         parser.error("SDK prefix and build directory must be separate")
     errors = verify(prefix, "windows-x64", require_subtitles=True)
@@ -55,9 +57,10 @@ def main() -> None:
     cmake, compiler, c_compiler, ninja = (toolchain / name for name in
                                           ("cmake.exe", "c++.exe", "cc.exe", "ninja.exe"))
     if not all(path.is_file() for path in (cmake, compiler, c_compiler, ninja)):
-        parser.error(f"Missing MinGW64 CMake, gcc or Ninja in {toolchain}")
+        parser.error(f"Missing UCRT64 CMake, gcc or Ninja in {toolchain}")
     env = dict(os.environ)
     env["PATH"] = str(toolchain) + os.pathsep + env.get("PATH", "")
+    require_ucrt_compiler(c_compiler, env)
     subprocess.run([str(cmake), "-S", str(NATIVE), "-B", str(build),
                     "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
                     f"-DCMAKE_C_COMPILER={c_compiler}",
@@ -73,11 +76,10 @@ def main() -> None:
     shutil.copyfile(built, temporary)
     os.replace(temporary, published)
     remove_enhancement_runtime(prefix / "bin")
+    copy_runtime_dependencies(prefix, toolchain.parent)
     marker_file = prefix / "rillight-core-dependencies.json"
     marker = json.loads(marker_file.read_text(encoding="utf-8"))
-    marker["libraries"]["bin/librillight_core.dll"] = digest(published)
-    marker_file.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n",
-                           encoding="utf-8")
+    record_libraries(prefix, marker)
     errors = verify(prefix, "windows-x64", require_subtitles=True)
     if errors:
         raise RuntimeError("Published SDK failed hash verification: " + "; ".join(errors))

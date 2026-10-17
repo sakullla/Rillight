@@ -89,6 +89,8 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
         return [f"{target}: invalid manifest: {error}"]
     if marker.get("platform") != target:
         errors.append(f"{target}: manifest platform mismatch")
+    if target == "windows-x64" and marker.get("msystem") != "UCRT64":
+        errors.append(f"{target}: rebuild the SDK with MSYS2 UCRT64 in a fresh prefix")
     if marker.get("ffmpeg_version") != SPEC["ffmpeg"]["version"]:
         errors.append(f"{target}: FFmpeg version mismatch")
     if marker.get("ffmpeg_commit") != SPEC["ffmpeg"]["commit"]:

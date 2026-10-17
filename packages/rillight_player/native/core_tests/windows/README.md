@@ -30,12 +30,12 @@ recorded separately in `../../HDR_PRESENTATION.md`.
 `flutter_core_smoke.dart` and `flutter_smoke_source.cpp` exercise the complete
 core → Flutter texture path with generated `tracks.mkv` media. Run from the
 repository root in PowerShell on Windows with Flutter 3.47.6, the pinned
-Windows core SDK, and MSYS2 MinGW64 installed:
+Windows core SDK, and MSYS2 UCRT64 installed:
 
 ```powershell
-$env:RILLIGHT_CORE_PREFIX_WINDOWS_X64 = (Resolve-Path build/ffmpeg-core-windows-hw-sdk).Path
+$env:RILLIGHT_CORE_PREFIX_WINDOWS_X64 = (Resolve-Path build/windows-ucrt64-sdk).Path
 $sdk = $env:RILLIGHT_CORE_PREFIX_WINDOWS_X64
-# Add your MinGW64 bin directory to PATH before running these commands.
+# Add your UCRT64 bin directory to PATH before running these commands.
 python packages/rillight_player/native/verify_core_dependencies.py --prefix $sdk --target windows-x64 --require-subtitles
 python tool/player_fixtures.py --media build/player-validation/media --ffmpeg ffmpeg
 g++ -std=c++17 -shared -O2 packages/rillight_player/native/core_tests/windows/flutter_smoke_source.cpp "-L$sdk/lib" -lrillight_core -o build/t4_smoke_helper.dll

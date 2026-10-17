@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/emby/emby_codec.dart';
 
 import 'dart:async';
@@ -1030,6 +1031,39 @@ void main() {
   );
 
   test(
+    'failed progress then resume and exit retains the final stop position',
+    () async {
+      await controller.start();
+      client.failReports = true;
+      await controller.seekTo(const Duration(seconds: 42));
+      expect(controller.progressSyncFailed, isTrue);
+      await controller.togglePlay();
+      await controller.togglePlay();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 55));
+      await _until(() => controller.position == const Duration(seconds: 55));
+      await controller.close();
+      expect(client.reports.last.$1, 'Stopped');
+      expect(client.reports.last.$2.position, const Duration(seconds: 55));
+      expect(snapshots.snapshot!.position, const Duration(seconds: 55));
+      expect(snapshots.snapshot!.cleanupOnly, isFalse);
+    },
+  );
+
+  test(
+    'successful final stop clears an earlier progress failure on exit',
+    () async {
+      await controller.start();
+      client.failReports = true;
+      await controller.seekTo(const Duration(seconds: 42));
+      expect(controller.progressSyncFailed, isTrue);
+      client.failReports = false;
+      await controller.close();
+      expect(controller.progressSyncFailed, isFalse);
+      expect(snapshots.snapshot, isNull);
+    },
+  );
+
+  test(
     'changing credentials cancels queued reports for the previous account',
     () async {
       await controller.start();
@@ -1435,6 +1469,7 @@ class _ControlledClient extends EmbyClient {
   Completer<void>? playingGate;
   Completer<void>? progressGate;
   Completer<void>? stoppedGate;
+  bool failReports = false;
   Completer<void>? queryGate;
   int queryCount = 0;
   int userRequests = 0;
@@ -1505,12 +1540,24 @@ class _ControlledClient extends EmbyClient {
   Future<void> reportProgress(PlaybackReport report) async {
     reports.add(('Progress', report));
     await progressGate?.future;
+    if (failReports) {
+      throw const MediaServerException(
+        MediaServerFailureKind.unreachable,
+        statusCode: 503,
+      );
+    }
   }
 
   @override
   Future<void> reportStopped(PlaybackReport report) async {
     reports.add(('Stopped', report));
     await stoppedGate?.future;
+    if (failReports) {
+      throw const MediaServerException(
+        MediaServerFailureKind.unreachable,
+        statusCode: 503,
+      );
+    }
   }
 
   void release() {

@@ -71,8 +71,8 @@ int main(void) {
 
     def compile_run(self, name, source):
         compiler = os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
-        if not compiler and Path("C:/msys64/mingw64/bin/gcc.exe").is_file():
-            compiler = "C:/msys64/mingw64/bin/gcc.exe"
+        if not compiler and Path("C:/msys64/ucrt64/bin/gcc.exe").is_file():
+            compiler = "C:/msys64/ucrt64/bin/gcc.exe"
         if not compiler:
             self.skipTest("C compiler unavailable; native helper checks unverified")
         directory = NATIVE.parents[2] / "build/android-dovi-patch-tests"

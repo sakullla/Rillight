@@ -1,4 +1,4 @@
-"""Build the pinned Windows media SDK and candidate core using MSYS2 MinGW64."""
+"""Build the pinned Windows media SDK and candidate core using MSYS2 UCRT64."""
 
 import argparse
 import json
@@ -15,6 +15,27 @@ from build_core_dependencies import (
 from verify_core_dependencies import ROOT, SPEC, digest, verify
 
 
+def require_ucrt_compiler(compiler: Path, environment: dict) -> None:
+    """Check the selected compiler headers, including explicit CLI overrides."""
+    subprocess.run([str(compiler), '-x', 'c', '-fsyntax-only', '-'],
+                   input='#include <_mingw.h>\n#ifndef _UCRT\n#error UCRT64 compiler required\n#endif\n',
+                   text=True, env=environment, check=True)
+
+
+def require_ucrt_prefix(prefix: Path) -> None:
+    """Never overlay UCRT libraries onto an old or unmarked SDK."""
+    if not prefix.exists() or not any(prefix.iterdir()):
+        return
+    marker = prefix / 'rillight-core-dependencies.json'
+    if marker.is_file():
+        try:
+            if json.loads(marker.read_text(encoding='utf-8')).get('msystem') == 'UCRT64':
+                return
+        except (OSError, json.JSONDecodeError):
+            pass
+    raise RuntimeError(f'Use a fresh SDK --prefix for the UCRT64 migration: {prefix}')
+
+
 def copy_runtime_dependencies(prefix: Path, mingw: Path) -> None:
     """Copy transitive MinGW DLL imports, leaving Windows DLLs to the OS."""
     pending = list((prefix / 'bin').glob('*.dll'))
@@ -28,6 +49,8 @@ def copy_runtime_dependencies(prefix: Path, mingw: Path) -> None:
         output = subprocess.check_output(
             [str(mingw / 'bin/objdump.exe'), '-p', str(library)], text=True)
         for name in re.findall(r'DLL Name:\s*(\S+)', output):
+            if name.lower() == 'msvcrt.dll':
+                raise RuntimeError(f'Non-UCRT runtime dependency: {name} ({library.name})')
             destination = prefix / 'bin' / name
             source = mingw / 'bin' / name
             if destination.is_file():
@@ -59,10 +82,15 @@ def main() -> None:
     args = parser.parse_args()
     prefix, work, msys = (path.resolve() for path in
                           (args.prefix, args.work, args.msys_root))
+    require_ucrt_prefix(prefix)
+    # Meson and CMake retain compiler paths; do not reconfigure MINGW64 builds.
+    work = work / 'ucrt64'
     prefix.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
-    mingw = msys / 'mingw64'
-    environment = {**os.environ, 'MSYSTEM': 'MINGW64', 'CHERE_INVOKING': '1'}
+    mingw = msys / 'ucrt64'
+    environment = {**os.environ, 'MSYSTEM': 'UCRT64', 'CHERE_INVOKING': '1'}
+    environment['PATH'] = str(mingw / 'bin') + os.pathsep + environment.get('PATH', '')
+    require_ucrt_compiler(mingw / 'bin/gcc.exe', environment)
 
     def unix(path):
         return subprocess.check_output(
@@ -70,7 +98,7 @@ def main() -> None:
 
     def shell(script, *, capture=False):
         command = [str(msys / 'usr/bin/bash.exe'), '-lc',
-                   'set -euo pipefail\nexport PATH=/mingw64/bin:/usr/bin:$PATH\n' + script]
+                   'set -euo pipefail\nexport PATH=/ucrt64/bin:/usr/bin:$PATH\n' + script]
         if capture:
             return subprocess.check_output(command, env=environment, text=True).strip()
         subprocess.run(command, env=environment, check=True)
@@ -125,7 +153,7 @@ def main() -> None:
               shlex.join([unix(work / 'ffmpeg/configure'), *configure]) + '\n' +
               f'make -j{args.jobs}\nmake install\n')
         copy_runtime_dependencies(prefix, mingw)
-        marker = {'schema': 1, 'platform': 'windows-x64',
+        marker = {'schema': 1, 'platform': 'windows-x64', 'msystem': 'UCRT64',
                   'ffmpeg_version': SPEC['ffmpeg']['version'],
                   'ffmpeg_tag': SPEC['ffmpeg']['version'],
                   'ffmpeg_commit': SPEC['ffmpeg']['commit'],
@@ -150,8 +178,8 @@ def main() -> None:
     core_build = work / 'core-build'
     shell(shlex.join(['cmake', '-S', unix(ROOT), '-B', unix(core_build), '-G', 'Ninja',
                       '-DCMAKE_BUILD_TYPE=Release',
-                      '-DCMAKE_C_COMPILER=/mingw64/bin/cc.exe',
-                      '-DCMAKE_CXX_COMPILER=/mingw64/bin/c++.exe',
+                      '-DCMAKE_C_COMPILER=/ucrt64/bin/cc.exe',
+                      '-DCMAKE_CXX_COMPILER=/ucrt64/bin/c++.exe',
                       f'-DRILLIGHT_CORE_PREFIX={prefix_unix}']) + '\n' +
           shlex.join(['cmake', '--build', unix(core_build), '--target', 'rillight_core',
                       '--parallel', str(args.jobs)]))

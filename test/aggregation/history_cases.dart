@@ -181,6 +181,68 @@ Future<WatchRecord?> _observe(
 );
 
 void main() {
+  test('a locked private playback permit cannot save preference', () async {
+    final f = await _fixture(privateB: true);
+    final permit = f.registry.permit(
+      f.b,
+      libraryId: 'library',
+      sessionOnly: true,
+    );
+    await f.writer.savePreference(f.pref(f.b), playbackPermit: permit);
+    await f.access.lock();
+    await expectLater(
+      f.writer.savePreference(f.pref(f.b), playbackPermit: permit),
+      throwsStateError,
+    );
+  });
+
+  test('local preference uses its live playback permit without widening aggregation', () async {
+    final f = await _fixture();
+    await f.registry.configureScope('a', participates: false, libraryIds: {});
+    final preference = f.pref(f.a);
+    final permit = f.registry.permit(
+      f.a,
+      libraryId: 'library',
+      sessionOnly: true,
+    );
+    await expectLater(f.writer.savePreference(preference), throwsStateError);
+    await f.writer.savePreference(preference, playbackPermit: permit);
+    final local = f.writer.resolvePreference(
+      owner: preference.owner,
+      region: AccessRegion.ordinary,
+      candidates: [f.candidate(f.a)],
+      playbackPermit: permit,
+    );
+    expect(local.failure, isNull);
+    expect(local.selected!.source, preference.target);
+    final aggregated = f.writer.resolvePreference(
+      owner: preference.owner,
+      region: AccessRegion.ordinary,
+      candidates: [f.candidate(f.a)],
+    );
+    expect(aggregated.failure, PreferenceFailure.notParticipating);
+    expect(aggregated.allowedCandidates, isEmpty);
+    for (final wrong in [
+      f.registry.permit(f.b, libraryId: 'library', sessionOnly: true),
+      f.registry.permit(f.a, libraryId: 'other-library', sessionOnly: true),
+      f.registry.permit(f.a, sessionOnly: true),
+    ]) {
+      await expectLater(
+        f.writer.savePreference(preference, playbackPermit: wrong),
+        throwsStateError,
+      );
+    }
+    await f.registry.configureScope(
+      'a',
+      participates: true,
+      libraryIds: {'other'},
+    );
+    await expectLater(
+      f.writer.savePreference(preference, playbackPermit: permit),
+      throwsStateError,
+    );
+  });
+
   test('actual local observation commits before failed report; reports only actual source', () async {
     final f = await _fixture();
     final s = await f.begin(f.a);

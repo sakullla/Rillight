@@ -34,7 +34,7 @@ internal class PhonePipCoordinator(private val activity: Activity, private val h
     private var watchingPermission = false
     private val permissionListener = AppOpsManager.OnOpChangedListener { op, packageName ->
         if (op == AppOpsManager.OPSTR_PICTURE_IN_PICTURE && packageName == activity.packageName) {
-            handler.post { if (!disposed) { if (!supported()) suspend() else refresh() } }
+            handler.post { if (!disposed) { if (!supported()) pipUnavailable() else refresh() } }
         }
     }
     private val action = "${activity.packageName}.PHONE_PIP_CONTROL"
@@ -223,7 +223,7 @@ internal class PhonePipCoordinator(private val activity: Activity, private val h
         publish()
     }
     fun mode(value: Boolean) {
-        if (value && (entrySession != policy.session || !policy.enabled || policy.blocked)) { suspend(); return }
+        if (value && (entrySession != policy.session || !policy.enabled || policy.blocked)) { pipUnavailable(); return }
         if (!value && policy.entering && !policy.active) return
         policy.mode(value)
         // Mode=false can precede resumed by several seconds during expansion.
@@ -250,6 +250,11 @@ internal class PhonePipCoordinator(private val activity: Activity, private val h
         refresh()
     }
     fun stopped() = suspend()
+    private fun pipUnavailable() {
+        policy.pipUnavailable()
+        if (policy.blocked) owner?.pauseForActivity()
+        refresh()
+    }
     fun suspend() {
         policy.suspend(); owner?.pauseForActivity(); refresh()
     }

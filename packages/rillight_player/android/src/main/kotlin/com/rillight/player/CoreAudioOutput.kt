@@ -11,8 +11,9 @@ import android.media.PlaybackParams
 import android.os.Build
 import java.nio.ByteBuffer
 
-internal const val AUDIO_WRITE_REJECT = -2
-internal const val AUDIO_WRITE_DROP = -3
+// Keep internal feeder actions distinct from AudioTrack's platform error codes.
+internal const val AUDIO_WRITE_REJECT = -1002
+internal const val AUDIO_WRITE_DROP = -1003
 
 internal data class AudioSinkCapability(
     val channels: Int,
@@ -46,7 +47,8 @@ internal fun routeCapability(
     direct: (Int) -> Boolean,
 ): AudioSinkCapability {
     val selected = outputs.filter { it.id in routedIds }
-    if (routedIds.isEmpty() || selected.isEmpty()) return AudioSinkCapability(2, 0, false)
+    if (routedIds.isEmpty() || selected.size != routedIds.size)
+        return AudioSinkCapability(2, 0, false)
     var channels = 8
     var accept = 3 or otherEncodings.keys.fold(0) { mask, bit -> mask or bit }
     var atmos = true
@@ -196,9 +198,10 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     fun routedDeviceIds(refresh: Boolean = false): Set<Int> {
         if (Build.VERSION.SDK_INT < 24) return emptySet()
         val active = track ?: return emptySet()
-        if (refresh) routePoll.reset()
-        return routePoll.read(System.nanoTime()) {
-            active.routedDevice?.id?.let { setOf(it) } ?: emptySet()
+        if (refresh) routePoll.invalidate()
+        return routePoll.read(System.nanoTime(), active.playState == AudioTrack.PLAYSTATE_PLAYING) {
+            if (Build.VERSION.SDK_INT >= 36) active.routedDevices.map { it.id }.toSet()
+            else active.routedDevice?.id?.let { setOf(it) } ?: emptySet()
         }
     }
 
@@ -292,22 +295,33 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
             if (frame.passthrough) return AUDIO_WRITE_REJECT
             throw IllegalStateException("AudioTrack does not support the PCM layout")
         }
-        val track = track ?: return 0
+        if (track == null) return 0
         if (offset >= frame.bytes.size) return 0
         endOfInput = false
-        val written = if (tunneled) {
-            if (tunnelFrame !== frame) {
-                tunnelFrame = frame
-                tunnelBuffer = ByteBuffer.allocateDirect(frame.bytes.size).apply {
-                    put(frame.bytes); flip()
+        val written = writeAudioTrackWithRecovery(passthrough, tunneled, write = {
+            val track = requireNotNull(track)
+            if (tunneled) {
+                if (tunnelFrame !== frame) {
+                    tunnelFrame = frame
+                    tunnelBuffer = ByteBuffer.allocateDirect(frame.bytes.size).apply {
+                        put(frame.bytes); flip()
+                    }
                 }
-            }
-            val buffer = requireNotNull(tunnelBuffer)
-            buffer.position(offset)
-            track.write(buffer, buffer.remaining(), AudioTrack.WRITE_NON_BLOCKING,
-                (frame.ptsUs.coerceAtLeast(0) + offset / bytesPerFrame.toLong() * 1_000_000L / sampleRate) * 1000L)
-        } else track.write(frame.bytes, offset, frame.bytes.size - offset,
-            AudioTrack.WRITE_NON_BLOCKING)
+                val buffer = requireNotNull(tunnelBuffer)
+                buffer.position(offset)
+                track.write(buffer, buffer.remaining(), AudioTrack.WRITE_NON_BLOCKING,
+                    (frame.ptsUs.coerceAtLeast(0) + offset / bytesPerFrame.toLong() * 1_000_000L / sampleRate) * 1000L)
+            } else track.write(frame.bytes, offset, frame.bytes.size - offset,
+                AudioTrack.WRITE_NON_BLOCKING)
+        }, recreate = { open(frame) })
+        if (written == AUDIO_WRITE_REJECT) {
+            // The dead compressed sink cannot be paused/flushed reliably. The
+            // feeder will negotiate PCM and lazily create its replacement.
+            track?.release()
+            track = null
+            routePoll.reset()
+            return written
+        }
         if (written < 0) throw IllegalStateException("AudioTrack write failed: $written")
         if (written > 0 && frame.passthrough && offset + written >= frame.bytes.size) {
             val samples = frame.sampleCount
@@ -429,7 +443,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     private fun watchRoute(created: AudioTrack) {
         if (Build.VERSION.SDK_INT < 24) return
         created.addOnRoutingChangedListener(AudioRouting.OnRoutingChangedListener {
-            routePoll.reset()
+            routePoll.invalidate()
             onRoute?.invoke()
         }, null)
     }

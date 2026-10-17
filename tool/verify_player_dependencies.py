@@ -68,6 +68,7 @@ if sys.platform == 'win32':
         raise RuntimeError('Bundled Windows native license set differs from source')
     marker = json.loads(marker_file.read_text(encoding='utf-8'))
     if (marker.get('platform') != 'windows-x64' or
+            marker.get('msystem') != 'UCRT64' or
             marker.get('ffmpeg_version') != SPEC['ffmpeg']['version'] or
             marker.get('ffmpeg_commit') != SPEC['ffmpeg']['commit'] or
             marker.get('ffmpeg_patches') != SPEC['ffmpeg']['patches'] or

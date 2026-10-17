@@ -11,20 +11,20 @@ void main() {
     caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
   );
   group(
-    'home/library_tiles_test.dart',
-    caseEntrypoints['home/library_tiles_cases.dart']!,
+    'home/hero_artwork_test.dart',
+    caseEntrypoints['home/hero_artwork_cases.dart']!,
   );
   group(
-    'library/external_link_test.dart',
-    caseEntrypoints['library/external_link_cases.dart']!,
+    'home/library_tiles_test.dart',
+    caseEntrypoints['home/library_tiles_cases.dart']!,
   );
   group(
     'library/person_works_test.dart',
     caseEntrypoints['library/person_works_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 4]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
+    'mobile/mobile_flow_test.dart [part 3]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#2']!,
   );
   group(
     'mobile/phone_home_rails_test.dart',
@@ -39,7 +39,7 @@ void main() {
     caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
   );
   group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'widgets/desktop_back_button_test.dart',
+    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
   );
 }

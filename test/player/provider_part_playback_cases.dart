@@ -10,6 +10,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/plex/plex_client.dart';
 
@@ -22,13 +23,25 @@ const device = ClientDeviceInfo(
   version: '1',
 );
 
-class _Backend extends FakeVideoBackend implements VideoBackendCapabilities {
+class _Backend extends FakeVideoBackend
+    implements VideoBackendCapabilities, VideoBackendSuspension {
+  @override
+  Future<void> suspend() => pause();
   @override
   Future<PlaybackCapabilities> playbackCapabilities(int bitrate) async =>
       PlaybackCapabilities(h264: true, aac: true, maxStreamingBitrate: bitrate);
   _Backend() : super(duration: const Duration(seconds: 60));
   final requests = <VideoOpenRequest>[];
   Completer<void>? openGate;
+  Completer<void>? subtitleGate;
+  bool restoringSubtitle = false;
+  @override
+  Future<void> setSubtitleOff({int slot = 0}) async {
+    restoringSubtitle = true;
+    await subtitleGate?.future;
+    await super.setSubtitleOff(slot: slot);
+  }
+
   @override
   Future<void> open(VideoOpenRequest request) async {
     requests.add(request);
@@ -89,6 +102,157 @@ void main() {
     expect(value.error, isNull, reason: value.disconnectDetail);
     return value;
   }
+
+  for (final stage in ['subtitle restoration', 'Playing reporting']) {
+    test(
+      'lock during $stage restores a freshly prepared Plex session',
+      () async {
+        fake.remuxDecision = true;
+        final gate = Completer<void>();
+        if (stage == 'subtitle restoration') {
+          backend.subtitleGate = gate;
+        } else {
+          fake.playingReportGate = gate;
+        }
+        final starting = start(seconds: 5, bitrate: 8000000);
+        try {
+          await until(
+            () => stage == 'subtitle restoration'
+                ? backend.restoringSubtitle
+                : fake.requests.any((r) => r.query['state'] == 'playing'),
+          );
+          final value = player!;
+          expect(value.loading, isFalse);
+          expect(value.resolved!.playMethod, PlayMethod.directStream);
+          final previous = value.resolved!;
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 15),
+          );
+          await until(() => value.position == const Duration(seconds: 20));
+          final suspending = value.suspendPlayback();
+          // A pending Playing report must finish before the queued Stopped.
+          gate.complete();
+          await Future.wait([starting, suspending]);
+          expect(previous.resources!.isReleased, isTrue);
+          expect(fake.sessions, isNot(contains(previous.resources!.id)));
+
+          await value.restorePlayback();
+          final restored = value.resolved!;
+          expect(value.error, isNull, reason: value.disconnectDetail);
+          expect(restored.resources!.isReleased, isFalse);
+          expect(fake.sessions, contains(restored.resources!.id));
+          expect(restored.resources, isNot(same(previous.resources)));
+          expect(backend.requests.last.url, restored.streamUrl);
+          expect(restored.streamUrl, isNot(previous.streamUrl));
+          expect(value.position, const Duration(seconds: 20));
+          expect(value.isPlaying, isFalse);
+        } finally {
+          if (!gate.isCompleted) gate.complete();
+          await starting;
+        }
+      },
+    );
+  }
+
+  test(
+    'suspension reports progress without releasing the retained Plex lease',
+    () async {
+      fake.remuxDecision = true;
+      final value = await start(seconds: 5, bitrate: 8000000);
+      expect(value.resolved!.playMethod, PlayMethod.directStream);
+      final lease = value.resolved!.resources!;
+      await value.suspendPlayback();
+      expect(lease.isReleased, isFalse);
+      expect(fake.sessions, contains(lease.id));
+      expect((await snapshots.read())!.cleanupOnly, isTrue);
+      await value.close();
+      expect(fake.sessions, isEmpty);
+      expect(await snapshots.read(), isNull);
+      final reports = fake.requests
+          .where((r) => r.path == '/:/timeline')
+          .length;
+      expect(await recoverAndroidSession(client, snapshots), isFalse);
+      expect(
+        fake.requests.where((r) => r.path == '/:/timeline'),
+        hasLength(reports),
+      );
+    },
+  );
+
+  for (final startSeconds in [5, 75]) {
+    test(
+      'retained remux at $startSeconds restores its saved global position',
+      () async {
+        fake.remuxDecision = true;
+        final value = await start(seconds: startSeconds, bitrate: 8000000);
+        expect(value.resolved!.startsAtRequestedPosition, isTrue);
+        final request = backend.requests.last;
+        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 15));
+        await until(
+          () => value.position == Duration(seconds: startSeconds + 15),
+        );
+        await value.suspendPlayback();
+        await value.restorePlayback();
+        expect(value.error, isNull);
+        expect(backend.requests.last.url, request.url);
+        expect(backend.requests.last.cacheIdentity, request.cacheIdentity);
+        expect(backend.openedStart, const Duration(seconds: 15));
+        expect(value.position, Duration(seconds: startSeconds + 15));
+        expect(value.isPlaying, isFalse);
+      },
+    );
+  }
+
+  test('clean suspended direct playback leaves no stop compensation', () async {
+    final value = await start();
+    await value.suspendPlayback();
+    await value.disposeAsync();
+    expect(await snapshots.read(), isNull);
+  });
+
+  test(
+    'back during pending suspension retires progress before resource cleanup',
+    () async {
+      final value = await start();
+      final gate = fake.stoppedReportGate = Completer<void>();
+      final suspending = value.suspendPlayback();
+      await until(
+        () => fake.requests.any((r) => r.query['state'] == 'stopped'),
+      );
+      final closing = value.disposeAsync();
+      await Future<void>.delayed(Duration.zero);
+      gate.complete();
+      await Future.wait([suspending, closing]);
+      expect(await snapshots.read(), isNull);
+      expect(value.progressSyncFailed, isFalse);
+    },
+  );
+
+  test(
+    'cleanup failure after reported stop cannot claim progress was lost',
+    () async {
+      final value = await start(bitrate: 8000000);
+      fake.failStops = true;
+      await value.disposeAsync();
+      expect(value.progressSyncFailed, isFalse);
+      expect(
+        value.progressSyncDiagnostics['pendingCleanupCount'],
+        greaterThan(0),
+      );
+      expect((await snapshots.read())!.cleanupOnly, isTrue);
+      final reports = fake.requests
+          .where((r) => r.path == '/:/timeline')
+          .length;
+      fake.failStops = false;
+      await value.retryResourceCleanup();
+      expect(await snapshots.read(), isNull);
+      expect(
+        fake.requests.where((r) => r.path == '/:/timeline'),
+        hasLength(reports),
+      );
+    },
+  );
 
   test(
     'direct Plex playback offers and confirms actual negotiated qualities',

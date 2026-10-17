@@ -7,43 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/presentation_test.dart [part 2]',
-    caseEntrypoints['aggregation/presentation_cases.dart#1']!,
+    'aggregation/playback_runtime_test.dart [part 1]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#0']!,
   );
   group(
-    'app/desktop_gestures_test.dart',
-    caseEntrypoints['app/desktop_gestures_cases.dart']!,
+    'aggregation/presentation_test.dart [part 2]',
+    caseEntrypoints['aggregation/presentation_cases.dart#1']!,
   );
   group(
     'app/desktop_scroll_test.dart',
     caseEntrypoints['app/desktop_scroll_cases.dart']!,
   );
   group(
-    'auth/provider_connect_entry_user_agent_test.dart',
-    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
+    'home/library_latest_row_test.dart',
+    caseEntrypoints['home/library_latest_row_cases.dart']!,
   );
   group(
-    'catalog/item_detail_test.dart [part 2]',
-    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
+    'library/episode_row_test.dart',
+    caseEntrypoints['library/episode_row_cases.dart']!,
   );
   group(
-    'library/album_test.dart',
-    caseEntrypoints['library/album_cases.dart']!,
+    'media_image/blurred_artwork_test.dart',
+    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
   );
   group(
-    'mobile/search_cached_refresh_test.dart',
-    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
+    'mobile/phone_detail_redesign_test.dart',
+    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
   );
   group(
     'player/buffer_snapshot_test.dart',
     caseEntrypoints['player/buffer_snapshot_cases.dart']!,
   );
   group(
-    'player/seek_preview_test.dart',
-    caseEntrypoints['player/seek_preview_cases.dart']!,
+    'player/desktop_player_page_test.dart',
+    caseEntrypoints['player/desktop_player_page_cases.dart']!,
   );
   group(
-    'widgets/artwork_crop_test.dart',
-    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
+    'player/playback_image_release_test.dart',
+    caseEntrypoints['player/playback_image_release_cases.dart']!,
   );
 }

@@ -968,6 +968,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             lineId: currentLines.length == 1 ? currentLines.single.id : null,
             settings: settings,
           ),
+          playbackPermit: origin.permit,
         );
         _saveSwitchPreference = false;
       }

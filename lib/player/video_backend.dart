@@ -24,9 +24,14 @@ class VideoOpenRequest {
     this.warmedPrefix,
     this.warmedPrefixEtag,
     this.warmedPrefixTotalBytes,
+    this.cacheIdentity,
   });
 
   final int sessionId;
+
+  /// Stable item/version/Part identity within one authenticated playback host.
+  /// Used only to resume a transport explicitly retained by suspend().
+  final String? cacheIdentity;
   final Uri url;
   final Duration start;
   final Map<String, String> headers;
@@ -93,6 +98,12 @@ abstract interface class VideoBackendSourceRenewal {
   Future<void> refreshSourceUrl(Uri url);
 }
 
+/// Pause a ready native session and retain its bounded byte cache on backgrounding.
+/// Normal stop/dispose must still release the retained transport.
+abstract interface class VideoBackendSuspension {
+  Future<void> suspend();
+}
+
 /// Optional upstream/native failure context for an open failure. Returns null
 /// when nothing diagnosable was observed; must never throw.
 abstract interface class VideoBackendFailureContext {
@@ -151,6 +162,7 @@ enum VideoEventKind {
   buffer,
   bufferSnapshot,
   playing,
+  interrupted,
   buffering,
   completed,
   error,

@@ -5,7 +5,7 @@ import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/video_backend.dart';
 
 /// Shared phone/TV lifecycle adapter. Inactive (IME/system overlays) and layout
-/// changes do not release the session; a paused Activity does.
+/// changes keep the session active; a paused Activity suspends it.
 class AndroidPlaybackLifecycle with WidgetsBindingObserver {
   AndroidPlaybackLifecycle(this.controller, {this.phonePresentation}) {
     phonePresentation?.phonePresentation.addListener(_nativeChanged);
@@ -19,6 +19,12 @@ class AndroidPlaybackLifecycle with WidgetsBindingObserver {
         phonePresentation?.phonePresentation.value['shouldSuspend'] == true;
     if (suspend && !_nativeSuspendRequested) {
       _enqueue(AppLifecycleState.paused, nativeOnly: true);
+    } else if (!suspend &&
+        _nativeSuspendRequested &&
+        phonePresentation?.phonePresentation.value['foreground'] == true) {
+      // Flutter resumed can precede the native Activity callback. Retry only
+      // when native facts actually revoke the suspension, not on every frame.
+      _enqueue(AppLifecycleState.resumed, nativeOnly: true);
     }
     _nativeSuspendRequested = suspend;
   }
@@ -71,7 +77,11 @@ class AndroidPlaybackLifecycle with WidgetsBindingObserver {
             await controller.suspendPlayback();
           } else {
             final facts = await _facts();
-            if (_disposed || facts['retainPlayback'] == true) return;
+            if (_disposed ||
+                facts['retainPlayback'] == true ||
+                facts['shouldSuspend'] == true) {
+              return;
+            }
             await controller.restorePlayback();
           }
         })

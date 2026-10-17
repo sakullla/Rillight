@@ -172,6 +172,10 @@ class PlaybackTransportSession {
     await _request('seek');
   }
 
+  Future<void> suspend() async {
+    await _request('suspend');
+  }
+
   Future<void> cancelSubtitles() async {
     await _request('subtitles');
   }
@@ -180,8 +184,16 @@ class PlaybackTransportSession {
     await _request('retry');
   }
 
-  Future<void> refreshSourceUrl(Uri route, Uri url) async {
-    await _request('refreshSource', [route.toString(), url.toString()]);
+  Future<void> refreshSourceUrl(
+    Uri route,
+    Uri url, {
+    bool preserveBufferedResponse = false,
+  }) async {
+    await _request('refreshSource', [
+      route.toString(),
+      url.toString(),
+      preserveBufferedResponse,
+    ]);
   }
 
   Future<void> refreshTimeline(Duration duration) async {
@@ -382,6 +394,9 @@ Future<void> _serveTransport(List<Object?> arguments) async {
           case 'seek':
             proxy.cancelPendingReads(preserveSubtitles: true);
             break;
+          case 'suspend':
+            await proxy.suspend();
+            break;
           case 'subtitles':
             proxy.cancelSubtitleReads();
             break;
@@ -393,6 +408,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             proxy.refreshSourceUrl(
               Uri.parse(value[0] as String),
               Uri.parse(value[1] as String),
+              preserveBufferedResponse: value[2] as bool,
             );
             break;
           case 'tracks':

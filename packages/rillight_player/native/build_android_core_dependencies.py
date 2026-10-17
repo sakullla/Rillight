@@ -97,6 +97,8 @@ def build_abi(
     ndk_bin: Path, bash: Path, jobs: int,
 ) -> None:
     arch, triple, machine = ABIS[abi]
+    if os.name == "nt":
+        work = work / "ucrt64"
     prefix = prefix_root / abi
     build = work / f"android-ffmpeg-build-{abi}"
     prefix.mkdir(parents=True, exist_ok=True)
@@ -106,7 +108,7 @@ def build_abi(
     prefix_sh = posix_path(prefix, bash)
     ndk_sh = posix_path(ndk_bin, bash)
     suffix = ".exe" if os.name == "nt" else ""
-    host_cc = "/mingw64/bin/gcc.exe" if os.name == "nt" else "cc"
+    host_cc = "/ucrt64/bin/gcc.exe" if os.name == "nt" else "cc"
     args = [
         f"--prefix={prefix_sh}", f"--libdir={prefix_sh}/lib",
         "--target-os=android", f"--arch={arch}", "--enable-cross-compile",
@@ -127,7 +129,7 @@ def build_abi(
     ]
     script = "\n".join([
         "set -euo pipefail",
-        f'export PATH="/usr/bin:/mingw64/bin:{ndk_sh}:$PATH"'
+        f'export PATH="/usr/bin:/ucrt64/bin:{ndk_sh}:$PATH"'
         if os.name == "nt" else f'export PATH="{ndk_sh}:$PATH"',
         f"cd {shlex.quote(build_sh)}",
         " ".join([shlex.quote(f"{source_sh}/configure"),

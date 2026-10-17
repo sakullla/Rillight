@@ -828,6 +828,45 @@ void main() {
     }, tags: ['integration']);
 
     cases.testWidgets(
+      'unstarted next episode has a play button in continue watching',
+      (tester) async {
+        _usePhoneSurface(tester);
+        final catalog = _catalog(resume: [], movies: [], series: [])
+          ..nextUp = CatalogRowState(
+            items: [_item('next-episode', '下一集', 'Episode', seriesName: '剧集')],
+          );
+        addTearDown(catalog.auth.dispose);
+        addTearDown(catalog.dispose);
+        final router = _router(catalog);
+        addTearDown(router.dispose);
+        await tester.pumpWidget(_scriptedApp(catalog, router: router));
+        await tester.pump();
+        final card = find.byKey(CatalogKeys.item('next-episode'));
+        expect(
+          find.descendant(
+            of: find.byKey(CatalogKeys.resumeRow),
+            matching: card,
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: card,
+            matching: find.byKey(CatalogKeys.resumeProgress),
+          ),
+          findsNothing,
+        );
+        final play = find.byKey(const Key('phone-resume-play-next-episode'));
+        expect(tester.widget<AppIconButton>(play).tooltip, '播放');
+        await tester.tap(play);
+        await settle(tester);
+        expect(find.text('播放 next-episode'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    cases.testWidgets(
       'resume card carries progress and remove, and removal survives refresh',
       (tester) async {
         _usePhoneSurface(tester);

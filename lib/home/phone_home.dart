@@ -681,7 +681,7 @@ class _WideCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                      if (item.canResume)
+                      if (item.isPlayable)
                         Positioned(
                           left: 10,
                           bottom: 12,
@@ -698,7 +698,9 @@ class _WideCard extends StatelessWidget {
                             ),
                             child: AppIconButton(
                               key: Key('phone-resume-play-${item.id}'),
-                              tooltip: l10n.resumePlay,
+                              tooltip: item.canResume
+                                  ? l10n.resumePlay
+                                  : l10n.play,
                               style: AppButtonStyle(
                                 minimumSize: const Size(48, 48),
                                 fixedSize: const Size(48, 48),

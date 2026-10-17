@@ -168,6 +168,24 @@ class _DelayedSettingsStore extends MemoryPlayerSettingsStore {
   }
 }
 
+class _SuspendingBackend extends _RecoveryBackend
+    implements VideoBackendSuspension {
+  int suspends = 0;
+  final cacheIdentities = <String?>[];
+
+  @override
+  Future<void> suspend() async {
+    suspends++;
+    await pause();
+  }
+
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    cacheIdentities.add(request.cacheIdentity);
+    await super.open(request);
+  }
+}
+
 void main() {
   late FakeEmbyServer server;
   late _RecoveryBackend backend;
@@ -1020,6 +1038,119 @@ void main() {
     expect(controller.activeMediaSourceId, source);
     expect(controller.state.phase, PlaybackPhase.closed);
   });
+
+  test(
+    'system interruption remains paused after controller recovery',
+    () async {
+      backend.emitEvent(VideoEventKind.interrupted, 'headphones');
+      backend.emitEvent(VideoEventKind.playing, false);
+      await Future<void>.delayed(Duration.zero);
+      await controller.retryPlayback();
+      expect(backend.openedPaused, isTrue);
+      expect(controller.isPlaying, isFalse);
+      await controller.togglePlay();
+      expect(backend.isPlaying, isTrue);
+    },
+  );
+
+  test(
+    'background uses cache-preserving suspension and exit still stops',
+    () async {
+      final retainedBackend = _SuspendingBackend();
+      final retainedController = PlayerController(
+        client: controller.client,
+        itemId: 'movie-up',
+        backend: retainedBackend,
+        window: PlayerWindow(),
+        settingsStore: settings,
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      );
+      addTearDown(retainedController.disposeAsync);
+      await retainedController.start();
+      final lease = retainedController.resolved!.resources!;
+      final sourceIds = retainedController.mediaSources
+          .map((s) => s.id)
+          .toList();
+      final requests = server.requests
+          .where((r) => r.contains('/PlaybackInfo'))
+          .length;
+      await retainedController.seekTo(const Duration(seconds: 12));
+      final stops = retainedBackend.stopCount;
+      await retainedController.suspendPlayback();
+      expect(retainedBackend.suspends, greaterThan(0));
+      expect(retainedBackend.stopCount, stops);
+      expect(lease.isReleased, isFalse);
+      metadataGate = Completer<void>();
+      await retainedController.restorePlayback().timeout(
+        const Duration(seconds: 2),
+      );
+      expect(
+        server.requests.where((r) => r.contains('/PlaybackInfo')).length,
+        requests,
+      );
+      expect(retainedBackend.openedStart, const Duration(seconds: 12));
+      expect(retainedBackend.openedPaused, isTrue);
+      expect(retainedController.mediaSources.map((s) => s.id), sourceIds);
+      expect(retainedBackend.cacheIdentities.first, isNotNull);
+      expect(retainedBackend.cacheIdentities.toSet(), hasLength(1));
+      await retainedController.suspendPlayback();
+      retainedBackend.openGate = Completer<void>();
+      final restoring = retainedController.restorePlayback();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (retainedBackend.openBegins < 3 &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(retainedBackend.openBegins, 3);
+      final play = retainedController.togglePlay();
+      retainedBackend.openGate!.complete();
+      await Future.wait([restoring, play]);
+      expect(
+        retainedBackend.isPlaying,
+        isTrue,
+        reason: 'A play tap during restore must not be lost',
+      );
+      await retainedController.suspendPlayback();
+      await retainedController.disposeAsync();
+      expect(retainedBackend.stopCount, greaterThan(stops));
+      expect(lease.isReleased, isTrue);
+    },
+  );
+
+  test(
+    'background during startup retains the requested resume position',
+    () async {
+      final startupBackend = _RecoveryBackend()..openGate = Completer<void>();
+      final startup = PlayerController(
+        client: controller.client,
+        itemId: 'movie-up',
+        backend: startupBackend,
+        window: PlayerWindow(),
+        startPosition: const Duration(seconds: 45),
+        settingsStore: settings,
+        disposeTimeout: const Duration(milliseconds: 30),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      );
+      addTearDown(() async {
+        if (!startupBackend.openGate!.isCompleted) {
+          startupBackend.openGate!.complete();
+        }
+        await startup.disposeAsync();
+      });
+      final opening = startup.start();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (startupBackend.openBegins == 0 &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(startupBackend.openBegins, 1);
+      await startup.suspendPlayback();
+      startupBackend.openGate!.complete();
+      await opening;
+      await startup.restorePlayback();
+      expect(startupBackend.openedStart, const Duration(seconds: 45));
+    },
+  );
 
   test(
     'suspend timeout waits for old open to retire before foreground open',

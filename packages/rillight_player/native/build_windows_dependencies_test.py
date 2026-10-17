@@ -7,9 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_windows_dependencies import copy_runtime_dependencies, record_libraries
+from build_windows_dependencies import (
+    copy_runtime_dependencies, record_libraries, require_ucrt_prefix)
 from build_windows_core import matches_ffmpeg_version
-from verify_core_dependencies import digest
+from verify_core_dependencies import digest, verify
 
 
 class WindowsSdkTest(unittest.TestCase):
@@ -59,6 +60,41 @@ class WindowsSdkTest(unittest.TestCase):
                    return_value='DLL Name: missing.dll'):
             with self.assertRaisesRegex(RuntimeError, 'missing.dll'):
                 copy_runtime_dependencies(self.prefix, self.mingw)
+
+    def test_msvcrt_import_is_rejected_even_if_windows_provides_it(self):
+        (self.prefix / 'bin/core.dll').write_bytes(b'core')
+        (self.root / 'Windows/System32/msvcrt.dll').write_bytes(b'system')
+        with patch('build_windows_dependencies.subprocess.check_output',
+                   return_value='DLL Name: msvcrt.dll'):
+            with self.assertRaisesRegex(RuntimeError, 'Non-UCRT'):
+                copy_runtime_dependencies(self.prefix, self.mingw)
+
+    def test_old_and_unmarked_prefixes_are_not_overlaid(self):
+        marker = self.prefix / 'rillight-core-dependencies.json'
+        for content in (None, '{}', '{"msystem": "MINGW64"}', 'invalid'):
+            with self.subTest(content=content):
+                if content is not None:
+                    marker.write_text(content)
+                with self.assertRaisesRegex(RuntimeError, 'fresh SDK --prefix'):
+                    require_ucrt_prefix(self.prefix)
+
+    def test_fresh_and_ucrt_prefixes_are_accepted(self):
+        require_ucrt_prefix(self.root / 'new-sdk')
+        empty = self.root / 'empty-sdk'
+        empty.mkdir()
+        require_ucrt_prefix(empty)
+        (self.prefix / 'rillight-core-dependencies.json').write_text(
+            '{"msystem": "UCRT64"}')
+        require_ucrt_prefix(self.prefix)
+
+    def test_verifier_rejects_old_toolchain_metadata(self):
+        marker = self.prefix / 'rillight-core-dependencies.json'
+        for msystem in (None, 'MINGW64', 'UCRT64'):
+            with self.subTest(msystem=msystem):
+                marker.write_text(json.dumps({'msystem': msystem}))
+                errors = verify(self.prefix, 'windows-x64')
+                self.assertEqual(any('UCRT64' in error for error in errors),
+                                 msystem != 'UCRT64')
 
     def test_rebuilt_core_gets_a_new_manifest_hash(self):
         core = self.prefix / 'bin/librillight_core.dll'

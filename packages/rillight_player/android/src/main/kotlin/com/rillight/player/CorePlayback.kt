@@ -375,11 +375,15 @@ internal class CorePlayback(
                         return
                     }
                     val code = synchronized(outputLock) {
-                        val selected = if (method == "audio")
-                            CoreNative.selectAudio(handle, stream, operation.incrementAndGet())
-                        else CoreNative.selectSubtitleSlot(handle, (args["slot"] as? Number)?.toInt() ?: 0, stream, operation.incrementAndGet())
-                        if (selected == 0) audioOutput?.flush()
-                        selected
+                        selectAudioTimeline(
+                            timeline = { CoreNative.snapshot(handle)?.getOrNull(3) },
+                            select = {
+                                if (method == "audio")
+                                    CoreNative.selectAudio(handle, stream, operation.incrementAndGet())
+                                else CoreNative.selectSubtitleSlot(handle, (args["slot"] as? Number)?.toInt() ?: 0, stream, operation.incrementAndGet())
+                            },
+                            flush = { audioOutput?.flush() },
+                        )
                     }
                     if (code == 0) { beginTrack(result, stream, method == "subtitle", handle, (args["slot"] as? Number)?.toInt() ?: 0); return }
                     code

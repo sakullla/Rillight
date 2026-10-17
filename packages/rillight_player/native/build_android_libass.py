@@ -106,8 +106,8 @@ def main() -> int:
     parser.add_argument("--ndk", type=Path, required=True)
     parser.add_argument("--abis", nargs="+", choices=ABIS, default=list(ABIS))
     parser.add_argument("--jobs", type=int, default=4)
-    parser.add_argument("--meson", type=Path, default=shutil.which("meson") or "C:/msys64/mingw64/bin/meson.exe")
-    parser.add_argument("--pkg-config", type=Path, default=shutil.which("pkg-config") or "C:/msys64/mingw64/bin/pkg-config.exe")
+    parser.add_argument("--meson", type=Path, default=shutil.which("meson") or "C:/msys64/ucrt64/bin/meson.exe")
+    parser.add_argument("--pkg-config", type=Path, default=shutil.which("pkg-config") or "C:/msys64/ucrt64/bin/pkg-config.exe")
     args = parser.parse_args()
     host = {"Windows": "windows-x86_64", "Linux": "linux-x86_64", "Darwin": "darwin-x86_64"}.get(platform.system())
     if host is None or args.jobs < 1:
@@ -116,16 +116,18 @@ def main() -> int:
     if not ndk_bin.is_dir() or not args.meson.is_file() or not args.pkg_config.is_file():
         parser.error("NDK, Meson or pkg-config is missing")
     work = args.work.resolve()
+    if os.name == "nt":
+        work = work / "ucrt64"
     root = args.prefix_root.resolve()
     work.mkdir(parents=True, exist_ok=True)
     native = work / "mingw-native.ini"
     if os.name == "nt":
         native.write_text(
             "[binaries]\n"
-            "c = 'C:/msys64/mingw64/bin/gcc.exe'\n"
-            "cpp = 'C:/msys64/mingw64/bin/g++.exe'\n"
-            "ar = 'C:/msys64/mingw64/bin/ar.exe'\n"
-            "strip = 'C:/msys64/mingw64/bin/strip.exe'\n",
+            "c = 'C:/msys64/ucrt64/bin/gcc.exe'\n"
+            "cpp = 'C:/msys64/ucrt64/bin/g++.exe'\n"
+            "ar = 'C:/msys64/ucrt64/bin/ar.exe'\n"
+            "strip = 'C:/msys64/ucrt64/bin/strip.exe'\n",
             encoding="utf-8",
         )
     else:

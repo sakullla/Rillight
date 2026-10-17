@@ -393,42 +393,59 @@ class HistoryWriter implements Listenable {
     return ResumeChoice(ResumeKind.remote, remote: candidates.first);
   }
 
-  Future<void> savePreference(SourcePreference preference) => _enqueue(
-    () async {
-      if (preference.owner.account.region != preference.target.account.region) {
-        throw ArgumentError('Preference cannot cross regions');
-      }
-      final ownerPermit = registry.permit(preference.owner.account);
-      final permit = registry.permit(
-        preference.target.account,
-        libraryId: preference.libraryId,
-      );
-      ownerPermit.requireValid();
-      permit.requireValid();
-      if (preference.lineId != null &&
-          !registry
-              .project(preference.target.account.region)
-              .firstWhere(
-                (s) => s.id == preference.target.account.configuredServerId,
-              )
-              .lines
-              .any((l) => l.id == preference.lineId)) {
-        throw ArgumentError('Unknown preferred line');
-      }
-      await _commit(
-        preferences: {..._preferences, preference.owner.key: preference},
-      );
-      if (!ownerPermit.isValid || !permit.isValid) {
-        _preferences.remove(preference.owner.key);
-        _revokedPreferenceKeys.add(preference.owner.key);
-        throw StateError('Preference operation revoked');
-      }
-      _revokedPreferenceKeys.remove(preference.owner.key);
-      _preferences[preference.owner.key] = preference;
-    },
-  );
+  Future<void> savePreference(
+    SourcePreference preference, {
+    OperationPermit? playbackPermit,
+  }) => _enqueue(() async {
+    if (preference.owner.account.region != preference.target.account.region) {
+      throw ArgumentError('Preference cannot cross regions');
+    }
+    if (playbackPermit != null &&
+        (!registry.accepts(playbackPermit) ||
+            playbackPermit.account != preference.owner.account ||
+            playbackPermit.account != preference.target.account ||
+            playbackPermit.libraryId != preference.libraryId)) {
+      throw StateError('Playback preference permit mismatch');
+    }
+    // Explicit playback can use a library excluded from aggregation. Its
+    // existing item/library permit remains the authority for local memory.
+    final ownerPermit =
+        playbackPermit ?? registry.permit(preference.owner.account);
+    final permit =
+        playbackPermit ??
+        registry.permit(
+          preference.target.account,
+          libraryId: preference.libraryId,
+        );
+    ownerPermit.requireValid();
+    permit.requireValid();
+    if (preference.lineId != null &&
+        !registry
+            .project(preference.target.account.region)
+            .firstWhere(
+              (s) => s.id == preference.target.account.configuredServerId,
+            )
+            .lines
+            .any((l) => l.id == preference.lineId)) {
+      throw ArgumentError('Unknown preferred line');
+    }
+    await _commit(
+      preferences: {..._preferences, preference.owner.key: preference},
+    );
+    if (!ownerPermit.isValid || !permit.isValid) {
+      _preferences.remove(preference.owner.key);
+      _revokedPreferenceKeys.add(preference.owner.key);
+      throw StateError('Preference operation revoked');
+    }
+    _revokedPreferenceKeys.remove(preference.owner.key);
+    _preferences[preference.owner.key] = preference;
+  });
 
-  PreferenceFailure? _failure(SourcePreference pref, AccessRegion region) {
+  PreferenceFailure? _failure(
+    SourcePreference pref,
+    AccessRegion region, {
+    OperationPermit? playbackPermit,
+  }) {
     if (!registry.access.allows(region)) return PreferenceFailure.regionLocked;
     if (pref.owner.account.region != region ||
         pref.target.account.region != region) {
@@ -439,17 +456,28 @@ class HistoryWriter implements Listenable {
         .where((s) => s.id == pref.target.account.configuredServerId)
         .firstOrNull;
     if (server == null) return PreferenceFailure.serverRemoved;
-    if (!server.participates) return PreferenceFailure.notParticipating;
-    if (!server.scopeKnown) return PreferenceFailure.unknownScope;
-    if (!server.libraryIds.contains(pref.libraryId)) {
+    final localPlayback =
+        playbackPermit != null &&
+        registry.accepts(playbackPermit) &&
+        playbackPermit.account == pref.owner.account &&
+        playbackPermit.account == pref.target.account &&
+        playbackPermit.libraryId == pref.libraryId;
+    if (!localPlayback && !server.participates) {
+      return PreferenceFailure.notParticipating;
+    }
+    if (!localPlayback && !server.scopeKnown) {
+      return PreferenceFailure.unknownScope;
+    }
+    if (!localPlayback && !server.libraryIds.contains(pref.libraryId)) {
       return PreferenceFailure.libraryExcluded;
     }
     try {
-      registry.permit(pref.owner.account).requireValid();
+      (localPlayback ? playbackPermit : registry.permit(pref.owner.account))
+          .requireValid();
     } on StateError {
       return PreferenceFailure.accountUnavailable;
     }
-    if (!_allows(pref.target, pref.libraryId, region)) {
+    if (!localPlayback && !_allows(pref.target, pref.libraryId, region)) {
       return PreferenceFailure.accountUnavailable;
     }
     if (pref.lineId != null && !server.lines.any((l) => l.id == pref.lineId)) {
@@ -502,7 +530,7 @@ class HistoryWriter implements Listenable {
         ? PreferenceFailure.wrongRegion
         : pref == null
         ? PreferenceFailure.notConfigured
-        : _failure(pref, region);
+        : _failure(pref, region, playbackPermit: playbackPermit);
     PreferenceCandidate? selected;
     if (failure == null && pref != null) {
       final matching = allowed

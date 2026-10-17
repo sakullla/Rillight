@@ -29,6 +29,10 @@ Flutter, dependency pins, patches or native build inputs. A simultaneous push
 and tag can still incur two cold builds. A cache eviction or toolchain change
 also requires a new cold build.
 
+Windows now uses MSYS2 UCRT64. Its `windows-media-sdk-ucrt64` cache namespace
+and SDK/work directories are separate from the previous MINGW64 build. The
+first build after migration is necessarily cold; old SDK manifests are rejected.
+
 The native cache key still includes the installed toolchain and pinned build
 inputs, including the subtitle Unicode build helper. The build verifies cached
 SDK hashes and provenance, compiles the owned core from the current candidate,

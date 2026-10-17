@@ -7,52 +7,44 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/query_test.dart',
-    caseEntrypoints['aggregation/query_cases.dart']!,
+    'aggregation/identity_test.dart',
+    caseEntrypoints['aggregation/identity_cases.dart']!,
   );
   group(
     'app/source_route_extra_codec_test.dart',
     caseEntrypoints['app/source_route_extra_codec_cases.dart']!,
   );
   group(
-    'auth/provider_line_boundaries_test.dart',
-    caseEntrypoints['auth/provider_line_boundaries_cases.dart']!,
-  );
-  group(
     'auth/provider_session_ownership_test.dart',
     caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
   );
   group(
-    'auth/server_import_test.dart',
-    caseEntrypoints['auth/server_import_cases.dart']!,
+    'auth/provider_user_agent_test.dart',
+    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
   );
   group(
-    'catalog/emby_catalog_client_test.dart',
-    caseEntrypoints['catalog/emby_catalog_client_cases.dart']!,
-  );
-  group(
-    'emby/emby_device_test.dart',
-    caseEntrypoints['emby/emby_device_cases.dart']!,
+    'emby/aggregation_metadata_test.dart',
+    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
   );
   group(
     'emby/emby_item_image_test.dart',
     caseEntrypoints['emby/emby_item_image_cases.dart']!,
   );
   group(
-    'emby/video_preview_test.dart',
-    caseEntrypoints['emby/video_preview_cases.dart']!,
-  );
-  group(
     'player/cache/cache_contract_test.dart [part 3]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#2']!,
   );
   group(
-    'player/cache/hls_proxy_timeline_test.dart',
-    caseEntrypoints['player/cache/hls_proxy_timeline_cases.dart']!,
-  );
-  group(
     'player/cache_crc32_test.dart',
     caseEntrypoints['player/cache_crc32_cases.dart']!,
+  );
+  group(
+    'player/capability_record_test.dart',
+    caseEntrypoints['player/capability_record_cases.dart']!,
+  );
+  group(
+    'player/danmaku/dandanplay_client_test.dart',
+    caseEntrypoints['player/danmaku/dandanplay_client_cases.dart']!,
   );
   group(
     'player/device_profile_test.dart',
@@ -63,28 +55,32 @@ void main() {
     caseEntrypoints['player/playback_http_proxy_cases.dart#0']!,
   );
   group(
-    'player/playback_metadata_test.dart',
-    caseEntrypoints['player/playback_metadata_cases.dart']!,
-  );
-  group(
     'player/playback_session_snapshot_test.dart',
     caseEntrypoints['player/playback_session_snapshot_cases.dart']!,
+  );
+  group(
+    'player/playback_wake_lock_test.dart',
+    caseEntrypoints['player/playback_wake_lock_cases.dart']!,
   );
   group(
     'player/player_process_control_test.dart',
     caseEntrypoints['player/player_process_control_cases.dart']!,
   );
   group(
-    'player/player_startup_test.dart',
-    caseEntrypoints['player/player_startup_cases.dart']!,
-  );
-  group(
-    'player/provider_failed_preparation_recovery_test.dart',
-    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
+    'player/player_runtime_options_test.dart',
+    caseEntrypoints['player/player_runtime_options_cases.dart']!,
   );
   group(
     'player/rillight_video_backend_test.dart [part 3]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#2']!,
+  );
+  group(
+    'player/strm_quality_confirmation_test.dart',
+    caseEntrypoints['player/strm_quality_confirmation_cases.dart']!,
+  );
+  group(
+    'player/subtitle_slots_test.dart',
+    caseEntrypoints['player/subtitle_slots_cases.dart']!,
   );
   group(
     'plex/plex_review_regression_test.dart',

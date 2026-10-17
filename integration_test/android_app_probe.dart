@@ -1,5 +1,6 @@
 // Validation-only observer. Inputs still enter through Android adb/IME; this
 // entrypoint does not replace authentication, routes, controllers or the core.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,6 +12,27 @@ import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
+
+PlayerController? _lastObservedController;
+
+void _observeProgressController() {
+  void visit(Element element) {
+    if (element.widget is Offstage && (element.widget as Offstage).offstage) {
+      return;
+    }
+    if (element is StatefulElement) {
+      final controller = switch (element.state) {
+        MobilePlayerPageState state => state.controller,
+        TvPlayerPageState state => state.controller,
+        _ => null,
+      };
+      if (controller != null) _lastObservedController = controller;
+    }
+    element.visitChildren(visit);
+  }
+
+  WidgetsBinding.instance.rootElement?.visitChildren(visit);
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +47,12 @@ Future<void> main() async {
     await request.response.close();
   });
   await production.main([]);
+  // Preserve safe final-report facts after the player route has been popped.
+  // Keep at most one controller; no server/media identity enters this record.
+  Timer.periodic(
+    const Duration(milliseconds: 500),
+    (_) => _observeProgressController(),
+  );
 }
 
 Future<Map<String, Object?>> snapshot() async {
@@ -62,10 +90,21 @@ Future<Map<String, Object?>> snapshot() async {
           player = {
             'loading': controller.loading,
             'error': controller.error?.name,
+            'failureKind': controller.loadFailure?.kind.name,
+            'failureStatusCode': controller.loadFailure?.statusCode,
+            'sourceScopeRejected':
+                controller.disconnectDetail?.contains(
+                  'Source outside allowed scope',
+                ) ==
+                true,
+            'phase': controller.state.phase.name,
+            'openStageTimings': controller.openStageTimings,
+            'playMethod': controller.playMethod?.name,
             'playing': controller.isPlaying,
             'controls': controller.controlsVisible,
             'positionMs': controller.position.inMilliseconds,
             'released': controller.backgroundReleased,
+            'progressSync': controller.progressSyncDiagnostics,
             'audio': controller.audioStreamIndex,
             'subtitle': controller.subtitleStreamIndex,
             'subtitleSettings': controller.phoneSubtitleSettings.toJson(),
@@ -148,6 +187,8 @@ Future<Map<String, Object?>> snapshot() async {
         for (final key in const [
           'openPhase',
           'transportAttached',
+          'transportSuspended',
+          'nativeRetained',
           'transportDiagnosticsStatus',
           'transportWorkerExited',
           'transportWorkerFailureKind',
@@ -217,5 +258,6 @@ Future<Map<String, Object?>> snapshot() async {
     'scale': view.devicePixelRatio,
     'size': [view.physicalSize.width, view.physicalSize.height],
     'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
+    'lastProgressSync': _lastObservedController?.progressSyncDiagnostics,
   };
 }

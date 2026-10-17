@@ -11,36 +11,39 @@ void main() {
     caseEntrypoints['aggregation/presentation_cases.dart#0']!,
   );
   group(
-    'auth/backup_import/backup_import_flow_test.dart',
-    caseEntrypoints['auth/backup_import/backup_import_flow_cases.dart']!,
+    'app/browsing_polish_test.dart',
+    caseEntrypoints['app/browsing_polish_cases.dart']!,
   );
   group(
-    'auth/provider_connect_dialog_test.dart',
-    caseEntrypoints['auth/provider_connect_dialog_cases.dart']!,
+    'auth/provider_connect_management_test.dart',
+    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
   );
   group(
-    'catalog/item_detail_test.dart [part 3]',
-    caseEntrypoints['catalog/item_detail_cases.dart#2']!,
+    'library/source_detail_route_test.dart [part 2]',
+    caseEntrypoints['library/source_detail_route_cases.dart#1']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 1]',
-    caseEntrypoints['library/source_detail_route_cases.dart#0']!,
+    'mobile/phone_nav_style_test.dart',
+    caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
   );
   group(
-    'mobile/phone_detail_redesign_test.dart',
-    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
+    'mobile/phone_player_test.dart [part 4]',
+    caseEntrypoints['mobile/phone_player_cases.dart#3']!,
   );
-  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
+  group(
+    'player/ended_navigation_test.dart',
+    caseEntrypoints['player/ended_navigation_cases.dart']!,
+  );
+  group(
+    'tv/tv_detail_test.dart [part 2]',
+    caseEntrypoints['tv/tv_detail_cases.dart#1']!,
+  );
   group(
     'tv/tv_home_featured_test.dart',
     caseEntrypoints['tv/tv_home_featured_cases.dart']!,
   );
   group(
-    'tv/tv_lan_pair_test.dart [part 2]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
-  );
-  group(
-    'widgets/app_empty_view_test.dart',
-    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
+    'widgets/scrim_icon_button_test.dart',
+    caseEntrypoints['widgets/scrim_icon_button_cases.dart']!,
   );
 }

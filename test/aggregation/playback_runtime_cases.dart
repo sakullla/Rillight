@@ -238,6 +238,17 @@ class _Backend extends FakeVideoBackend {
   bool failDispose = false;
   Duration? hangStop;
   bool stopFinished = false;
+  Completer<void>? subtitleGate;
+  bool subtitleEntered = false;
+  @override
+  Future<void> setSubtitleOff({int slot = 0}) async {
+    if (slot == 0 && subtitleGate != null) {
+      subtitleEntered = true;
+      await subtitleGate!.future;
+    }
+    await super.setSubtitleOff(slot: slot);
+  }
+
   @override
   Future<void> stop() async {
     stopEntered = true;
@@ -414,6 +425,7 @@ void main() {
     String itemId = 'movie',
     String libraryId = 'library',
     bool scopeKnown = true,
+    bool selectedEntry = false,
     bool trackChoices = false,
     String? preferredSource,
     _Backend? videoBackend,
@@ -504,14 +516,16 @@ void main() {
       snapshotStore: snapshots,
       settingsStore: MemoryPlayerSettingsStore(),
       progressInterval: const Duration(milliseconds: 30),
-      openRequest: PlayerOpenRequest(
-        itemId: itemId,
-        libraryId: libraryId,
-        regionGeneration: registry
-            .permit(account, sessionOnly: true)
-            .regionGeneration,
-        source: SourceReference(account: account, itemId: itemId),
-      ),
+      openRequest: selectedEntry
+          ? null
+          : PlayerOpenRequest(
+              itemId: itemId,
+              libraryId: libraryId,
+              regionGeneration: registry
+                  .permit(account, sessionOnly: true)
+                  .regionGeneration,
+              source: SourceReference(account: account, itemId: itemId),
+            ),
     );
     Future<void> cleanup() async {
       if (widgetTester != null) {
@@ -1004,7 +1018,7 @@ void main() {
     cases.test(
       'selected home playback ignores $scope aggregation scope',
       () async {
-        await setup(scopeKnown: scope != 'unknown');
+        await setup(scopeKnown: scope != 'unknown', selectedEntry: true);
         await auth.restore();
         if (scope != 'unknown') {
           await runtime.registry.configureScope(
@@ -1022,6 +1036,22 @@ void main() {
         expect(origin.permit.sessionOnly, isTrue);
         final session = await runtime.begin(origin, 'v');
         expect(session.permit.isValid, isTrue);
+        // Android can display frames while optional subtitle restoration is
+        // still in flight. Preference persistence must not stop that stream.
+        final subtitleGate = backend.subtitleGate = Completer<void>();
+        final starting = controller.start();
+        await _eventually(() => backend.subtitleEntered);
+        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 1));
+        await _eventually(() => controller.activeMediaSourceId == 'v');
+        subtitleGate.complete();
+        await starting;
+        expect(controller.error, isNull);
+        expect(controller.isPlaying, isTrue);
+        expect(controller.openStageTimings, contains('ready'));
+        expect(controller.progressSyncFailed, isFalse);
+        await controller.start();
+        expect(controller.error, isNull);
+        expect(controller.isPlaying, isTrue);
       },
     );
   }
