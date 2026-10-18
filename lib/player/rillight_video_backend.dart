@@ -991,8 +991,14 @@ class RillightVideoBackend extends VideoBackend
       );
       return;
     }
-    final status =
-        data['authenticationStatus'] ?? data['lastMediaUpstreamStatus'];
+    final authentication = data['authenticationStatus'];
+    final lastMediaStatus = data['lastMediaUpstreamStatus'];
+    // Read-ahead leaves the last foreground HTTP status unchanged. Its failed
+    // foreground consumer publishes rateLimitStatus separately; background-only
+    // prefetchRateLimitStatus must never interrupt valid cached playback.
+    final status = authentication == 401 || lastMediaStatus == 401
+        ? 401
+        : authentication ?? data['rateLimitStatus'] ?? lastMediaStatus;
     if (status == 429 ||
         status == 403 && !isExpiredPlaybackUrl(_lastOpenRequest?.url)) {
       // A diagnostic poll may observe a transient 403 while transport is still
