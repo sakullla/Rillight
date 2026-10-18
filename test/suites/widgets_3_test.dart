@@ -27,16 +27,16 @@ void main() {
     caseEntrypoints['player/phone_presentation_lifecycle_cases.dart']!,
   );
   group(
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+  );
+  group(
     'tv/tv_detail_test.dart [part 1]',
     caseEntrypoints['tv/tv_detail_cases.dart#0']!,
   );
   group(
     'tv/tv_lan_pair_test.dart [part 3]',
     caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
-  );
-  group(
-    'widgets/app_empty_view_test.dart',
-    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
   );
   group(
     'widgets/artwork_crop_test.dart',

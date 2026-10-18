@@ -2499,47 +2499,106 @@ void main() {
     PresentationEnvironment.phone,
     PresentationEnvironment.tv,
   ]) {
-    cases.testWidgets(
-      '${environment.presentation.name} ordinary detail exposes manual source selection without synthetic route extras',
-      (tester) async {
-        isolateImageCache();
-        tester.view.physicalSize = environment.isDesktop || environment.isTv
-            ? const Size(1280, 900)
-            : const Size(412, 900);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        final f = _Fixture();
-        await tester.runAsync(f.open);
-        addTearDown(() => _drive(tester, f.close()));
-        final app = f.app(environment);
-        await tester.pumpWidget(app);
-        await _settle(tester);
-        app.router.go('/item/shared-id');
-        await _settle(tester);
-        await tester.tap(find.byKey(const Key('source-selection-open')));
-        await _settle(tester);
-        expect(
-          find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(Key('source-selection-item-${f.aId}-shared-id')),
-          findsNothing,
-        );
-        expect(f.auth.session!.server.id, f.aId);
-        expect(find.text('查找同源'), findsNothing);
-        expect(find.text('全部服务器'), findsNothing);
-        await tester.binding.handlePopRoute();
-        await _settle(tester);
-        expect(find.byKey(const Key('source-selection-title')), findsNothing);
-        expect(find.byKey(const Key('source-selection-open')), findsOneWidget);
-        expect(f.auth.session!.server.id, f.aId);
-        await tester.pumpWidget(const SizedBox.shrink());
-        app.router.dispose();
-      },
-      tags: ['integration'],
-    );
+    for (final protected in [false, true]) {
+      cases.testWidgets(
+        '${environment.presentation.name} ${protected ? 'protected' : 'unprotected'} ordinary detail exposes manual source selection without synthetic route extras',
+        (tester) async {
+          isolateImageCache();
+          tester.view.physicalSize = environment.isDesktop || environment.isTv
+              ? const Size(1280, 900)
+              : const Size(412, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final f = _Fixture();
+          await tester.runAsync(f.open);
+          if (protected) {
+            await tester.runAsync(() => f.protect(f.aId, unlock: true));
+          }
+          addTearDown(() => _drive(tester, f.close()));
+          final app = f.app(environment);
+          await tester.pumpWidget(app);
+          await _settle(tester);
+          app.router.go('/item/shared-id');
+          await _settle(tester);
+          await tester.tap(find.byKey(const Key('source-selection-open')));
+          await _settle(tester);
+          expect(
+            find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(Key('source-selection-item-${f.aId}-shared-id')),
+            findsNothing,
+          );
+          expect(f.auth.session!.server.id, f.aId);
+          expect(find.text('查找同源'), findsNothing);
+          expect(find.text('全部服务器'), findsNothing);
+          await tester.binding.handlePopRoute();
+          await _settle(tester);
+          expect(find.byKey(const Key('source-selection-title')), findsNothing);
+          expect(
+            find.byKey(const Key('source-selection-open')),
+            findsOneWidget,
+          );
+          expect(f.auth.session!.server.id, f.aId);
+          await tester.pumpWidget(const SizedBox.shrink());
+          app.router.dispose();
+        },
+        tags: ['integration'],
+      );
+    }
+    for (final change in ['lock', 'switch']) {
+      cases.testWidgets(
+        '${environment.presentation.name} protected ordinary source resolution rejects late overlay after $change',
+        (tester) async {
+          isolateImageCache();
+          tester.view.physicalSize = environment.isDesktop || environment.isTv
+              ? const Size(1280, 900)
+              : const Size(412, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final f = _Fixture();
+          final adapter = _BlockingCatalogAdapter([f.a, f.b]);
+          await tester.runAsync(() => f.open(sourceAdapter: adapter));
+          addTearDown(() => _drive(tester, f.close()));
+          addTearDown(() {
+            if (!adapter.gate.isCompleted) adapter.gate.complete();
+          });
+          await tester.runAsync(() => f.protect(f.aId, unlock: true));
+          final app = f.app(environment);
+          await tester.pumpWidget(app);
+          await _settle(tester);
+          app.router.go('/item/shared-id');
+          await _settle(tester);
+          adapter.blockedAuthority = 'a.test';
+          adapter.blockedSuffix = '/Items/shared-id';
+          await tester.tap(find.byKey(const Key('source-selection-open')));
+          await _settle(tester);
+          expect(adapter.entered, isTrue);
+          if (change == 'lock') {
+            await tester.runAsync(() => f.auth.serverAccess.lock(f.aId));
+          } else {
+            await tester.runAsync(() => f.auth.switchTo(f.bId));
+          }
+          await _settle(tester);
+          adapter.gate.complete();
+          await _settle(tester);
+          expect(find.byKey(const Key('source-selection-title')), findsNothing);
+          expect(
+            find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
+            findsNothing,
+          );
+          expect(f.auth.serverAccess.allows(f.aId), isFalse);
+          if (change == 'switch') expect(f.auth.session!.server.id, f.bId);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+          app.router.dispose();
+        },
+        tags: ['integration'],
+      );
+    }
     cases.testWidgets(
       '${environment.presentation.name} sourced shelf preserves genre and child queries without legacy aggregation or current-server fallback',
       (tester) async {

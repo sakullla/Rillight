@@ -113,14 +113,30 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
         (scopedOrigin != null && !scopedOrigin.permit.isValid)) {
       return;
     }
+    final auth = AuthScope.of(context);
+    final selected = auth.session;
+    final selectedGeneration = selected == null
+        ? null
+        : auth.serverAccess.generation(selected.server.id);
     final route = ModalRoute.of(context);
-    bool stillHere() => route?.isCurrent != false;
+    bool stillHere() =>
+        route?.isCurrent != false &&
+        (scopedOrigin != null ||
+            (selected != null &&
+                identical(auth.session, selected) &&
+                auth.serverAccess.generation(selected.server.id) ==
+                    selectedGeneration));
     setState(() => _loading = true);
     SameSourceQueryController? controller;
     try {
       final origin =
           scopedOrigin ??
-          await runtime.resolve(PlayerOpenRequest(itemId: widget.itemId!));
+          await runtime.resolve(
+            PlayerOpenRequest(
+              itemId: widget.itemId!,
+              accessGeneration: selectedGeneration,
+            ),
+          );
       if (!mounted || !stillHere() || !origin.permit.isValid) return;
       var dto = await origin.permit.dispatch(
         (c) => c.getItem(origin.source.itemId),
