@@ -263,6 +263,7 @@ extension PlayerLineTransactions on PlayerController {
   }
 
   void _disposeLineTransactions() {
+    _finishLineConfirmation(const PlaybackRecoveryCancelled());
     ++_lineRevision;
     _lineBudget?.cancel();
     runtime?.unregisterLinePlayer(this);
@@ -277,6 +278,7 @@ extension PlayerLineTransactions on PlayerController {
   }
 
   void cancelLineRecovery() {
+    _finishLineConfirmation(const PlaybackRecoveryCancelled());
     ++_lineRevision;
     _lineRollback?.call();
     _lineRollback = null;
@@ -315,11 +317,72 @@ extension PlayerLineTransactions on PlayerController {
   Future<void> switchLine(String lineId) =>
       selectPlaybackLine(LineSelection.fixed(lineId));
 
+  void _finishLineConfirmation([Object? failure]) {
+    final result = _lineConfirmationResult;
+    _lineConfirmationResult = null;
+    if (result == null || result.isCompleted) return;
+    if (failure == null) {
+      result.complete();
+    } else {
+      result.completeError(failure);
+    }
+  }
+
+  /// The host must retain the pending transaction until the helper user's
+  /// choice has actually committed, failed, expired, or been cancelled.
+  void cancelPendingPlaybackLineRequest() {
+    if (_hostLineRequestRevision == _lineRevision) cancelLineRecovery();
+  }
+
+  Future<void> selectPlaybackLineWithConfirmation(
+    LineSelection selection, {
+    required DateTime deadlineUtc,
+    required void Function() guard,
+    required Future<void> Function() onNeedsSelection,
+  }) async {
+    final work = selectPlaybackLine(
+      selection,
+      guard: guard,
+      deadlineUtc: deadlineUtc,
+    );
+    final revision = _lineRevision;
+    _hostLineRequestRevision = revision;
+    try {
+      await work;
+    } catch (failure) {
+      final result = _lineConfirmationResult;
+      if (_lineRevision != revision ||
+          failure is! PlaybackRecoveryFailure ||
+          failure.kind != PlaybackRecoveryFailureKind.needsSelection ||
+          result == null) {
+        rethrow;
+      }
+      try {
+        guard();
+        await onNeedsSelection();
+        await result.future.timeout(
+          deadlineUtc.difference(DateTime.now().toUtc()),
+        );
+        guard();
+      } catch (_) {
+        if (_lineRevision == revision) cancelLineRecovery();
+        rethrow;
+      }
+    } finally {
+      if (_hostLineRequestRevision == revision) {
+        _hostLineRequestRevision = null;
+        if (_lineRevision == revision) _lineSelectionDeadlineUtc = null;
+      }
+    }
+  }
+
   Future<void> selectPlaybackLine(
     LineSelection selection, {
     void Function()? guard,
     DateTime? deadlineUtc,
   }) async {
+    _finishLineConfirmation(const PlaybackRecoveryCancelled());
+    _lineSelectionDeadlineUtc = deadlineUtc;
     final wasRecovering = isRecovering || _lineTransactionOpening;
     if (wasRecovering) cancelLineRecovery();
     final revision = ++_lineRevision;
@@ -396,6 +459,7 @@ extension PlayerLineTransactions on PlayerController {
       }
       rethrow;
     } finally {
+      if (revision == _lineRevision) _lineSelectionDeadlineUtc = null;
       if (identical(_lineBudget, budget) && _confirmLine == null) {
         _lineBudget = null;
         _attachRecoveryBudget(null);
@@ -717,8 +781,13 @@ extension PlayerLineTransactions on PlayerController {
       pendingLineId = line.id;
       final revision = _lineRevision;
       final confirmationOrigin = origin;
+      final deadline = _lineSelectionDeadlineUtc;
+      final result = _lineConfirmationResult = Completer<void>();
+      // Local UI callers do not await a host receipt, but share its lifecycle.
+      unawaited(result.future.then<void>((_) {}, onError: (Object _) {}));
       _confirmLine = (choice, audio, subtitle, off, defaultAudio) async {
         if (choice == SwitchResumeChoice.cancel) {
+          _finishLineConfirmation(const PlaybackRecoveryCancelled());
           _confirmLine = null;
           switchConfirmation = null;
           pendingLineId = null;
@@ -739,31 +808,49 @@ extension PlayerLineTransactions on PlayerController {
         );
         _confirmLine = null;
         switchConfirmation = null;
-        // Confirmation is a new explicit intent with a fresh bounded deadline.
-        final confirmedBudget = PlaybackRecoveryBudget(total: recoveryTimeout);
+        // Local choices get a bounded intent; helper choices keep the host's
+        // original deadline, including time spent waiting for this decision.
+        final confirmedBudget = PlaybackRecoveryBudget(
+          total: deadline == null
+              ? recoveryTimeout
+              : deadline.difference(DateTime.now().toUtc()),
+        );
         _lineBudget = confirmedBudget;
         void confirmed() {
           confirmedBudget.check();
+          if (deadline != null) current();
           if (_disposed || _revoked || revision != _lineRevision) {
             throw StateError('Playback line confirmation cancelled');
           }
           confirmationOrigin?.permit.requireValid();
         }
 
-        await _openPlaybackLine(
-          line,
-          selection,
-          prepared,
-          plan,
-          confirmedBudget,
-          confirmed,
-          compensate: true,
-          startTicks: choice == SwitchResumeChoice.beginning
-              ? 0
-              : plan.positionTicks,
-          audio: audio ?? (defaultAudio ? null : plan.audioIndex),
-          subtitle: off ? null : (subtitle ?? plan.subtitleIndex),
-        );
+        try {
+          await _openPlaybackLine(
+            line,
+            selection,
+            prepared,
+            plan,
+            confirmedBudget,
+            confirmed,
+            compensate: true,
+            startTicks: choice == SwitchResumeChoice.beginning
+                ? 0
+                : plan.positionTicks,
+            audio: audio ?? (defaultAudio ? null : plan.audioIndex),
+            subtitle: off ? null : (subtitle ?? plan.subtitleIndex),
+          );
+          if (identical(_lineConfirmationResult, result)) {
+            _finishLineConfirmation();
+          }
+        } catch (failure) {
+          if (identical(_lineConfirmationResult, result)) {
+            _finishLineConfirmation(failure);
+          }
+          rethrow;
+        } finally {
+          if (identical(_lineBudget, confirmedBudget)) _lineBudget = null;
+        }
       };
       _emit();
       throw const PlaybackRecoveryFailure(

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/tv_player_page.dart';
@@ -32,6 +33,9 @@ extension PlayerLineCaptures on CaptureSession {
       'player-lines-auto-landscape',
       'player-line-reconnecting-landscape',
       'player-line-confirmation-landscape',
+      'player-line-certificate',
+      'player-line-forbidden',
+      'player-line-rate-limited',
     ];
     if (!states.any(shouldCapture)) return;
     final (
@@ -103,6 +107,77 @@ extension PlayerLineCaptures on CaptureSession {
       await tester.pump();
       await tester.tap(choice);
       await advance(400);
+    }
+
+    final classifiedStates = {
+      PlaybackRecoveryFailureKind.certificate: (
+        'player-line-certificate',
+        '证书验证失败，请检查服务器证书',
+      ),
+      PlaybackRecoveryFailureKind.forbidden: (
+        'player-line-forbidden',
+        '没有播放权限，请检查账号权限',
+      ),
+      PlaybackRecoveryFailureKind.rateLimited: (
+        'player-line-rate-limited',
+        '服务器请求过多，请稍后重试',
+      ),
+    };
+    for (final entry in classifiedStates.entries) {
+      if (!shouldCapture(entry.value.$1)) continue;
+      backend.emitEvent(
+        VideoEventKind.error,
+        PlaybackRecoveryFailure(
+          entry.key,
+          retryAfter: entry.key == PlaybackRecoveryFailureKind.rateLimited
+              ? const Duration(seconds: 30)
+              : null,
+        ),
+      );
+      await advance(300);
+      expect(find.text(entry.value.$2).hitTestable(), findsOneWidget);
+      expect(find.text('播放中断，请检查网络'), findsNothing);
+      expect(controller.isRecovering, isFalse);
+      final retry = tester.widget<AppButton>(
+        find.byKey(const Key('playback-recovery-retry')),
+      );
+      expect(
+        retry.onPressed == null,
+        entry.key == PlaybackRecoveryFailureKind.rateLimited,
+      );
+      if (platform == 'tv' &&
+          entry.key == PlaybackRecoveryFailureKind.rateLimited) {
+        expect(
+          tester
+              .widget<AppButton>(
+                find.byKey(const Key('playback-recovery-lines')),
+              )
+              .focusNode
+              ?.hasFocus,
+          isTrue,
+        );
+      }
+      await save(entry.value.$1);
+      if (entry.key == PlaybackRecoveryFailureKind.rateLimited) {
+        // End the synthetic cooldown with a separate classified event before
+        // continuing unrelated captures; no production clock is bypassed.
+        backend.emitEvent(
+          VideoEventKind.error,
+          const PlaybackRecoveryFailure(
+            PlaybackRecoveryFailureKind.certificate,
+          ),
+        );
+        await advance(100);
+      }
+      await tap(const Key('playback-recovery-retry'));
+      await advance(600);
+      expect(controller.isPlaying, isTrue);
+    }
+    if (!states
+        .where((id) => !classifiedStates.values.any((v) => v.$1 == id))
+        .any(shouldCapture)) {
+      backup.publicInfoStatus = failedPublicInfo;
+      return;
     }
 
     Future<void> saveLineState(String state) async {

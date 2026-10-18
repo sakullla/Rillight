@@ -257,6 +257,9 @@ class PlayerController extends ChangeNotifier {
   Future<void>? _lineRecovery;
   Future<void> Function(SwitchResumeChoice, int?, int?, bool, bool)?
   _confirmLine;
+  Completer<void>? _lineConfirmationResult;
+  int? _hostLineRequestRevision;
+  DateTime? _lineSelectionDeadlineUtc;
   NetworkChangeMonitor? _networkChanges;
   StreamSubscription<void>? _networkChangeSubscription;
   bool _networkChanged = false;
@@ -415,8 +418,10 @@ class PlayerController extends ChangeNotifier {
   int? _snapshotOwner;
   String? trackFailure;
   int? _sourceRenewalOperation;
+  bool _sourceRenewalRequired = false;
   final Set<String> _refreshedSourceUrls = {};
   DateTime? _lineRetryAfter;
+  DateTime? get playbackRetryAfter => _lineRetryAfter;
   String? _operationBaseUrl;
   String? _operationUserId;
   String? _operationToken;
@@ -429,10 +434,19 @@ class PlayerController extends ChangeNotifier {
     final operation = _operations.begin();
     if (operation != null) {
       if (!lineTransaction) {
+        _finishLineConfirmation(const PlaybackRecoveryCancelled());
+        _lineSelectionDeadlineUtc = null;
         ++_lineRevision;
         _lineBudget?.cancel();
         _confirmLine = null;
+        if (_sourceRenewalOperation != null) {
+          _sourceRenewalOperation = null;
+          _sourceRenewalRequired = false;
+          _lineBudget = null;
+          isRecovering = false;
+        }
       }
+      _refreshedSourceUrls.clear();
       ++_switchInspection;
       switchConfirmation = null;
       _switchOriginal = null;
@@ -4275,12 +4289,23 @@ class PlayerController extends ChangeNotifier {
               _ => MediaServerFailureKind.unreachable,
             };
             loadFailure = MediaServerException(kind, cause: failure);
-            if (failure.retryAfter != null) {
-              _lineRetryAfter = DateTime.now().add(failure.retryAfter!);
-            }
+            _lineRetryAfter = failure.retryAfter == null
+                ? null
+                : DateTime.now().add(failure.retryAfter!);
           } else if (!isFatalPlaybackError(message, playing: isPlaying)) {
             return;
+          } else {
+            // A new transport fault cannot inherit a previous operation's
+            // terminal classification after that operation has recovered.
+            loadFailure = failure is MediaServerException ? failure : null;
+            _lineRetryAfter = null;
           }
+          playbackLineFailure = _lineFailureText(
+            loadFailure ??
+                const PlaybackRecoveryFailure(
+                  PlaybackRecoveryFailureKind.network,
+                ),
+          );
           disconnected = true;
           isPlaying = false;
           loading = false;
@@ -4294,6 +4319,10 @@ class PlayerController extends ChangeNotifier {
             unawaited(_recoverPlaybackLines(automatic: true));
           }
         case VideoEventKind.authenticationRequired:
+          loadFailure = const MediaServerException(
+            MediaServerFailureKind.sessionExpired,
+          );
+          playbackLineFailure = _lineFailureText(loadFailure!);
           if (_lineTransactionOpening) _invalidateHelperLineCommit();
           sessionExpired = true;
           disconnected = true;
@@ -4307,7 +4336,12 @@ class PlayerController extends ChangeNotifier {
           _progressTimer?.cancel();
           unawaited(backend.stop().catchError((Object _) {}));
         case VideoEventKind.sourceRefreshRequired:
-          unawaited(_renewSourceUrl(operation));
+          unawaited(
+            _renewSourceUrl(
+              operation,
+              required: event.value is RequiredSourceRenewal,
+            ),
+          );
         case VideoEventKind.outputStatus:
           final next = event.value;
           if (next is PlaybackOutputStatus) applyObservedOutput(next);
@@ -4322,31 +4356,61 @@ class PlayerController extends ChangeNotifier {
     return DateTime.now().difference(_lastPlaybackUi) >= kPlaybackUiMinInterval;
   }
 
-  Future<void> _renewSourceUrl(PlaybackOperation operation) async {
+  Future<void> _renewSourceUrl(
+    PlaybackOperation operation, {
+    bool required = false,
+  }) async {
     final current = resolved;
     final renewal = backend;
     if (current == null ||
         renewal is! VideoBackendSourceRenewal ||
-        _sourceRenewalOperation == operation.id ||
         !_accepts(operation)) {
       return;
     }
-    if (!_refreshedSourceUrls.add(current.streamUrl.toString())) return;
-    _sourceRenewalOperation = operation.id;
-    if (current.isTranscode || !current.canRenewUrlInPlace) {
-      await _recoverPlaybackLines(selection: playbackLineSelection);
+    if (_sourceRenewalOperation == operation.id) {
+      if (required) {
+        _sourceRenewalRequired = true;
+        isRecovering = true;
+        _emit();
+      }
       return;
     }
-    final budget =
-        (_lineBudget ?? PlaybackRecoveryBudget(total: recoveryTimeout)).child(
-          const Duration(seconds: 5),
-        );
+    final mayRefresh = _refreshedSourceUrls.add(current.streamUrl.toString());
+    if (!mayRefresh && !required) return;
+    _sourceRenewalOperation = operation.id;
+    _sourceRenewalRequired = required;
+    final wasRecovering = isRecovering;
+    if (required) {
+      isRecovering = true;
+      controlsVisible = true;
+      _emit();
+    }
+    final ownsBudget = _lineBudget == null;
+    final root = _lineBudget ?? PlaybackRecoveryBudget(total: recoveryTimeout);
+    if (ownsBudget) _lineBudget = root;
+    final budget = root.child(const Duration(seconds: 5));
     PlaybackResourceLease? preparation;
+    Object? failure;
+    var succeeded = false;
     try {
+      if (!mayRefresh) {
+        throw const PlaybackRecoveryFailure(
+          PlaybackRecoveryFailureKind.network,
+        );
+      }
+      if (current.isTranscode || !current.canRenewUrlInPlace) {
+        await _recoverPlaybackLines(
+          selection: playbackLineSelection,
+          sharedBudget: root,
+        );
+        return;
+      }
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
-          ? await (backend as VideoBackendCapabilities).playbackCapabilities(
-              maxStreamingBitrate,
+          ? await budget.run(
+              () => (backend as VideoBackendCapabilities).playbackCapabilities(
+                maxStreamingBitrate,
+              ),
             )
           : null;
       if (!_accepts(operation)) return;
@@ -4381,7 +4445,7 @@ class PlayerController extends ChangeNotifier {
           resolvedNext.mediaSource.id != current.mediaSource.id) {
         return;
       }
-      final next = await _expandStrm(operation, resolvedNext);
+      final next = await budget.run(() => _expandStrm(operation, resolvedNext));
       if (next == null ||
           next.isTranscode ||
           next.requiresStrmExpansion ||
@@ -4391,17 +4455,64 @@ class PlayerController extends ChangeNotifier {
           !_accepts(operation)) {
         return;
       }
-      await (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
-        next.streamUrl,
+      await budget.run(
+        () => (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
+          next.streamUrl,
+        ),
+        onCancel: () {
+          if (_sourceRenewalRequired && _accepts(operation)) {
+            _trackNativeRetirement(
+              _operations.interrupt(backend.stop, ensureRetired: true),
+            );
+          }
+        },
       );
-    } catch (_) {
-      // Renewal is optional while cached playback continues. Normal failure
-      // reporting remains available if foreground bytes cannot be recovered.
+      succeeded = true;
+    } catch (error) {
+      failure = error;
     } finally {
-      await _releasePrepared(preparation);
+      // Resource cleanup keeps its own retry record and must not extend the
+      // foreground recovery deadline while a provider DELETE is outstanding.
+      unawaited(_releasePrepared(preparation).catchError((Object _) {}));
       if (_sourceRenewalOperation == operation.id) {
         _sourceRenewalOperation = null;
+        final mandatory = _sourceRenewalRequired;
+        _sourceRenewalRequired = false;
+        if (_accepts(operation) && mandatory) {
+          if (backend is VideoBackendSourceRenewalFeedback) {
+            (backend as VideoBackendSourceRenewalFeedback).finishSourceRenewal(
+              succeeded: succeeded,
+            );
+          }
+          if (!succeeded || disconnected) {
+            loadFailure = failure is MediaServerException
+                ? failure
+                : const MediaServerException(
+                    MediaServerFailureKind.unreachable,
+                  );
+            sessionExpired =
+                PlaybackRecoveryCoordinator.classify(loadFailure!) ==
+                PlaybackRecoveryFailureKind.unauthorized;
+            playbackLineFailure = _lineFailureText(loadFailure!);
+            error = PlayerErrorKind.load;
+            loading = false;
+            isPlaying = false;
+            disconnected = true;
+            state.phase = PlaybackPhase.failed;
+            state.buffering = false;
+            // An enclosing open/line recovery already owns this deadline.
+            // Otherwise continue this same root, never start another 45 s.
+            if (!_lineTransactionOpening && _lineRecovery == null) {
+              isRecovering = false;
+              await _recoverPlaybackLines(automatic: true, sharedBudget: root);
+            }
+          } else {
+            isRecovering = wasRecovering;
+          }
+          _emit();
+        }
       }
+      if (ownsBudget && identical(_lineBudget, root)) _lineBudget = null;
     }
   }
 
@@ -5021,6 +5132,9 @@ class PlayerController extends ChangeNotifier {
       }
       if (!_accepts(operation) || disconnected) return;
       error = null;
+      loadFailure = null;
+      playbackLineFailure = null;
+      _lineRetryAfter = null;
       if (_scopedPlayback) {
         pendingMediaSourceId = chosenId;
       }
@@ -6169,6 +6283,11 @@ class PlayerController extends ChangeNotifier {
   void _revokePlayback() {
     if (_revoked) return;
     _revoked = true;
+    _finishLineConfirmation(const PlaybackRecoveryCancelled());
+    _confirmLine = null;
+    _sourceRenewalOperation = null;
+    _sourceRenewalRequired = false;
+    isRecovering = false;
     ++_lineRevision;
     _lineBudget?.cancel();
     _revokedSession = _session;

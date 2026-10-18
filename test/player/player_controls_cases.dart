@@ -1,4 +1,5 @@
 import 'package:rillight/player/playback_line_recovery_ui.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
@@ -170,6 +171,37 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('line retry waits for the original deadline across rebuilds', (
+    tester,
+  ) async {
+    var retries = 0;
+    final retryAfter = DateTime.now().add(const Duration(seconds: 1));
+    Widget panel() => recoveryHarness(
+      PlaybackLineRecoveryPanel(
+        recovering: false,
+        tryingAlternative: false,
+        retryAfter: retryAfter,
+        onCancel: () {},
+        onChooseLines: () {},
+        onRetry: () => retries++,
+      ),
+    );
+    await tester.pumpWidget(panel());
+    final button = find.byKey(const Key('playback-recovery-retry'));
+    expect(tester.widget<AppButton>(button).onPressed, isNull);
+    expect(find.textContaining('秒后可重试'), findsOneWidget);
+    await tester.pumpWidget(panel());
+    expect(tester.widget<AppButton>(button).onPressed, isNull);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 1100)),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.widget<AppButton>(button).onPressed, isNotNull);
+    await tester.tap(button);
+    expect(retries, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'line confirmation can cancel uncertain timeline without changing tracks or position',
@@ -453,6 +485,55 @@ void main() {
     );
     app.auth.dispose();
   }
+
+  testWidgets(
+    'desktop runtime failures show classified reasons and retry actions',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+      final c = controllerOf(tester);
+      for (final entry in {
+        PlaybackRecoveryFailureKind.certificate: '证书验证失败，请检查服务器证书',
+        PlaybackRecoveryFailureKind.forbidden: '没有播放权限，请检查账号权限',
+        PlaybackRecoveryFailureKind.rateLimited: '服务器请求过多，请稍后重试',
+      }.entries) {
+        final opens = backend.openCount;
+        backend.emitEvent(
+          VideoEventKind.error,
+          PlaybackRecoveryFailure(
+            entry.key,
+            retryAfter: entry.key == PlaybackRecoveryFailureKind.rateLimited
+                ? const Duration(seconds: 30)
+                : null,
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text(entry.value).hitTestable(), findsOneWidget);
+        expect(find.text('播放中断，请检查网络'), findsNothing);
+        expect(c.isRecovering, isFalse);
+        expect(backend.openCount, opens);
+        final retry = tester.widget<AppButton>(
+          find.byKey(const Key('playback-recovery-retry')),
+        );
+        expect(
+          retry.onPressed == null,
+          entry.key == PlaybackRecoveryFailureKind.rateLimited,
+        );
+        expect(
+          find.byKey(const Key('playback-recovery-lines')).hitTestable(),
+          findsOneWidget,
+        );
+        if (entry.key != PlaybackRecoveryFailureKind.rateLimited) {
+          await tester.tap(find.byKey(const Key('playback-recovery-retry')));
+          await settle(tester);
+          expect(c.error, isNull);
+        }
+      }
+      await disposeApp(tester);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('settings own keyboard input and Escape returns to the player', (
     tester,

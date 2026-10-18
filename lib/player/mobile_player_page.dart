@@ -790,7 +790,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     final message = c.sessionExpired
         ? l.playbackSessionExpired
         : c.disconnected
-        ? l.playbackDisconnected
+        ? playbackClassifiedFailureTitle(c.loadFailure?.kind, l) ??
+              l.playbackDisconnected
         : c.error == PlayerErrorKind.noStream
         ? l.noPlayableStream
         : l.playbackFailed;

@@ -7,36 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'auth/login_widgets_test.dart',
-    caseEntrypoints['auth/login_widgets_cases.dart']!,
+    'aggregation/playback_runtime_test.dart [part 3]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#2']!,
   );
   group(
-    'home/shelf_hover_clip_test.dart',
-    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+    'app/content_theme_test.dart',
+    caseEntrypoints['app/content_theme_cases.dart']!,
+  );
+  group(
+    'auth/provider_connect_entry_user_agent_test.dart',
+    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
+  );
+  group(
+    'home/hero_carousel_test.dart',
+    caseEntrypoints['home/hero_carousel_cases.dart']!,
+  );
+  group(
+    'home/hero_logo_test.dart',
+    caseEntrypoints['home/hero_logo_cases.dart']!,
+  );
+  group(
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
+  );
+  group(
+    'library/source_detail_route_test.dart [part 3]',
+    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
   );
   group(
     'mobile/phone_player_test.dart [part 2]',
     caseEntrypoints['mobile/phone_player_cases.dart#1']!,
   );
   group(
-    'player/player_controls_test.dart',
-    caseEntrypoints['player/player_controls_cases.dart']!,
+    'widgets/poster_card_test.dart',
+    caseEntrypoints['widgets/poster_card_cases.dart']!,
   );
   group(
-    'tv/tv_detail_test.dart [part 1]',
-    caseEntrypoints['tv/tv_detail_cases.dart#0']!,
-  );
-  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
-  group(
-    'widgets/app_button_test.dart',
-    caseEntrypoints['widgets/app_button_cases.dart']!,
-  );
-  group(
-    'widgets/app_hover_card_test.dart',
-    caseEntrypoints['widgets/app_hover_card_cases.dart']!,
-  );
-  group(
-    'widgets/backdrop_scrim_test.dart',
-    caseEntrypoints['widgets/backdrop_scrim_cases.dart']!,
+    'widgets/skeleton_test.dart',
+    caseEntrypoints['widgets/skeleton_cases.dart']!,
   );
 }

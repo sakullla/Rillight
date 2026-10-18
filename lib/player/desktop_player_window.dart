@@ -308,6 +308,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
     this.entryOpenTimeout = const Duration(seconds: 150),
+    this.lineSelectionTimeout = const Duration(seconds: 45),
   }) : _control = processControl ?? createPlayerProcessControl() {
     auth.addListener(_onAuth);
     auth.serverAccess.addRevocationHook(_revokePrivate);
@@ -349,7 +350,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     }
 
     current();
-    final deadline = DateTime.now().toUtc().add(const Duration(seconds: 45));
+    final deadline = DateTime.now().toUtc().add(lineSelectionTimeout);
     await ipc.requestLineSelection(pid, {
       'deadlineUtc': deadline.toIso8601String(),
       'sequence': sequence,
@@ -361,6 +362,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         current();
         final result = await ipc.lineSelectionResult(pid);
         if (result?['sequence'] == sequence) {
+          if (result?['status'] == 'needsSelection') {
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            continue;
+          }
           if (result?['accepted'] != true) {
             throw StateError('Playback line was not saved');
           }
@@ -379,6 +384,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   final AuthController auth;
+  final Duration lineSelectionTimeout;
   final PlaybackRuntime? runtime;
   final Future<String?> Function(SavedServer server)? requestSourcePassword;
   ServerEntryTicket? _switchEntry;
@@ -2134,7 +2140,8 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
               lineSequence == _lineCommandSequence &&
               lineSequence != _cancelledLineCommand) {
             _cancelledLineCommand = lineSequence;
-            _playerKey.currentState?.controller?.cancelLineRecovery();
+            _playerKey.currentState?.controller
+                ?.cancelPendingPlaybackLineRequest();
           } else if (lineSequence is int &&
               lineSequence > _lineCommandSequence &&
               lineCommand?['cancel'] != true) {
@@ -2147,11 +2154,22 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                 }
                 final controller = _playerKey.currentState?.controller;
                 if (controller == null) throw StateError('Player unavailable');
-                await controller.selectPlaybackLine(
+                final deadline = DateTime.tryParse(
+                  lineCommand?['deadlineUtc'] as String? ?? '',
+                );
+                if (deadline == null) {
+                  throw StateError('Line request deadline missing');
+                }
+                await controller.selectPlaybackLineWithConfirmation(
                   LineSelection.fromJson(lineCommand!['selection']),
-                  deadlineUtc: DateTime.tryParse(
-                    lineCommand['deadlineUtc'] as String? ?? '',
-                  ),
+                  deadlineUtc: deadline,
+                  onNeedsSelection: () async {
+                    await endpoint?.write('line-selection-result', {
+                      'sequence': lineSequence,
+                      'status': 'needsSelection',
+                      'accepted': false,
+                    });
+                  },
                   guard: () {
                     if (_closing != null ||
                         _lineCommandSequence != lineSequence ||
@@ -2160,13 +2178,15 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                     }
                   },
                 );
-                accepted = controller.switchConfirmation == null;
+                accepted = true;
               } catch (_) {
                 /* Child keeps the actionable failure/selection UI. */
               }
+              if (_lineCommandSequence != lineSequence) return;
               await endpoint?.write('line-selection-result', {
                 'sequence': lineSequence,
                 'accepted': accepted,
+                'status': accepted ? 'committed' : 'failed',
               });
             }());
           }

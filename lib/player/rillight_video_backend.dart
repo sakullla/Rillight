@@ -27,6 +27,7 @@ class RillightVideoBackend extends VideoBackend
     implements
         VideoBackendFailureContext,
         VideoBackendRecoveryBudget,
+        VideoBackendSourceRenewalFeedback,
         VideoBackendCapabilities,
         VideoBackendSubtitlePresentation,
         VideoBackendPhonePresentation,
@@ -168,6 +169,7 @@ class RillightVideoBackend extends VideoBackend
   String _coreSourceDiagnostics = '';
   Map<String, Object?> _lastTransportDiagnostics = const {};
   bool _authenticationReported = false;
+  String? _foregroundRenewalUrl;
   VideoOpenRequest? _lastOpenRequest;
   bool _opened = false;
   final _openingDownloadProgress = Stopwatch();
@@ -642,6 +644,7 @@ class RillightVideoBackend extends VideoBackend
     _coreSourceDiagnostics = '';
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
+    _foregroundRenewalUrl = null;
     _sourceRenewalRequestedAt = null;
     if (!sameSession) {
       if (_outputStatus != PlaybackOutputStatus.unknown) {
@@ -1006,10 +1009,18 @@ class RillightVideoBackend extends VideoBackend
     }
     if (status != 401 && status != 403) return;
     if (status == 403) {
-      _authenticationReported = true;
       if (isExpiredPlaybackUrl(_lastOpenRequest?.url)) {
-        _emit(VideoEventKind.sourceRefreshRequired, 403, generation);
+        final url = _lastOpenRequest!.url.toString();
+        if (_foregroundRenewalUrl != url) {
+          _foregroundRenewalUrl = url;
+          _emit(
+            VideoEventKind.sourceRefreshRequired,
+            const RequiredSourceRenewal(403),
+            generation,
+          );
+        }
       } else {
+        _authenticationReported = true;
         _emit(
           VideoEventKind.error,
           const PlaybackRecoveryFailure(PlaybackRecoveryFailureKind.forbidden),
@@ -1389,7 +1400,15 @@ class RillightVideoBackend extends VideoBackend
   }
 
   @override
+  void finishSourceRenewal({required bool succeeded}) {
+    // This is a renewal result, not terminal authentication. In particular,
+    // failed renewal must leave subsequent fatal native errors observable.
+    if (!succeeded) _sourceRenewalRequestedAt = DateTime.now();
+  }
+
+  @override
   Future<void> refreshSourceUrl(Uri url) async {
+    final generation = _generation;
     final transport = _transport;
     final route = _mediaRoute;
     final request = _lastOpenRequest;
@@ -1400,7 +1419,7 @@ class RillightVideoBackend extends VideoBackend
       return;
     }
     await transport.refreshSourceUrl(route, url);
-    if (!identical(transport, _transport)) return;
+    if (generation != _generation || !identical(transport, _transport)) return;
     _authenticationReported = false;
     _sourceRenewalCount++;
     _lastOpenRequest = VideoOpenRequest(

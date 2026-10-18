@@ -2778,6 +2778,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playbackContinueAtPosition => '沿用原观看位置';
 
   @override
+  String get playbackCertificateStopped => '无法建立安全连接';
+
+  @override
+  String get playbackPermissionStopped => '当前账号没有播放权限';
+
+  @override
+  String get playbackRateLimited => '服务器暂时限制请求';
+
+  @override
+  String get playbackRetryAfterRepair => '修复后重试';
+
+  @override
+  String get playbackRetryAfterPermission => '权限恢复后重试';
+
+  @override
+  String playbackRetryAfter(int seconds) {
+    return '$seconds 秒后可重试';
+  }
+
+  @override
   String get playbackLinePending => '正在连接，成功后才会保存选择';
 
   @override

@@ -388,6 +388,61 @@ void main() {
     // A test's default 2 GiB budget can evict an active 8 GiB session.
     addTearDown(() => deleteTemporaryDirectory(isolatedCache));
   });
+  cases.test('expired foreground URL renewal failure preserves later fatal core error', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+    });
+    final driver = _CoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+    );
+    final events = <VideoBackendEvent>[];
+    final subscription = backend.events.listen(events.add);
+    final http = HttpClient();
+    try {
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 1,
+          url: Uri.parse(
+            'http://127.0.0.1:${upstream.port}/video.mp4?Signature=s&Expires=1',
+          ),
+        ),
+      );
+      final refresh = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.sourceRefreshRequired,
+      );
+      final response = await (await http.getUrl(driver.request!.url)).close();
+      await response.drain<void>();
+      expect(
+        (await refresh.timeout(const Duration(seconds: 4))).value,
+        isA<RequiredSourceRenewal>(),
+      );
+      backend.finishSourceRenewal(succeeded: false);
+      final fatal = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.error,
+      );
+      driver.emit('error', 'Connection lost');
+      await fatal.timeout(const Duration(seconds: 2));
+      expect(
+        events.where((e) => e.kind == VideoEventKind.authenticationRequired),
+        isEmpty,
+      );
+      expect(
+        events.where((e) => e.value is RequiredSourceRenewal),
+        hasLength(1),
+      );
+    } finally {
+      http.close(force: true);
+      await subscription.cancel();
+      await backend.dispose();
+      await upstream.close(force: true);
+    }
+  });
+
   cases.test(
     'Android prefetch follows saved disk budget across opens',
     () async {

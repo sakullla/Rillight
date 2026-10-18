@@ -3,6 +3,7 @@ import 'dart:async';
 import '../app/l10n/app_localizations.dart';
 import '../app/ui/ui.dart';
 import '../media_server/playback.dart';
+import '../media_server/errors.dart';
 import 'player_controller.dart';
 
 typedef PlaybackSwitchChoiceCallback = Future<void> Function(
@@ -13,8 +14,18 @@ typedef PlaybackSwitchChoiceCallback = Future<void> Function(
   bool turnSubtitlesOff,
 });
 
+String? playbackClassifiedFailureTitle(
+  MediaServerFailureKind? kind,
+  AppLocalizations l,
+) => switch (kind) {
+  MediaServerFailureKind.certificate => l.playbackCertificateStopped,
+  MediaServerFailureKind.forbidden => l.playbackPermissionStopped,
+  MediaServerFailureKind.rateLimited => l.playbackRateLimited,
+  _ => null,
+};
+
 /// The native video remains a sibling; this only presents an actionable status.
-class PlaybackLineRecoveryPanel extends StatelessWidget {
+class PlaybackLineRecoveryPanel extends StatefulWidget {
   const PlaybackLineRecoveryPanel({
     super.key,
     required this.recovering,
@@ -25,15 +36,85 @@ class PlaybackLineRecoveryPanel extends StatelessWidget {
     this.lineName,
     this.failure,
     this.primaryFocusNode,
+    this.failureKind,
+    this.retryAfter,
   });
   final bool recovering, tryingAlternative;
   final String? lineName, failure;
   final FocusNode? primaryFocusNode;
+  final MediaServerFailureKind? failureKind;
+  final DateTime? retryAfter;
   final VoidCallback onCancel, onChooseLines, onRetry;
+
+  @override
+  State<PlaybackLineRecoveryPanel> createState() =>
+      _PlaybackLineRecoveryPanelState();
+}
+
+class _PlaybackLineRecoveryPanelState extends State<PlaybackLineRecoveryPanel> {
+  Timer? _retryTimer;
+  final _waitingFocus = FocusNode(
+    debugLabel: 'playback retry wait alternative',
+  );
+
+  Duration get _retryWait =>
+      widget.retryAfter?.difference(DateTime.now()) ?? Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleRetryUpdate(requestFocus: true);
+  }
+
+  @override
+  void didUpdateWidget(PlaybackLineRecoveryPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.retryAfter != widget.retryAfter) {
+      _scheduleRetryUpdate(requestFocus: true);
+    }
+  }
+
+  void _scheduleRetryUpdate({bool requestFocus = false}) {
+    _retryTimer?.cancel();
+    final wait = _retryWait;
+    if (wait <= Duration.zero) return;
+    if (requestFocus && widget.primaryFocusNode != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _retryWait > Duration.zero) _waitingFocus.requestFocus();
+      });
+    }
+    _retryTimer = Timer(
+      wait < const Duration(seconds: 1) ? wait : const Duration(seconds: 1),
+      () {
+        if (!mounted) return;
+        setState(() {});
+        _scheduleRetryUpdate();
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _retryTimer?.cancel();
+    _waitingFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final recovering = widget.recovering;
+    final tryingAlternative = widget.tryingAlternative;
+    final lineName = widget.lineName, failure = widget.failure;
+    final retryWait = _retryWait;
+    final waiting = retryWait > Duration.zero;
+    final retryLabel = waiting
+        ? l.playbackRetryAfter((retryWait.inMicroseconds / 1000000).ceil())
+        : switch (widget.failureKind) {
+            MediaServerFailureKind.certificate => l.playbackRetryAfterRepair,
+            MediaServerFailureKind.forbidden => l.playbackRetryAfterPermission,
+            _ => l.retry,
+          };
     return Column(
       key: const Key('playback-line-recovery'),
       mainAxisSize: MainAxisSize.min,
@@ -52,13 +133,14 @@ class PlaybackLineRecoveryPanel extends StatelessWidget {
                       ? tryingAlternative
                             ? l.playbackTryingAlternative
                             : l.playbackReconnecting
-                      : l.playbackRecoveryStopped,
+                      : playbackClassifiedFailureTitle(widget.failureKind, l) ??
+                            l.playbackRecoveryStopped,
                   textAlign: TextAlign.center,
                 ),
                 if (lineName != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    lineName!,
+                    lineName,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
@@ -66,7 +148,7 @@ class PlaybackLineRecoveryPanel extends StatelessWidget {
                 ],
                 if (!recovering && failure != null) ...[
                   const SizedBox(height: 8),
-                  Text(failure!, textAlign: TextAlign.center),
+                  Text(failure, textAlign: TextAlign.center),
                 ],
                 const SizedBox(height: 8),
                 Text(
@@ -91,13 +173,19 @@ class PlaybackLineRecoveryPanel extends StatelessWidget {
                       : 'playback-recovery-retry',
                 ),
                 autofocus: true,
-                focusNode: primaryFocusNode,
-                onPressed: recovering ? onCancel : onRetry,
-                child: Text(recovering ? l.cancelAction : l.retry),
+                focusNode: widget.primaryFocusNode,
+                onPressed: recovering
+                    ? widget.onCancel
+                    : waiting
+                    ? null
+                    : widget.onRetry,
+                child: Text(recovering ? l.cancelAction : retryLabel),
               ),
               AppButton(
                 key: const Key('playback-recovery-lines'),
-                onPressed: onChooseLines,
+                focusNode: _waitingFocus,
+                autofocus: waiting,
+                onPressed: widget.onChooseLines,
                 child: Text(l.playbackChooseLine),
               ),
             ],
@@ -349,6 +437,8 @@ class PlayerLineStatus extends StatelessWidget {
                   recovering: c.isRecovering,
                   primaryFocusNode: primaryFocusNode,
                   failure: c.playbackLineFailure,
+                  failureKind: c.loadFailure?.kind,
+                  retryAfter: c.playbackRetryAfter,
                   tryingAlternative:
                       c.pendingLineId != null &&
                       c.pendingLineId != c.activeLineId,

@@ -1,5 +1,6 @@
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
@@ -306,6 +307,68 @@ void main() {
     }
     expect(find.byType(MobilePlayerPage), findsNothing);
   }
+
+  cases.testWidgets(
+    'phone runtime failures show classified reasons and retry actions',
+    (tester) async {
+      final backend = FakeVideoBackend();
+      final c = await showPlayer(
+        tester,
+        itemId: 'movie-up',
+        backend: backend,
+        withRuntime: true,
+      );
+      for (final entry in {
+        PlaybackRecoveryFailureKind.certificate: '证书验证失败，请检查服务器证书',
+        PlaybackRecoveryFailureKind.forbidden: '没有播放权限，请检查账号权限',
+        PlaybackRecoveryFailureKind.rateLimited: '服务器请求过多，请稍后重试',
+      }.entries) {
+        final opens = backend.openCount;
+        backend.emitEvent(
+          VideoEventKind.error,
+          PlaybackRecoveryFailure(
+            entry.key,
+            retryAfter: entry.key == PlaybackRecoveryFailureKind.rateLimited
+                ? const Duration(seconds: 30)
+                : null,
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text(entry.value).hitTestable(), findsOneWidget);
+        expect(find.text('播放中断，请检查网络'), findsNothing);
+        expect(c.isRecovering, isFalse);
+        expect(backend.openCount, opens);
+        final retry = tester.widget<AppButton>(
+          find.byKey(const Key('playback-recovery-retry')),
+        );
+        expect(
+          retry.onPressed == null,
+          entry.key == PlaybackRecoveryFailureKind.rateLimited,
+        );
+        expect(
+          find.byKey(const Key('playback-recovery-lines')).hitTestable(),
+          findsOneWidget,
+        );
+        if (entry.key != PlaybackRecoveryFailureKind.rateLimited) {
+          await tester.tap(find.byKey(const Key('playback-recovery-retry')));
+          for (
+            var frame = 0;
+            frame < 40 && (c.error != null || c.loading);
+            frame++
+          ) {
+            await tester.pump(const Duration(milliseconds: 50));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          expect(c.error, isNull);
+        }
+      }
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
 
   cases.testWidgets(
     'phone PiP removes controls and keeps the same mounted video session',

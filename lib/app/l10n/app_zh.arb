@@ -2470,6 +2470,15 @@
   "playbackContinueWithoutSubtitles": "关闭字幕继续",
   "playbackStartFromBeginning": "从头播放",
   "playbackContinueAtPosition": "沿用原观看位置",
+  "playbackCertificateStopped": "无法建立安全连接",
+  "playbackPermissionStopped": "当前账号没有播放权限",
+  "playbackRateLimited": "服务器暂时限制请求",
+  "playbackRetryAfterRepair": "修复后重试",
+  "playbackRetryAfterPermission": "权限恢复后重试",
+  "playbackRetryAfter": "{seconds} 秒后可重试",
+  "@playbackRetryAfter": {
+    "placeholders": { "seconds": { "type": "int" } }
+  },
   "playbackLinePending": "正在连接，成功后才会保存选择",
   "playbackLineFixed": "固定线路",
   "playbackLineActual": "正在使用：{line}",

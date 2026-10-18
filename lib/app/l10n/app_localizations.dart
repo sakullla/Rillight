@@ -5362,6 +5362,42 @@ abstract class AppLocalizations {
   /// **'沿用原观看位置'**
   String get playbackContinueAtPosition;
 
+  /// No description provided for @playbackCertificateStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法建立安全连接'**
+  String get playbackCertificateStopped;
+
+  /// No description provided for @playbackPermissionStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前账号没有播放权限'**
+  String get playbackPermissionStopped;
+
+  /// No description provided for @playbackRateLimited.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器暂时限制请求'**
+  String get playbackRateLimited;
+
+  /// No description provided for @playbackRetryAfterRepair.
+  ///
+  /// In zh, this message translates to:
+  /// **'修复后重试'**
+  String get playbackRetryAfterRepair;
+
+  /// No description provided for @playbackRetryAfterPermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'权限恢复后重试'**
+  String get playbackRetryAfterPermission;
+
+  /// No description provided for @playbackRetryAfter.
+  ///
+  /// In zh, this message translates to:
+  /// **'{seconds} 秒后可重试'**
+  String playbackRetryAfter(int seconds);
+
   /// No description provided for @playbackLinePending.
   ///
   /// In zh, this message translates to:

@@ -25,6 +25,7 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_output_status.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -407,6 +408,59 @@ void main() {
         ),
       )
       .any((s) => s.properties.focused == true);
+
+  testWidgets('TV runtime failures show classified reasons and retry actions', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend();
+    final c = await start(tester, backend);
+    for (final entry in {
+      PlaybackRecoveryFailureKind.certificate: '证书验证失败，请检查服务器证书',
+      PlaybackRecoveryFailureKind.forbidden: '没有播放权限，请检查账号权限',
+      PlaybackRecoveryFailureKind.rateLimited: '服务器请求过多，请稍后重试',
+    }.entries) {
+      final opens = backend.openCount;
+      backend.emitEvent(
+        VideoEventKind.error,
+        PlaybackRecoveryFailure(
+          entry.key,
+          retryAfter: entry.key == PlaybackRecoveryFailureKind.rateLimited
+              ? const Duration(seconds: 30)
+              : null,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text(entry.value).hitTestable(), findsOneWidget);
+      expect(find.text('播放中断，请检查网络'), findsNothing);
+      expect(c.isRecovering, isFalse);
+      expect(backend.openCount, opens);
+      final retry = tester.widget<AppButton>(
+        find.byKey(const Key('playback-recovery-retry')),
+      );
+      expect(
+        retry.onPressed == null,
+        entry.key == PlaybackRecoveryFailureKind.rateLimited,
+      );
+      if (entry.key == PlaybackRecoveryFailureKind.rateLimited) {
+        expect(
+          tester
+              .widget<AppButton>(
+                find.byKey(const Key('playback-recovery-lines')),
+              )
+              .focusNode
+              ?.hasFocus,
+          isTrue,
+        );
+      } else {
+        expect(retry.focusNode?.hasFocus, isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        await settle(tester);
+        expect(c.error, isNull);
+      }
+    }
+    await finish(tester);
+  }, tags: ['integration']);
 
   testWidgets(
     'single-choice TV tracks quality and source actions stay hidden',

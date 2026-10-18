@@ -103,6 +103,17 @@ abstract interface class VideoBackendSourceRenewal {
   Future<void> refreshSourceUrl(Uri url);
 }
 
+/// Foreground rejection requires a bounded recovery result. Integer events
+/// remain optional prefetch/stall hints, while this request owns failed IO.
+class RequiredSourceRenewal {
+  const RequiredSourceRenewal(this.status);
+  final int status;
+}
+
+abstract interface class VideoBackendSourceRenewalFeedback {
+  void finishSourceRenewal({required bool succeeded});
+}
+
 /// Pause a ready native session and retain its bounded byte cache on backgrounding.
 /// Normal stop/dispose must still release the retained transport.
 abstract interface class VideoBackendSuspension {

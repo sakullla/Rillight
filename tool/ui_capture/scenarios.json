@@ -1,4 +1,7 @@
 [
+{ "id": "player-line-certificate", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{ "id": "player-line-forbidden", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{ "id": "player-line-rate-limited", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
 {
   "id": "player-lines-auto-landscape",
   "feature": "player",
