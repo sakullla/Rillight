@@ -161,8 +161,15 @@ def serve(media, output, metadata_delay_ms=0):
              'subtitle-window': 'subtitle-window.mp4',
              'broken': 'missing.mkv'}
     user = {'Id': 'validation-user', 'Name': 'validation', 'Configuration': {'EnableNextEpisodeAutoPlay': False}}
+    series_id = 'validation-series'
     def item(identifier):
-        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 900000000 if identifier == 'cache-long' else 600000000 if identifier == '1080p60-long' else 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
+        if identifier == series_id:
+            return {'Id': series_id, 'Name': 'Playback validation', 'Type': 'Series', 'IsFolder': True}
+        # Smoke tests switch clips through playEpisode, which keeps the work
+        # anchor. Model them as episodes of one series, not unrelated movies.
+        return {'Id': identifier, 'Name': identifier, 'Type': 'Episode',
+                'SeriesId': series_id, 'ParentId': series_id,
+                'RunTimeTicks': 900000000 if identifier == 'cache-long' else 600000000 if identifier == '1080p60-long' else 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
                 'UserData': {'PlaybackPositionTicks': 20000000 if identifier == 'baseline' else 0}, 'MediaType': 'Video'}
 
     class Handler(BaseHTTPRequestHandler):
@@ -232,7 +239,7 @@ def serve(media, output, metadata_delay_ms=0):
             elif path == '/Users/validation-user':
                 time.sleep(metadata_delay_ms / 1000)
                 self.send_json(user)
-            elif re.fullmatch(r'/Users/validation-user/Items/[^/]+', path) and path.split('/')[-1] in paths:
+            elif re.fullmatch(r'/Users/validation-user/Items/[^/]+', path) and (path.split('/')[-1] in paths or path.split('/')[-1] == series_id):
                 time.sleep(metadata_delay_ms / 1000)
                 self.send_json(item(path.split('/')[-1]))
             elif path.startswith('/media/') or '/Subtitles/' in path:
