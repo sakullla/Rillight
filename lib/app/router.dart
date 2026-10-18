@@ -32,8 +32,7 @@ import 'package:rillight/home/tv_shelf_page.dart';
 import 'package:rillight/home/phone_home_edit_page.dart';
 
 import 'package:rillight/library/aggregation_page.dart';
-import 'package:rillight/aggregation/query/aggregation_query.dart'
-    show QueryMode;
+
 import 'package:rillight/app/mobile_shell.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
@@ -531,7 +530,7 @@ Widget _shelfPage(
   final command = state.extra is PlayerHostOpenItemCommand
       ? state.extra as PlayerHostOpenItemCommand
       : null;
-  if (command?.source == null) {
+  if (command == null || command.source == null) {
     if (!environment.isDesktop && !environment.isTv) {
       return PhoneShelfPage.fromState(state);
     }
@@ -546,41 +545,34 @@ Widget _shelfPage(
     }
     return ShelfGridPage.fromState(state);
   }
-  if (command != null &&
-      (command.source == null || command.libraryId == null)) {
-    return const SizedBox.shrink();
-  }
-  final source = state.pathParameters['source'];
-  final query = state.uri.queryParameters;
-  final child = AggregationPage(
-    key: ValueKey((
-      state.uri.toString(),
-      command?.source,
-      command?.accessGeneration,
-    )),
-
-    sourceCommand: command,
-    legacySelected: command == null,
-    legacyLibraryId: command == null ? query['parentId'] : null,
-    initialGenre: query['genre'] ?? '',
-    initialType: source == 'latest-movies'
-        ? 'Movie'
-        : source == 'latest-series'
-        ? 'Series'
-        : source == 'nextup'
-        ? 'Episode'
-        : const {'Movie', 'Series'}.contains(query['includeItemTypes'])
-        ? query['includeItemTypes']
-        : null,
-    initialMode: source == 'nextup'
-        ? QueryMode.nextUp
-        : source == 'resume'
-        ? QueryMode.continueWatching
-        : source == 'latest-movies' || source == 'latest-series'
-        ? QueryMode.recent
-        : QueryMode.browse,
+  final child = Builder(
+    builder: (context) {
+      final origin = DetailSourceScope.maybeOf(context)!;
+      return ShelfClientOverride(
+        client: origin.client,
+        child: ShelfItemOpen(
+          onOpen: (item) => openServerItem(
+            context,
+            account: origin.source.account,
+            item: item,
+          ),
+          child: environment.isTv
+              ? TvShelfPage.fromState(
+                  state,
+                  client: origin.client,
+                  onOpen: (item) => openServerItem(
+                    context,
+                    account: origin.source.account,
+                    item: item,
+                  ),
+                )
+              : environment.isDesktop
+              ? ShelfGridPage.fromState(state)
+              : PhoneShelfPage.fromState(state),
+        ),
+      );
+    },
   );
-  if (command == null) return child;
   return SourceDetailGate(
     key: ValueKey((
       state.uri.toString(),

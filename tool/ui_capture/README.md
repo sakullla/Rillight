@@ -24,7 +24,7 @@ node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
 | 功能 | 主要状态 |
 | --- | --- |
 | `home` / 首页 | 两帧加载过程、内容、货架、鼠标悬浮过程、遥控焦点、手机首页编辑、桌面顶栏媒体库下拉 |
-| `aggregation` / 聚合 | 真实三端入口、逐服横排、锁定占位及进入密码、来源筛选、空结果、手动来源比较、局部失败与搜索 |
+| `aggregation` / 聚合 | 真实三端入口、逐服横排、锁定占位及进入密码、继续观看／收藏／媒体库、逐服空态、局部失败与搜索 |
 | `library` / 片库 | 片库列表、电影/剧集片库、排序、筛选、继续观看及最新入库列表 |
 | `detail` / 详情 | 电影、剧集、季、分集、选季/选集弹窗、分集右键菜单、音轨和字幕选择、剧照查看器与翻页 |
 | `search` / 搜索 | 初始、输入、结果、空结果、筛选、TV 输入弹窗 |
@@ -62,4 +62,4 @@ macOS 若运行磁盘缓存测试时出现 `disk-unavailable`，先检查系统�
 它不是系统小窗、原生字幕像素或连续视频／音频证据。系统 PiP 使用隔离 Android 验证包，
 由 `tool/android_release_checks.py` 的 `phone_pip_flow` 另验 pinned task、连续会话和变化画面。
 
-`--feature entry` captures the real comparison dialog before verification, its password form and privately verified candidates, plus the recoverable startup history failure page. Synthetic paths identify retained files; these captures do not establish native playback or device acceptance.
+`--feature entry` captures the compact film-source selector before verification, its password form and privately verified candidates, plus the recoverable startup history failure page. Synthetic paths identify retained files; these captures do not establish native playback or device acceptance.

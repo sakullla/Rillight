@@ -15,8 +15,8 @@ void main() {
     caseEntrypoints['auth/line_management_cases.dart']!,
   );
   group(
-    'catalog/catalog_browse_test.dart',
-    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
   );
   group(
     'library/person_works_test.dart',
@@ -35,7 +35,7 @@ void main() {
     caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
   );
   group(
-    'mobile/tv_shelf_focus_test.dart',
-    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
+    'tv/tv_lan_pair_test.dart [part 1]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
   );
 }

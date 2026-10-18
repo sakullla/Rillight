@@ -29,6 +29,7 @@ import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -80,6 +81,21 @@ class _Movie extends FakeEmbyItem {
   Map<String, dynamic> toJson() => {
     ...super.toJson(),
     'ProviderIds': {'Tmdb': '1234'},
+  };
+}
+
+class _ConflictMovie extends FakeEmbyItem {
+  _ConflictMovie()
+    : super(
+        id: 'conflict',
+        name: '合成作品',
+        type: 'Movie',
+        parentId: 'view-movies',
+      );
+  @override
+  Map<String, dynamic> toJson() => {
+    ...super.toJson(),
+    'ProviderIds': {'Tmdb': '9999'},
   };
 }
 
@@ -1415,7 +1431,7 @@ void main() {
         findsNothing,
       );
       expect(find.byKey(const Key('aggregation-private-entry')), findsNothing);
-      expect(find.text('查找同源'), findsNothing);
+      expect(find.text('选择影片来源'), findsNothing);
       expect(find.byType(ui.AppChoiceChip), findsNothing);
       await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
       await _settle(tester);
@@ -1471,7 +1487,7 @@ void main() {
       app.router.pop();
       await _settle(tester);
       expect(find.text('继续播放'), findsWidgets);
-      expect(find.text('查找同源'), findsNothing);
+      expect(find.text('选择影片来源'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -1653,7 +1669,7 @@ void main() {
           find.byKey(const Key('aggregation-private-entry')),
           findsNothing,
         );
-        expect(find.text('查找同源'), findsNothing);
+        expect(find.text('选择影片来源'), findsNothing);
         expect(find.text('媒体库范围'), findsNothing);
         expect(find.byType(ui.AppChoiceChip), findsNothing);
         await tester.tap(
@@ -2221,23 +2237,23 @@ void main() {
         )!;
         f.b.requests.clear();
         Future<void> showComparison() async {
-          final action = find.widgetWithText(ui.AppButton, '查找同源');
+          final action = find.widgetWithText(ui.AppButton, '选择影片来源');
           await tester.ensureVisible(action);
           await tester.tap(action);
           await _settle(tester);
         }
 
         Future<void> verifyTarget() async {
-          final action = find.byKey(Key('comparison-verify-${f.bId}'));
+          final action = find.byKey(Key('source-selection-verify-${f.bId}'));
           await tester.ensureVisible(action);
           await tester.tap(action);
           await _settle(tester);
-          expect(find.text('验证进入密码'), findsOneWidget);
-          expect(find.text('验证后查找这台服务器中的对应影片。'), findsOneWidget);
+          expect(find.text('输入访问密码'), findsOneWidget);
+          expect(find.text('输入这台服务器的本机密码，查看可选来源。'), findsOneWidget);
           expect(
             find.descendant(
               of: find.byKey(const Key('server-unlock-submit')),
-              matching: find.text('验证并查找'),
+              matching: find.text('解锁'),
             ),
             findsOneWidget,
           );
@@ -2253,16 +2269,19 @@ void main() {
         }
 
         await showComparison();
-        expect(find.byKey(Key('comparison-server-${f.bId}')), findsOneWidget);
         expect(
-          find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+          find.byKey(Key('source-selection-server-${f.bId}')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
           findsNothing,
         );
         expect(f.b.requests, isEmpty);
-        await tester.tap(find.byKey(Key('comparison-verify-${f.bId}')));
+        await tester.tap(find.byKey(Key('source-selection-verify-${f.bId}')));
         await _settle(tester);
         await tester.tap(
-          find.byKey(const Key('comparison-verification-cancel')),
+          find.byKey(const Key('source-selection-verification-cancel')),
         );
         await _settle(tester);
         expectOriginalAccess();
@@ -2270,19 +2289,20 @@ void main() {
         if (environment.isTv) {
           await tester.binding.handlePopRoute();
           await _settle(tester);
-          expect(find.byKey(const Key('comparison-title')), findsNothing);
+          expect(find.byKey(const Key('source-selection-title')), findsNothing);
           expectOriginalAccess();
           await showComparison();
         }
         await verifyTarget();
         expect(
-          find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+          find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
           findsOneWidget,
         );
         expectOriginalAccess();
-        expect(find.text('已确认是同一作品'), findsOneWidget);
-        expect(find.text('共 3 个版本'), findsOneWidget);
-        expect(find.text('音轨 1 条 · 字幕 24 条'), findsNWidgets(2));
+        expect(find.textContaining('1080p'), findsOneWidget);
+        expect(find.text('共 3 个版本'), findsNothing);
+        expect(find.textContaining('音轨 1 条'), findsNothing);
+        expect(find.textContaining('查找完成'), findsNothing);
         final visibleCopy = tester
             .widgetList<Text>(find.byType(Text))
             .map((text) => text.data ?? '')
@@ -2299,26 +2319,26 @@ void main() {
           expect(visibleCopy, isNot(contains(internal)));
         }
         final titlePosition = tester.getTopLeft(
-          find.byKey(const Key('comparison-title')),
+          find.byKey(const Key('source-selection-title')),
         );
         final closePosition = tester.getTopLeft(
-          find.byKey(const Key('comparison-close')),
+          find.byKey(const Key('source-selection-close')),
         );
         await tester.drag(
-          find.byKey(const Key('comparison-content')),
+          find.byKey(const Key('source-selection-content')),
           const Offset(0, -300),
         );
         await _settle(tester);
         expect(
-          tester.getTopLeft(find.byKey(const Key('comparison-title'))),
+          tester.getTopLeft(find.byKey(const Key('source-selection-title'))),
           titlePosition,
         );
         expect(
-          tester.getTopLeft(find.byKey(const Key('comparison-close'))),
+          tester.getTopLeft(find.byKey(const Key('source-selection-close'))),
           closePosition,
         );
         expect(
-          find.byKey(const Key('comparison-close')).hitTestable(),
+          find.byKey(const Key('source-selection-close')).hitTestable(),
           findsOneWidget,
         );
         // Another query cannot consume the comparison's private entry ticket.
@@ -2334,14 +2354,14 @@ void main() {
           isFalse,
         );
         global.dispose();
-        final close = find.byKey(const Key('comparison-close'));
+        final close = find.byKey(const Key('source-selection-close'));
         if (environment.isTv) {
           bool closeHasFocus() {
             var found = false;
             FocusManager.instance.primaryFocus?.context?.visitAncestorElements((
               element,
             ) {
-              if (element.widget.key == const Key('comparison-close')) {
+              if (element.widget.key == const Key('source-selection-close')) {
                 found = true;
               }
               return !found;
@@ -2374,14 +2394,19 @@ void main() {
         expectOriginalAccess();
         await showComparison();
         // Closing discarded the previous candidate authorization.
-        expect(find.byKey(Key('comparison-server-${f.bId}')), findsOneWidget);
         expect(
-          find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+          find.byKey(Key('source-selection-server-${f.bId}')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
           findsNothing,
         );
         await verifyTarget();
         expectOriginalAccess();
-        final target = find.byKey(Key('comparison-item-${f.bId}-shared-id'));
+        final target = find.byKey(
+          Key('source-selection-item-${f.bId}-shared-id'),
+        );
         await tester.ensureVisible(target);
         await tester.tap(target);
         await _settle(tester);
@@ -2389,7 +2414,7 @@ void main() {
         expect(f.auth.serverAccess.allows(f.aId), isFalse);
         expect(original.permit.isValid, isFalse);
         expect(f.auth.serverAccess.allows(f.bId), isTrue);
-        expect(find.byKey(const Key('comparison-title')), findsNothing);
+        expect(find.byKey(const Key('source-selection-title')), findsNothing);
         expect(find.byType(detailType), findsOneWidget);
         final destination = DetailSourceScope.maybeOf(
           tester.element(find.byType(detailType)),
@@ -2432,12 +2457,14 @@ void main() {
       final original = DetailSourceScope.maybeOf(
         tester.element(find.byType(ItemDetailPage)),
       )!;
-      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
       await _settle(tester);
-      await tester.tap(find.byKey(Key('comparison-verify-${f.bId}')));
+      await tester.tap(find.byKey(Key('source-selection-verify-${f.bId}')));
       await _settle(tester);
       await _typeEntryPassword(tester, PresentationEnvironment.desktop, '1234');
-      final target = find.byKey(Key('comparison-item-${f.bId}-shared-id'));
+      final target = find.byKey(
+        Key('source-selection-item-${f.bId}-shared-id'),
+      );
       expect(target, findsOneWidget);
       f.b.itemStatus = 503;
       await tester.ensureVisible(target);
@@ -2447,18 +2474,242 @@ void main() {
       expect(original.permit.isValid, isTrue);
       expect(f.auth.serverAccess.allows(f.aId), isTrue);
       expect(f.auth.serverAccess.allows(f.bId), isFalse);
-      expect(find.byKey(Key('comparison-server-${f.bId}')), findsOneWidget);
       expect(
-        find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+        find.byKey(Key('source-selection-server-${f.bId}')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
         findsNothing,
       );
       expect(app.router.state.uri.path, '/item/shared-id');
-      await tester.tap(find.byKey(const Key('comparison-close')));
+      await tester.tap(find.byKey(const Key('source-selection-close')));
       await _settle(tester);
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await _settle(tester);
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    cases.testWidgets(
+      '${environment.presentation.name} ordinary detail exposes manual source selection without synthetic route extras',
+      (tester) async {
+        isolateImageCache();
+        tester.view.physicalSize = environment.isDesktop || environment.isTv
+            ? const Size(1280, 900)
+            : const Size(412, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final f = _Fixture();
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
+        final app = f.app(environment);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        app.router.go('/item/shared-id');
+        await _settle(tester);
+        await tester.tap(find.byKey(const Key('source-selection-open')));
+        await _settle(tester);
+        expect(
+          find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(Key('source-selection-item-${f.aId}-shared-id')),
+          findsNothing,
+        );
+        expect(f.auth.session!.server.id, f.aId);
+        expect(find.text('查找同源'), findsNothing);
+        expect(find.text('全部服务器'), findsNothing);
+        await tester.binding.handlePopRoute();
+        await _settle(tester);
+        expect(find.byKey(const Key('source-selection-title')), findsNothing);
+        expect(find.byKey(const Key('source-selection-open')), findsOneWidget);
+        expect(f.auth.session!.server.id, f.aId);
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+    cases.testWidgets(
+      '${environment.presentation.name} sourced shelf preserves genre and child queries without legacy aggregation or current-server fallback',
+      (tester) async {
+        isolateImageCache();
+        tester.view.physicalSize = environment.isDesktop || environment.isTv
+            ? const Size(1280, 900)
+            : const Size(412, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final f = _Fixture();
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
+        f.b.items.addAll([
+          FakeEmbyItem(
+            id: 'b-season',
+            name: 'B 第二季',
+            type: 'Season',
+            parentId: 'view-movies',
+          ),
+          FakeEmbyItem(
+            id: 'b-episode',
+            name: 'B 专属第二集',
+            type: 'Episode',
+            parentId: 'b-season',
+            indexNumber: 2,
+            parentIndexNumber: 2,
+          ),
+          FakeEmbyItem(
+            id: 'b-album',
+            name: 'B 相册',
+            type: 'PhotoAlbum',
+            parentId: 'view-movies',
+          ),
+          FakeEmbyItem(
+            id: 'b-photo',
+            name: 'B 专属剧照',
+            type: 'Photo',
+            parentId: 'b-album',
+          ),
+        ]);
+        f.b.items.first.genres = ['冒险'];
+        await tester.runAsync(() => f.protect(f.bId, unlock: true));
+        final app = f.app(environment);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        final account = (await tester.runAsync(
+          () => f.auth.sources.acquireAccount(f.bId, libraryId: 'view-movies'),
+        ))!;
+        final command = PlayerHostOpenItemCommand(
+          itemId: 'shared-id',
+          source: SourceReference(account: account, itemId: 'shared-id'),
+          libraryId: 'view-movies',
+          accessGeneration: f.auth.serverAccess.generation(f.bId),
+        );
+        for (final spec in [
+          ('view-movies', 'Movie', '冒险', '合成作品'),
+          ('b-season', 'Episode', '', 'B 专属第二集'),
+          ('b-album', 'Photo', '', 'B 专属剧照'),
+        ]) {
+          f.a.requests.clear();
+          f.b.requests.clear();
+          app.router.go(
+            Uri(
+              path: '/shelf/items',
+              queryParameters: {
+                'parentId': spec.$1,
+                'includeItemTypes': spec.$2,
+                'title': '来源 B 列表',
+                if (spec.$3.isNotEmpty) 'genre': spec.$3,
+              },
+            ).toString(),
+            extra: command,
+          );
+          await _settle(tester);
+          expect(find.textContaining(spec.$4), findsWidgets);
+          expect(find.text('全部服务器'), findsNothing);
+          expect(find.textContaining('未选择可参与'), findsNothing);
+          expect(find.byType(SourceSelectionAction), findsNothing);
+          final requests = f.b.requests
+              .map(
+                (request) =>
+                    Uri.parse(request.substring(request.indexOf(' ') + 1)),
+              )
+              .where(
+                (uri) =>
+                    uri.queryParameters['ParentId'] == spec.$1 &&
+                    uri.queryParameters['IncludeItemTypes'] == spec.$2,
+              )
+              .toList();
+          expect(requests, isNotEmpty);
+          if (spec.$3.isNotEmpty) {
+            expect(
+              requests.any((uri) => uri.queryParameters['Genres'] == spec.$3),
+              isTrue,
+            );
+          }
+          expect(
+            f.a.requests.where(
+              (r) =>
+                  r.contains('ParentId=${spec.$1}') &&
+                  r.contains('IncludeItemTypes=${spec.$2}'),
+            ),
+            isEmpty,
+          );
+          expect(tester.takeException(), isNull);
+        }
+        await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
+        await _settle(tester);
+        expect(find.text('B 专属剧照'), findsNothing);
+        f.a.requests.clear();
+        f.b.requests.clear();
+        app.router.go(
+          '/shelf/items?parentId=b-album&includeItemTypes=Photo',
+          extra: command,
+        );
+        await _settle(tester);
+        expect(find.text('B 专属剧照'), findsNothing);
+        expect(
+          f.a.requests.where((r) => r.contains('ParentId=b-album')),
+          isEmpty,
+        );
+        expect(
+          f.b.requests.where((r) => r.contains('ParentId=b-album')),
+          isEmpty,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+
+  cases.testWidgets(
+    'leaving ordinary detail cancels a pending source selector without a late overlay',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      final adapter = _BlockingCatalogAdapter([f.a, f.b]);
+      await tester.runAsync(() => f.open(sourceAdapter: adapter));
+      addTearDown(() => _drive(tester, f.close()));
+      addTearDown(() {
+        if (!adapter.gate.isCompleted) adapter.gate.complete();
+      });
+      f.a.items.add(
+        FakeEmbyItem(
+          id: 'other',
+          name: '另一部影片',
+          type: 'Movie',
+          parentId: 'view-movies',
+        ),
+      );
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go('/item/shared-id');
+      await _settle(tester);
+      adapter.blockedAuthority = 'a.test';
+      adapter.blockedSuffix = '/Items/shared-id';
+      await tester.tap(find.byKey(const Key('source-selection-open')));
+      await _settle(tester);
+      expect(adapter.entered, isTrue);
+      app.router.push('/item/other');
+      await _settle(tester);
+      adapter.gate.complete();
+      await _settle(tester);
+      expect(app.router.state.uri.path, '/item/other');
+      expect(find.byKey(const Key('source-selection-title')), findsNothing);
+      expect(find.text('另一部影片'), findsWidgets);
+      await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
     tags: ['integration'],
@@ -2479,6 +2730,15 @@ void main() {
           parentId: 'view-movies',
         ),
       ];
+      f.b.items.add(_ConflictMovie());
+      f.a.items.add(
+        FakeEmbyItem(
+          id: 'same-server-copy',
+          name: '合成作品',
+          type: 'Movie',
+          parentId: 'view-movies',
+        ),
+      );
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -2489,14 +2749,26 @@ void main() {
         serverId: f.aId,
         itemId: 'shared-id',
       );
-      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
       await _settle(tester);
-      expect(find.text('尚未确认是同一作品，请先核对详情'), findsOneWidget);
+      expect(
+        find.byKey(Key('source-selection-item-${f.bId}-candidate')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(Key('source-selection-item-${f.bId}-conflict')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(Key('source-selection-item-${f.aId}-same-server-copy')),
+        findsNothing,
+      );
+      expect(find.textContaining('请核对影片详情'), findsOneWidget);
       expect(find.text('已确认是同一作品'), findsNothing);
-      expect(find.textContaining('未知'), findsWidgets);
+      expect(find.textContaining('音轨'), findsNothing);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _settle(tester);
-      expect(find.byKey(const Key('comparison-title')), findsNothing);
+      expect(find.byKey(const Key('source-selection-title')), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -2541,9 +2813,9 @@ void main() {
         ),
       );
       await _settle(tester);
-      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
       await _settle(tester);
-      expect(find.text('已确认是同一作品'), findsOneWidget);
+      expect(find.text('查找此集'), findsOneWidget);
       await tester.tap(find.text('查找此集'));
       await _settle(tester);
       await tester.tap(find.text('已核对，按季与集对应'));
@@ -2660,12 +2932,12 @@ void main() {
         serverId: f.bId,
         itemId: 'shared-id',
       );
-      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
       await _settle(tester);
-      expect(find.byKey(const Key('comparison-title')), findsOneWidget);
+      expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
       await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
       await _settle(tester);
-      expect(find.byKey(const Key('comparison-title')), findsNothing);
+      expect(find.byKey(const Key('source-selection-title')), findsNothing);
       expect(find.byType(ItemDetailPage), findsNothing);
       expect(
         app.router.routeInformationProvider.value.uri.path,
@@ -3711,7 +3983,7 @@ void main() {
   }, tags: ['integration']);
 
   cases.testWidgets(
-    'each server poster uses that session and opened details hide comparison',
+    'each server poster and its source selector retain the actual server',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
@@ -3807,13 +4079,13 @@ void main() {
       );
       await _settle(tester);
       expect(find.byType(ItemDetailPage), findsOneWidget);
-      expect(find.byType(SourceComparisonAction), findsNothing);
-      expect(app.router.state.uri.queryParameters['showComparison'], '0');
+      expect(find.byType(SourceSelectionAction), findsOneWidget);
+      expect(app.router.state.uri.queryParameters['showComparison'], isNull);
       expect(
         tester
             .widget<SourceDetailGate>(find.byType(SourceDetailGate))
             .showComparison,
-        isFalse,
+        isTrue,
       );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -3876,7 +4148,7 @@ void main() {
         findsOneWidget,
         reason: app.router.state.uri.toString(),
       );
-      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(find.byType(SourceSelectionAction), findsOneWidget);
       expect(
         DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
             .source
@@ -3892,7 +4164,7 @@ void main() {
       await _settle(tester);
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(app.router.state.uri.path, '/item/shared-id');
-      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(find.byType(SourceSelectionAction), findsOneWidget);
       expect(f.auth.session!.server.id, f.bId);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());

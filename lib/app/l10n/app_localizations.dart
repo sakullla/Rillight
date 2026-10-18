@@ -322,18 +322,6 @@ abstract class AppLocalizations {
   /// **'聚合'**
   String get aggregation;
 
-  /// No description provided for @aggregationLibraryScope.
-  ///
-  /// In zh, this message translates to:
-  /// **'媒体库范围'**
-  String get aggregationLibraryScope;
-
-  /// No description provided for @aggregationPrivate.
-  ///
-  /// In zh, this message translates to:
-  /// **'私密区域'**
-  String get aggregationPrivate;
-
   /// No description provided for @aggregationPrivateLocked.
   ///
   /// In zh, this message translates to:
@@ -343,91 +331,13 @@ abstract class AppLocalizations {
   /// No description provided for @aggregationUnavailableDetail.
   ///
   /// In zh, this message translates to:
-  /// **'此来源详情当前不可访问，请返回允许的来源范围'**
+  /// **'暂时无法打开此服务器的内容，请返回重试。'**
   String get aggregationUnavailableDetail;
-
-  /// No description provided for @aggregationAllowedSources.
-  ///
-  /// In zh, this message translates to:
-  /// **'全部允许来源'**
-  String get aggregationAllowedSources;
-
-  /// No description provided for @aggregationAllSources.
-  ///
-  /// In zh, this message translates to:
-  /// **'全部服务器'**
-  String get aggregationAllSources;
-
-  /// No description provided for @aggregationAllTypes.
-  ///
-  /// In zh, this message translates to:
-  /// **'全部类型'**
-  String get aggregationAllTypes;
-
-  /// No description provided for @aggregationAllWatching.
-  ///
-  /// In zh, this message translates to:
-  /// **'全部观看状态'**
-  String get aggregationAllWatching;
-
-  /// No description provided for @aggregationContinue.
-  ///
-  /// In zh, this message translates to:
-  /// **'继续观看'**
-  String get aggregationContinue;
-
-  /// No description provided for @aggregationRecent.
-  ///
-  /// In zh, this message translates to:
-  /// **'最近更新'**
-  String get aggregationRecent;
-
-  /// No description provided for @aggregationLoaded.
-  ///
-  /// In zh, this message translates to:
-  /// **'已加载作品'**
-  String get aggregationLoaded;
-
-  /// No description provided for @aggregationLoadedRemote.
-  ///
-  /// In zh, this message translates to:
-  /// **'远端已加载作品'**
-  String get aggregationLoadedRemote;
-
-  /// No description provided for @aggregationRemoteEmpty.
-  ///
-  /// In zh, this message translates to:
-  /// **'远端暂无继续观看项，本机记录仍可用'**
-  String get aggregationRemoteEmpty;
-
-  /// No description provided for @aggregationRemoteConflict.
-  ///
-  /// In zh, this message translates to:
-  /// **'远端观看时间不可信，请明确选择实际来源（不取最大进度）'**
-  String get aggregationRemoteConflict;
-
-  /// No description provided for @aggregationComplete.
-  ///
-  /// In zh, this message translates to:
-  /// **'范围完整'**
-  String get aggregationComplete;
-
-  /// No description provided for @aggregationIncomplete.
-  ///
-  /// In zh, this message translates to:
-  /// **'范围尚不完整 · 仅对已加载结果排序'**
-  String get aggregationIncomplete;
-
-  /// No description provided for @aggregationEmptyScope.
-  ///
-  /// In zh, this message translates to:
-  /// **'未选择可参与的服务或媒体库'**
-  String get aggregationEmptyScope;
 
   /// No description provided for @aggregationEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'所选范围没有匹配作品'**
+  /// **'暂无内容'**
   String get aggregationEmpty;
 
   /// No description provided for @aggregationAllFailed.
@@ -447,102 +357,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'重试此来源'**
   String get aggregationRetry;
-
-  /// No description provided for @aggregationMore.
-  ///
-  /// In zh, this message translates to:
-  /// **'加载此来源更多'**
-  String get aggregationMore;
-
-  /// No description provided for @aggregationLocalRecord.
-  ///
-  /// In zh, this message translates to:
-  /// **'本机确认观看记录'**
-  String get aggregationLocalRecord;
-
-  /// No description provided for @aggregationResumeActual.
-  ///
-  /// In zh, this message translates to:
-  /// **'从本机记录的实际来源继续'**
-  String get aggregationResumeActual;
-
-  /// No description provided for @aggregationVerifySource.
-  ///
-  /// In zh, this message translates to:
-  /// **'验证并查找'**
-  String get aggregationVerifySource;
-
-  /// No description provided for @aggregationSources.
-  ///
-  /// In zh, this message translates to:
-  /// **'查找同源'**
-  String get aggregationSources;
-
-  /// No description provided for @aggregationConfirmed.
-  ///
-  /// In zh, this message translates to:
-  /// **'已确认来源'**
-  String get aggregationConfirmed;
-
-  /// No description provided for @aggregationCandidate.
-  ///
-  /// In zh, this message translates to:
-  /// **'待辨认候选（非确认续播来源）'**
-  String get aggregationCandidate;
-
-  /// No description provided for @aggregationUnknown.
-  ///
-  /// In zh, this message translates to:
-  /// **'未知'**
-  String get aggregationUnknown;
-
-  /// No description provided for @aggregationLoading.
-  ///
-  /// In zh, this message translates to:
-  /// **'加载中'**
-  String get aggregationLoading;
-
-  /// No description provided for @aggregationAvailable.
-  ///
-  /// In zh, this message translates to:
-  /// **'已返回'**
-  String get aggregationAvailable;
-
-  /// No description provided for @aggregationTimeout.
-  ///
-  /// In zh, this message translates to:
-  /// **'超时'**
-  String get aggregationTimeout;
-
-  /// No description provided for @aggregationOffline.
-  ///
-  /// In zh, this message translates to:
-  /// **'离线'**
-  String get aggregationOffline;
-
-  /// No description provided for @aggregationNeedsLogin.
-  ///
-  /// In zh, this message translates to:
-  /// **'需登录'**
-  String get aggregationNeedsLogin;
-
-  /// No description provided for @aggregationForbidden.
-  ///
-  /// In zh, this message translates to:
-  /// **'无权限'**
-  String get aggregationForbidden;
-
-  /// No description provided for @aggregationFailed.
-  ///
-  /// In zh, this message translates to:
-  /// **'查询失败'**
-  String get aggregationFailed;
-
-  /// No description provided for @aggregationRevoked.
-  ///
-  /// In zh, this message translates to:
-  /// **'许可已撤销'**
-  String get aggregationRevoked;
 
   /// No description provided for @aggregationEpisodeLookup.
   ///
@@ -5206,72 +5020,6 @@ abstract class AppLocalizations {
   /// **'{seconds} 秒后可重试'**
   String serversPasswordRetryAfter(int seconds);
 
-  /// No description provided for @comparisonHint.
-  ///
-  /// In zh, this message translates to:
-  /// **'选择来源查看详情，播放不会自动切换。'**
-  String get comparisonHint;
-
-  /// No description provided for @comparisonVerified.
-  ///
-  /// In zh, this message translates to:
-  /// **'已确认是同一作品'**
-  String get comparisonVerified;
-
-  /// No description provided for @comparisonUnverified.
-  ///
-  /// In zh, this message translates to:
-  /// **'尚未确认是同一作品，请先核对详情'**
-  String get comparisonUnverified;
-
-  /// No description provided for @comparisonSearchDone.
-  ///
-  /// In zh, this message translates to:
-  /// **'查找完成'**
-  String get comparisonSearchDone;
-
-  /// No description provided for @comparisonSearchPending.
-  ///
-  /// In zh, this message translates to:
-  /// **'正在查找其他版本…'**
-  String get comparisonSearchPending;
-
-  /// No description provided for @comparisonSearchPartial.
-  ///
-  /// In zh, this message translates to:
-  /// **'部分内容未能加载'**
-  String get comparisonSearchPartial;
-
-  /// No description provided for @comparisonNoVersionDetails.
-  ///
-  /// In zh, this message translates to:
-  /// **'版本信息未知，可进入详情查看'**
-  String get comparisonNoVersionDetails;
-
-  /// No description provided for @comparisonVersions.
-  ///
-  /// In zh, this message translates to:
-  /// **'共 {count} 个版本'**
-  String comparisonVersions(int count);
-
-  /// No description provided for @comparisonTracks.
-  ///
-  /// In zh, this message translates to:
-  /// **'音轨 {audio} 条 · 字幕 {subtitles} 条'**
-  String comparisonTracks(int audio, int subtitles);
-
-  /// No description provided for @comparisonPasswordTitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'验证进入密码'**
-  String get comparisonPasswordTitle;
-
-  /// No description provided for @comparisonPasswordPrompt.
-  ///
-  /// In zh, this message translates to:
-  /// **'验证后查找这台服务器中的对应影片。'**
-  String get comparisonPasswordPrompt;
-
   /// No description provided for @playbackReconnecting.
   ///
   /// In zh, this message translates to:
@@ -5415,6 +5163,66 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'正在使用：{line}'**
   String playbackLineActual(String line);
+
+  /// No description provided for @sourceSelectionAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择影片来源'**
+  String get sourceSelectionAction;
+
+  /// No description provided for @sourceSelectionEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂未找到其他来源'**
+  String get sourceSelectionEmpty;
+
+  /// No description provided for @sourceSelectionRetry.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分来源加载失败，重试'**
+  String get sourceSelectionRetry;
+
+  /// No description provided for @sourceSelectionMore.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续查找'**
+  String get sourceSelectionMore;
+
+  /// No description provided for @sourceSelectionCheckDetails.
+  ///
+  /// In zh, this message translates to:
+  /// **'请核对影片详情'**
+  String get sourceSelectionCheckDetails;
+
+  /// No description provided for @sourceSelectionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择来源查看详情，播放不会自动切换。'**
+  String get sourceSelectionHint;
+
+  /// No description provided for @sourceSelectionPasswordTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入访问密码'**
+  String get sourceSelectionPasswordTitle;
+
+  /// No description provided for @sourceSelectionPasswordPrompt.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入这台服务器的本机密码，查看可选来源。'**
+  String get sourceSelectionPasswordPrompt;
+
+  /// No description provided for @sourceSelectionUnlock.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁'**
+  String get sourceSelectionUnlock;
+
+  /// No description provided for @sourceSelectionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法加载影片来源，请重试。'**
+  String get sourceSelectionUnavailable;
 }
 
 class _AppLocalizationsDelegate

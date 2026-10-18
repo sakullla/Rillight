@@ -944,9 +944,14 @@ void main() {
       final current = tester
           .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
           .controller!;
-      expect(current.runtime, isNull);
-      expect(current.origin, isNull);
-      expect(identical(current.client, app.auth.client), isTrue);
+      expect(current.runtime, isNotNull);
+      expect(current.origin!.permit.isValid, isTrue);
+      expect(
+        current.origin!.source.account.configuredServerId,
+        app.auth.session!.server.id,
+      );
+      expect(current.client.baseUrl, app.auth.client.baseUrl);
+      expect(current.client.userId, app.auth.client.userId);
       unawaited(current.seekTo(const Duration(seconds: 25)));
       await settle(tester);
       backend.emitError('network stream interrupted');
@@ -1136,7 +1141,7 @@ void main() {
       await tester.tap(find.text('聚合').last);
       await settle(tester);
       expect(find.byType(AggregationPage), findsOneWidget);
-      expect(find.text('所选范围没有匹配作品'), findsOneWidget);
+      expect(find.text('暂无内容'), findsOneWidget);
       expect(find.widgetWithText(AppButton, '添加服务器'), findsNothing);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
       // Declare a real synthetic library before testing an unsupported stream;

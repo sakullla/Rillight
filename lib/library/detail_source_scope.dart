@@ -10,7 +10,7 @@ import 'package:go_router/go_router.dart';
 
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
-import 'aggregation_page.dart';
+import 'source_selection.dart';
 import '../app/l10n/app_localizations.dart';
 
 import 'package:rillight/auth/auth_controller.dart';
@@ -488,7 +488,21 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
       // Renewed credentials must recreate controllers holding the old client.
       // Ordinary navigation follows the selected session; explicit source
       // routes below still require their original, valid source permit.
-      return KeyedSubtree(key: ValueKey(_authIdentity), child: widget.child);
+      return KeyedSubtree(
+        key: ValueKey(_authIdentity),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            widget.child,
+            if (widget.showComparison)
+              Positioned(
+                right: 16,
+                bottom: 24,
+                child: SourceSelectionAction(itemId: widget.itemId),
+              ),
+          ],
+        ),
+      );
     }
     if (origin == null || !origin.permit.isValid) {
       if (!_resolved) return const Center(child: CupertinoActivityIndicator());
@@ -515,7 +529,7 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
             const Positioned(
               right: 16,
               bottom: 24,
-              child: SourceComparisonAction(),
+              child: SourceSelectionAction(),
             ),
         ],
       ),

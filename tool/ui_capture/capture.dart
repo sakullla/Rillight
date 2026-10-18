@@ -429,7 +429,7 @@ void main() {
           if (config.$1 == 'desktop') {
             await capture.tap(PlayerKeys.open);
           } else {
-            app.router.go('/play/movie-up');
+            unawaited(app.router.push('/play/movie-up'));
           }
           await capture.advance(400);
           await capture.save('player-loading');
@@ -619,9 +619,8 @@ void main() {
               String itemId, {
               bool autoResume = false,
             }) async {
-              if (config.$1 == 'desktop') {
-                await app.windowHost.close();
-              } else {
+              await capture.closeCapturedPlayer();
+              if (config.$1 != 'desktop') {
                 app.router.go('/item/$itemId');
                 await capture.advance(300);
               }
@@ -639,7 +638,7 @@ void main() {
               if (config.$1 == 'desktop') {
                 await app.windowHost.open(request);
               } else {
-                app.router.go('/play/$itemId', extra: request);
+                unawaited(app.router.push('/play/$itemId', extra: request));
               }
               await capture.advance(800);
             }
@@ -759,10 +758,10 @@ void main() {
           }
           if (config.$1 == 'desktop') {
             await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-            await app.windowHost.close();
             await capture.advance(400);
           }
         }
+        await capture.closeCapturedPlayer();
         tester.view.physicalSize = config.$3;
         if (config.$1 == 'tv') {
           await capture.captureTvAppearance(app, snapshots);
@@ -803,6 +802,7 @@ void main() {
             auth,
             server,
             () => backend = CaptureBackend(),
+            snapshots,
           );
         }
         await tester.pumpWidget(const SizedBox.shrink());
@@ -813,6 +813,10 @@ void main() {
         auth.dispose();
         appearance.dispose();
         CaptureProviders.closeClients();
+        // Dio cancellation schedules interceptor futures on the fake clock.
+        // Drain them after closing the clients, not before cancellation begins.
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
       }, tags: ['integration']);
       final states = (Platform.environment['RILLIGHT_CAPTURE_STATES'] ?? '')
           .split(',')
@@ -1110,9 +1114,9 @@ class CaptureSession {
     if (!wants('settings') || !shouldCapture('tv-appearance-signed-in')) {
       return;
     }
-    // 播放会留下会话快照。回到首页时电视壳用独立网络补报停止；
-    // 捕获环境没有这条连接，恢复失败会换成重试页，设置里的外观三态就不在了。
-    await tester.runAsync(snapshots.delete);
+    // Normal player close must finish its stopped report before settings opens.
+    // Never erase a pending session just to make a screenshot reachable.
+    expect(snapshots.snapshot, isNull);
     app.router.go('/');
     for (
       var i = 0;
@@ -1120,10 +1124,6 @@ class CaptureSession {
       i++
     ) {
       await tester.pump(const Duration(milliseconds: 50));
-      if (find.text('重试').evaluate().isNotEmpty) {
-        await tester.runAsync(snapshots.delete);
-        await tester.tap(find.text('重试'));
-      }
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );

@@ -6,41 +6,41 @@ import 'modules.dart';
 
 void main() {
   verifySuiteManifest();
-  group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
-    'catalog/item_detail_test.dart [part 3]',
-    caseEntrypoints['catalog/item_detail_cases.dart#2']!,
+    'app/app_shell_top_bar_test.dart',
+    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 4]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
+    'catalog/item_detail_test.dart [part 1]',
+    caseEntrypoints['catalog/item_detail_cases.dart#0']!,
   );
   group(
-    'mobile/mobile_performance_timing_test.dart',
-    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
+    'home/library_latest_row_test.dart',
+    caseEntrypoints['home/library_latest_row_cases.dart']!,
   );
   group(
-    'mobile/phone_detail_redesign_test.dart',
-    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
+    'mobile/detail_route_identity_test.dart',
+    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 2]',
     caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
+    'mobile/tv_shell_navigation_test.dart',
+    caseEntrypoints['mobile/tv_shell_navigation_cases.dart']!,
+  );
+  group(
+    'player/playback_image_release_test.dart',
+    caseEntrypoints['player/playback_image_release_cases.dart']!,
   );
   group(
     'player/playback_overlay_widgets_test.dart',
     caseEntrypoints['player/playback_overlay_widgets_cases.dart']!,
   );
+  group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
   group(
-    'player/seek_preview_test.dart',
-    caseEntrypoints['player/seek_preview_cases.dart']!,
-  );
-  group(
-    'tv/tv_lan_pair_test.dart [part 1]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
+    'widgets/app_hover_card_test.dart',
+    caseEntrypoints['widgets/app_hover_card_cases.dart']!,
   );
 }

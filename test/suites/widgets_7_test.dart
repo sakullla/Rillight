@@ -7,43 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/playback_runtime_test.dart [part 1]',
-    caseEntrypoints['aggregation/playback_runtime_cases.dart#0']!,
+    'aggregation/presentation_test.dart [part 2]',
+    caseEntrypoints['aggregation/presentation_cases.dart#1']!,
   );
   group(
-    'aggregation/presentation_test.dart [part 1]',
-    caseEntrypoints['aggregation/presentation_cases.dart#0']!,
+    'auth/library_counts_test.dart',
+    caseEntrypoints['auth/library_counts_cases.dart']!,
   );
   group(
-    'auth/backup_import/backup_import_flow_test.dart',
-    caseEntrypoints['auth/backup_import/backup_import_flow_cases.dart']!,
+    'library/episode_list_scroll_test.dart',
+    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
   );
   group(
-    'home/hero_artwork_test.dart',
-    caseEntrypoints['home/hero_artwork_cases.dart']!,
+    'mobile/mobile_flow_test.dart [part 4]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
   );
   group(
-    'library/episode_row_test.dart',
-    caseEntrypoints['library/episode_row_cases.dart']!,
+    'mobile/phone_detail_redesign_test.dart',
+    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
   );
   group(
-    'mobile/tv_server_management_test.dart',
-    caseEntrypoints['mobile/tv_server_management_cases.dart']!,
+    'mobile/phone_player_test.dart [part 1]',
+    caseEntrypoints['mobile/phone_player_cases.dart#0']!,
   );
   group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'player/player_cache_status_test.dart',
+    caseEntrypoints['player/player_cache_status_cases.dart']!,
   );
+  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
   group(
-    'tv/tv_detail_test.dart [part 1]',
-    caseEntrypoints['tv/tv_detail_cases.dart#0']!,
-  );
-  group(
-    'tv/tv_lan_pair_test.dart [part 3]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
-  );
-  group(
-    'widgets/artwork_crop_test.dart',
-    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
+    'widgets/poster_card_test.dart',
+    caseEntrypoints['widgets/poster_card_cases.dart']!,
   );
 }

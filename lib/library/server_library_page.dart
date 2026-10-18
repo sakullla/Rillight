@@ -75,9 +75,8 @@ Future<void> openServerItem(
   }
 }
 
-/// 聚合和搜索打开的详情不进入同源比对。查询留在路由上，刷新后仍然生效。
-String _serverItemLocation(String itemId) =>
-    AppRoutes.item(itemId, showComparison: false);
+/// 聚合和搜索进入实际来源的详情；详情提供独立的手动来源选择。
+String _serverItemLocation(String itemId) => AppRoutes.item(itemId);
 
 OperationPermit _openPermit(
   SourceSessionRegistry registry,
@@ -218,6 +217,7 @@ class _ServerLibraryPageState extends State<_AuthorizedServerLibraryPage> {
         child: TvShelfPage(
           key: ValueKey((widget.serverId, widget.viewId)),
           source: 'items',
+          recursive: true,
           title: _title,
           client: client,
           parentId: widget.viewId,

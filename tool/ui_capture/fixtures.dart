@@ -373,6 +373,7 @@ class CaptureAdapter extends FakeEmbyAdapter {
   Completer<void>? catalogGate;
   Completer<void>? detailGate;
   bool failAggregationMirror = false;
+  bool emptyAggregationMirror = false;
   bool failLineCheck = false;
   final artwork = <String, Uint8List>{};
 
@@ -396,6 +397,17 @@ class CaptureAdapter extends FakeEmbyAdapter {
             .where((other) => other.serverId == server.serverId)
             .expand((other) => other.issuedTokens)
             .toList(),
+      );
+    }
+    if (emptyAggregationMirror &&
+        options.uri.host == 'capture-mirror.test' &&
+        options.uri.path.endsWith('/Items')) {
+      return ResponseBody.fromString(
+        '{"Items":[],"TotalRecordCount":0}',
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
       );
     }
     if (failAggregationMirror &&

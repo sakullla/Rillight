@@ -88,7 +88,7 @@
   ]
 },
 {
-  "id": "entry-comparison-locked",
+  "id": "entry-source-selection-locked",
   "feature": "entry",
   "platforms": [
     "desktop",
@@ -97,7 +97,7 @@
   ]
 },
 {
-  "id": "entry-comparison-password",
+  "id": "entry-source-selection-password",
   "feature": "entry",
   "platforms": [
     "desktop",
@@ -106,7 +106,7 @@
   ]
 },
 {
-  "id": "entry-comparison-candidate",
+  "id": "entry-source-selection-candidate",
   "feature": "entry",
   "platforms": [
     "desktop",
@@ -169,30 +169,6 @@
     ]
   },
   {
-    "id": "aggregation-single-source",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-filter-empty",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-comparison",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
     "id": "aggregation-search-single",
     "feature": "aggregation",
     "platforms": [
@@ -202,11 +178,17 @@
     ]
   },
   {
+    "id": "aggregation-empty",
+    "feature": "aggregation",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
     "id": "aggregation-partial-failure",
     "feature": "aggregation",
     "platforms": [
       "desktop",
-      "phone"
+      "phone",
+      "tv"
     ]
   },
   {

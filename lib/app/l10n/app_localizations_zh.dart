@@ -127,58 +127,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aggregation => '聚合';
 
   @override
-  String get aggregationLibraryScope => '媒体库范围';
-
-  @override
-  String get aggregationPrivate => '私密区域';
-
-  @override
   String get aggregationPrivateLocked => '私密区域已锁定，请先在服务管理中解锁';
 
   @override
-  String get aggregationUnavailableDetail => '此来源详情当前不可访问，请返回允许的来源范围';
+  String get aggregationUnavailableDetail => '暂时无法打开此服务器的内容，请返回重试。';
 
   @override
-  String get aggregationAllowedSources => '全部允许来源';
-
-  @override
-  String get aggregationAllSources => '全部服务器';
-
-  @override
-  String get aggregationAllTypes => '全部类型';
-
-  @override
-  String get aggregationAllWatching => '全部观看状态';
-
-  @override
-  String get aggregationContinue => '继续观看';
-
-  @override
-  String get aggregationRecent => '最近更新';
-
-  @override
-  String get aggregationLoaded => '已加载作品';
-
-  @override
-  String get aggregationLoadedRemote => '远端已加载作品';
-
-  @override
-  String get aggregationRemoteEmpty => '远端暂无继续观看项，本机记录仍可用';
-
-  @override
-  String get aggregationRemoteConflict => '远端观看时间不可信，请明确选择实际来源（不取最大进度）';
-
-  @override
-  String get aggregationComplete => '范围完整';
-
-  @override
-  String get aggregationIncomplete => '范围尚不完整 · 仅对已加载结果排序';
-
-  @override
-  String get aggregationEmptyScope => '未选择可参与的服务或媒体库';
-
-  @override
-  String get aggregationEmpty => '所选范围没有匹配作品';
+  String get aggregationEmpty => '暂无内容';
 
   @override
   String get aggregationAllFailed => '所选来源全部失败，请逐来源重试';
@@ -188,54 +143,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aggregationRetry => '重试此来源';
-
-  @override
-  String get aggregationMore => '加载此来源更多';
-
-  @override
-  String get aggregationLocalRecord => '本机确认观看记录';
-
-  @override
-  String get aggregationResumeActual => '从本机记录的实际来源继续';
-
-  @override
-  String get aggregationVerifySource => '验证并查找';
-
-  @override
-  String get aggregationSources => '查找同源';
-
-  @override
-  String get aggregationConfirmed => '已确认来源';
-
-  @override
-  String get aggregationCandidate => '待辨认候选（非确认续播来源）';
-
-  @override
-  String get aggregationUnknown => '未知';
-
-  @override
-  String get aggregationLoading => '加载中';
-
-  @override
-  String get aggregationAvailable => '已返回';
-
-  @override
-  String get aggregationTimeout => '超时';
-
-  @override
-  String get aggregationOffline => '离线';
-
-  @override
-  String get aggregationNeedsLogin => '需登录';
-
-  @override
-  String get aggregationForbidden => '无权限';
-
-  @override
-  String get aggregationFailed => '查询失败';
-
-  @override
-  String get aggregationRevoked => '许可已撤销';
 
   @override
   String get aggregationEpisodeLookup => '查找此集';
@@ -2696,43 +2603,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get comparisonHint => '选择来源查看详情，播放不会自动切换。';
-
-  @override
-  String get comparisonVerified => '已确认是同一作品';
-
-  @override
-  String get comparisonUnverified => '尚未确认是同一作品，请先核对详情';
-
-  @override
-  String get comparisonSearchDone => '查找完成';
-
-  @override
-  String get comparisonSearchPending => '正在查找其他版本…';
-
-  @override
-  String get comparisonSearchPartial => '部分内容未能加载';
-
-  @override
-  String get comparisonNoVersionDetails => '版本信息未知，可进入详情查看';
-
-  @override
-  String comparisonVersions(int count) {
-    return '共 $count 个版本';
-  }
-
-  @override
-  String comparisonTracks(int audio, int subtitles) {
-    return '音轨 $audio 条 · 字幕 $subtitles 条';
-  }
-
-  @override
-  String get comparisonPasswordTitle => '验证进入密码';
-
-  @override
-  String get comparisonPasswordPrompt => '验证后查找这台服务器中的对应影片。';
-
-  @override
   String get playbackReconnecting => '正在重新连接…';
 
   @override
@@ -2807,4 +2677,34 @@ class AppLocalizationsZh extends AppLocalizations {
   String playbackLineActual(String line) {
     return '正在使用：$line';
   }
+
+  @override
+  String get sourceSelectionAction => '选择影片来源';
+
+  @override
+  String get sourceSelectionEmpty => '暂未找到其他来源';
+
+  @override
+  String get sourceSelectionRetry => '部分来源加载失败，重试';
+
+  @override
+  String get sourceSelectionMore => '继续查找';
+
+  @override
+  String get sourceSelectionCheckDetails => '请核对影片详情';
+
+  @override
+  String get sourceSelectionHint => '选择来源查看详情，播放不会自动切换。';
+
+  @override
+  String get sourceSelectionPasswordTitle => '输入访问密码';
+
+  @override
+  String get sourceSelectionPasswordPrompt => '输入这台服务器的本机密码，查看可选来源。';
+
+  @override
+  String get sourceSelectionUnlock => '解锁';
+
+  @override
+  String get sourceSelectionUnavailable => '暂时无法加载影片来源，请重试。';
 }

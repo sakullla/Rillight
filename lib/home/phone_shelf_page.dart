@@ -1,3 +1,5 @@
+import '../library/shelf_grid_page.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -157,6 +159,9 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   }
 
   CatalogCache get _cache {
+    if (ShelfClientOverride.maybeOf(context) != null) {
+      return _fallbackCache ??= CatalogCache();
+    }
     return CatalogScope.maybeOf(context)?.cache ??
         (_fallbackCache ??= CatalogCache());
   }
@@ -270,7 +275,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     if (widget.source == 'similar' && similarId.isEmpty) {
       return const MediaItemPage(items: []);
     }
-    final client = AuthScope.of(context).client;
+    final client =
+        ShelfClientOverride.maybeOf(context) ?? AuthScope.of(context).client;
     final json = await _cache.fetch(
       client,
       _request(client, startIndex, PhoneShelfPage.pageSize),
@@ -282,7 +288,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     final gen = ++_loadGen;
     final identity = _identity;
     final keep = keepVisible && _items.isNotEmpty;
-    final client = AuthScope.of(context).client;
+    final client =
+        ShelfClientOverride.maybeOf(context) ?? AuthScope.of(context).client;
     final request = _request(client, 0, PhoneShelfPage.pageSize);
     final network = _fetch(0);
     unawaited(network.then<void>((_) {}, onError: (Object _) {}));
@@ -516,6 +523,9 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                       return PhoneGridPosterCard(
                         key: PhoneShelfPage.imageKey(item.id),
                         item: item,
+                        onTap: ShelfItemOpen.maybeOf(context) == null
+                            ? null
+                            : () => ShelfItemOpen.maybeOf(context)!(item),
                         imageMaxWidth: imageWidth,
                       );
                     },

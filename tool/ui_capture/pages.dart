@@ -1,4 +1,4 @@
-import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/app/startup_failure.dart';
 import 'package:rillight/app/android_bootstrap.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -33,8 +33,6 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/search/search_overlay.dart';
-import 'package:rillight/player/player_host_command.dart';
-import 'package:rillight/aggregation/identity/media_identity.dart';
 
 import '../../test/auth/backup_import/backup_import_cases.dart';
 import '../../test/emby/fake_emby_server.dart';
@@ -174,9 +172,9 @@ extension PageCaptures on CaptureSession {
   ) async {
     if (wants('entry')) {
       if ([
-        'entry-comparison-locked',
-        'entry-comparison-password',
-        'entry-comparison-candidate',
+        'entry-source-selection-locked',
+        'entry-source-selection-password',
+        'entry-source-selection-candidate',
       ].any(shouldCapture)) {
         final source = auth.savedServers.first;
         final target = auth.savedServers.last;
@@ -190,38 +188,27 @@ extension PageCaptures on CaptureSession {
           );
           await auth.refreshServers();
         });
-        final session = (await tester.runAsync(
-          () => auth.sources.ensureSession(source.id),
-        ))!;
-        app.router.go(
-          '/item/movie-up',
-          extra: PlayerHostOpenItemCommand(
-            itemId: 'movie-up',
-            source: SourceReference(
-              account: session.account,
-              itemId: 'movie-up',
-            ),
-            libraryId: 'view-movies',
-            accessGeneration: auth.serverAccess.generation(source.id),
-          ),
-        );
+        // Use the same ordinary detail route as a home-page poster.
+        app.router.go('/item/movie-up');
         await advance(1200);
         await activate(
           find
               .descendant(
-                of: find.byType(SourceComparisonAction),
+                of: find.byType(SourceSelectionAction),
                 matching: find.byType(AppButton),
               )
               .first,
         );
         await advance(800);
         expect(
-          find.byKey(ValueKey('comparison-verify-${target.id}')),
+          find.byKey(ValueKey('source-selection-verify-${target.id}')),
           findsOneWidget,
         );
-        await save('entry-comparison-locked');
-        await activate(find.byKey(ValueKey('comparison-verify-${target.id}')));
-        await save('entry-comparison-password');
+        await save('entry-source-selection-locked');
+        await activate(
+          find.byKey(ValueKey('source-selection-verify-${target.id}')),
+        );
+        await save('entry-source-selection-password');
         if (platform == 'tv') {
           await _editTvField(
             const Key('server-unlock-password'),
@@ -238,7 +225,9 @@ extension PageCaptures on CaptureSession {
           var i = 0;
           i < 60 &&
               find
-                  .byKey(ValueKey('comparison-item-${target.id}-movie-up'))
+                  .byKey(
+                    ValueKey('source-selection-item-${target.id}-movie-up'),
+                  )
                   .evaluate()
                   .isEmpty;
           i++
@@ -249,20 +238,20 @@ extension PageCaptures on CaptureSession {
           await advance(100);
         }
         expect(
-          find.byKey(ValueKey('comparison-item-${target.id}-movie-up')),
+          find.byKey(ValueKey('source-selection-item-${target.id}-movie-up')),
           findsOneWidget,
         );
         expect(auth.session?.server.id, source.id);
         expect(auth.serverAccess.allows(target.id), isFalse);
         await Scrollable.ensureVisible(
           tester.element(
-            find.byKey(ValueKey('comparison-item-${target.id}-movie-up')),
+            find.byKey(ValueKey('source-selection-item-${target.id}-movie-up')),
           ),
           alignment: .2,
         );
         await advance(250);
-        await save('entry-comparison-candidate');
-        await activate(find.byKey(const Key('comparison-close')));
+        await save('entry-source-selection-candidate');
+        await activate(find.byKey(const Key('source-selection-close')));
         await _driveEntryCapture(() async {
           await auth.serverAccess.disablePassword(
             target.id,
@@ -330,88 +319,47 @@ extension PageCaptures on CaptureSession {
         });
         await advance(900);
       }
-      if (platform != 'tv') {
-        await tap(const Key('aggregation-segment-favorites'));
-        await save('aggregation-segment-favorites');
-        await tap(const Key('aggregation-segment-libraries'));
-        await save('aggregation-segment-libraries');
-        // 来源裁剪/同源比较只在旧版跨服务器聚合页上,从命令路由进入。
-        final sources = auth.sources.project();
-        final account = (await tester.runAsync(
-          () async =>
-              (await auth.sources.authenticate(sources.first.id)).account,
-        ))!;
-        app.router.go(
-          '/shelf/items',
-          extra: PlayerHostOpenItemCommand(
-            itemId: 'movie-up',
-            source: SourceReference(account: account, itemId: 'movie-up'),
-            libraryId: 'view-movies',
-            accessGeneration: auth.serverAccess.generation(
-              account.configuredServerId,
-            ),
+      await tap(const Key('aggregation-segment-favorites'));
+      await save('aggregation-segment-favorites');
+      await tap(const Key('aggregation-segment-libraries'));
+      await save('aggregation-segment-libraries');
+      adapter.failAggregationMirror = true;
+      // Re-enter the content shell so the real row loader performs a fresh
+      // request; changing a segment alone only changes the visible slice.
+      app.router.go('/connect?add=1');
+      await advance(400);
+      app.router.go('/');
+      await advance(700);
+      if (platform == 'desktop') {
+        await tap(const Key('app-shell-aggregation'));
+      } else if (platform == 'phone') {
+        await activate(
+          find.descendant(
+            of: find.byType(CupertinoTabBar),
+            matching: find.text('聚合'),
           ),
         );
-        await advance(1200);
-        await activate(find.widgetWithText(AppChoiceChip, '全部服务器'));
-        await advance(600);
-        await activate(
-          find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
-        );
-        await advance(600);
-        await save('aggregation-single-source');
-        await activate(
-          find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
-        );
-        await save('aggregation-filter-empty');
-        await activate(find.widgetWithText(AppChoiceChip, '全部服务器'));
-        await advance(900);
-        final comparison = find.widgetWithText(AppButton, '查找同源 · 2');
-        for (var step = 0; step < 20 && comparison.evaluate().isEmpty; step++) {
-          await tester.drag(
-            find
-                .descendant(
-                  of: find.byKey(const PageStorageKey('aggregation')),
-                  matching: find.byType(Scrollable),
-                )
-                .first,
-            const Offset(0, -240),
-          );
-          await advance(150);
-        }
-        expect(comparison, findsWidgets);
-        await activate(comparison.first);
-        await advance(900);
-        await save('aggregation-comparison');
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-        await advance(350);
-        adapter.failAggregationMirror = true;
-        await activate(find.widgetWithText(AppChoiceChip, '全部服务器'));
-        await advance(1000);
-        await save('aggregation-partial-failure');
-        adapter.failAggregationMirror = false;
-        if (platform == 'phone') {
-          // /aggregation 只有桌面路由;先回首页再经底部导航进聚合页。
-          app.router.go('/');
-          await advance(900);
-          await activate(
-            find.descendant(
-              of: find.byType(CupertinoTabBar),
-              matching: find.text('聚合'),
-            ),
-          );
-        } else {
-          app.router.go('/aggregation');
-          await advance(900);
-        }
-        await tap(const Key('aggregation-segment-continue'));
       } else {
-        await tap(const Key('aggregation-segment-favorites'));
-        await save('aggregation-segment-favorites');
-        await tap(const Key('aggregation-segment-libraries'));
-        await save('aggregation-segment-libraries');
-        await tap(const Key('aggregation-segment-continue'));
+        await tap(const ValueKey('tv-nav-1'));
       }
+      await tap(const Key('aggregation-segment-favorites'));
+      await advance(1000);
+      expect(find.text('重试'), findsWidgets);
+      await tester.ensureVisible(find.text('重试').first);
+      await advance(200);
+      await save('aggregation-partial-failure');
+      adapter.failAggregationMirror = false;
+      adapter.emptyAggregationMirror = true;
+      await activate(find.text('重试').first);
+      await advance(700);
+      expect(find.text('重试'), findsNothing);
+      expect(find.text('暂无内容'), findsWidgets);
+      await tester.ensureVisible(find.text('暂无内容').last);
+      await advance(200);
+      await save('aggregation-empty');
+      adapter.emptyAggregationMirror = false;
+      await tap(const Key('aggregation-segment-continue'));
+      await advance(800);
       if (platform == 'desktop') {
         app.router.go('/search');
         await advance(700);

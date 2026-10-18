@@ -18,6 +18,11 @@ import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/plex/plex_authentication.dart';
 import 'package:rillight/plex/plex_client.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/player_page.dart';
+import 'package:rillight/player/tv_player_page.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 
 import '../../test/emby/fake_emby_server.dart';
 import '../../test/jellyfin/fake_jellyfin_server.dart';
@@ -92,6 +97,46 @@ class CaptureProviders {
 }
 
 extension ProviderCaptures on CaptureSession {
+  PlayerController? get _capturePlayer => switch (platform) {
+    'phone' when find.byType(MobilePlayerPage).evaluate().isNotEmpty =>
+      tester
+          .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+          .controller,
+    'tv' when find.byType(TvPlayerPage).evaluate().isNotEmpty =>
+      tester.state<TvPlayerPageState>(find.byType(TvPlayerPage)).controller,
+    'desktop' when find.byType(PlayerPage).evaluate().isNotEmpty =>
+      tester.state<PlayerPageState>(find.byType(PlayerPage)).controller,
+    _ => null,
+  };
+
+  Future<void> _providerUntil(bool Function() ready, String reason) async {
+    final elapsed = Stopwatch()..start();
+    while (!ready() && elapsed.elapsed < const Duration(seconds: 10)) {
+      await advance(100);
+    }
+    expect(ready(), isTrue, reason: reason);
+  }
+
+  Future<void> closeCapturedPlayer() async {
+    final controller = _capturePlayer;
+    if (controller == null) return;
+    if (find.byKey(PlayerKeys.endedClose).evaluate().isNotEmpty) {
+      await activate(find.byKey(PlayerKeys.endedClose));
+    } else if (platform == 'desktop') {
+      await activate(find.byKey(const Key('player-window-close')));
+    } else if (platform == 'phone') {
+      await tap(const Key('mobile-player-close'));
+    } else {
+      await activate(find.byKey(const Key('tv-player-close')));
+    }
+    // The page only pops after controller.close has flushed the stopped report
+    // and snapshot. Removing it via router.go skips that user-visible lifecycle.
+    await _providerUntil(
+      () => _capturePlayer == null,
+      'Normal playback close must finish before changing server',
+    );
+  }
+
   Future<void> _providerField(String key, String value) async {
     final field = find.byKey(Key(key));
     // User-Agent 收在「高级选项」里;先展开再填写。
@@ -133,6 +178,7 @@ extension ProviderCaptures on CaptureSession {
     AuthController auth,
     FakeEmbyServer emby,
     CaptureBackend Function() newBackend,
+    MemoryPlaybackSessionSnapshotStore snapshots,
   ) async {
     for (final type in MediaServerType.values) {
       if (!wants('login') && !wants('player')) continue;
@@ -241,7 +287,7 @@ extension ProviderCaptures on CaptureSession {
       if (platform == 'desktop') {
         await activate(find.byKey(PlayerKeys.open));
       } else {
-        app.router.go('/play/$id');
+        unawaited(app.router.push('/play/$id'));
       }
       await advance(500);
       if (find
@@ -254,12 +300,23 @@ extension ProviderCaptures on CaptureSession {
       await save('provider-$name-player-loading');
       backend.openGate = null;
       gate.complete();
-      await advance(1400);
+      await _providerUntil(
+        () => backend.openCount > 0 && _capturePlayer?.loading == false,
+        '$name playback must finish preparation and open the capture backend',
+      );
       expect(backend.openCount, greaterThan(0));
+      expect(_capturePlayer?.sessionExpired, isFalse);
+      expect(_capturePlayer?.error, isNull);
       await save('provider-$name-player');
-      if (platform == 'desktop') await app.windowHost.close();
+      await closeCapturedPlayer();
+      expect(
+        snapshots.snapshot,
+        isNull,
+        reason: '$name stopped report completed',
+      );
       app.router.go('/');
       await advance(400);
+      expect(find.text('上次播放已中断，可从详情页继续观看。'), findsNothing);
     }
   }
 }

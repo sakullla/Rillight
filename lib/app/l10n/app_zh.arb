@@ -45,43 +45,12 @@
   "desktopSourceRestoreUnavailable": "原来源访问许可已失效，无法恢复。",
   "desktopSourceRestoreFailed": "原来源恢复失败，请检查来源后重试。",
   "aggregation": "聚合",
-  "aggregationLibraryScope": "媒体库范围",
-  "aggregationPrivate": "私密区域",
   "aggregationPrivateLocked": "私密区域已锁定，请先在服务管理中解锁",
-  "aggregationUnavailableDetail": "此来源详情当前不可访问，请返回允许的来源范围",
-  "aggregationAllowedSources": "全部允许来源",
-  "aggregationAllSources": "全部服务器",
-  "aggregationAllTypes": "全部类型",
-  "aggregationAllWatching": "全部观看状态",
-  "aggregationContinue": "继续观看",
-  "aggregationRecent": "最近更新",
-  "aggregationLoaded": "已加载作品",
-  "aggregationLoadedRemote": "远端已加载作品",
-  "aggregationRemoteEmpty": "远端暂无继续观看项，本机记录仍可用",
-  "aggregationRemoteConflict": "远端观看时间不可信，请明确选择实际来源（不取最大进度）",
-  "aggregationComplete": "范围完整",
-  "aggregationIncomplete": "范围尚不完整 · 仅对已加载结果排序",
-  "aggregationEmptyScope": "未选择可参与的服务或媒体库",
-  "aggregationEmpty": "所选范围没有匹配作品",
+  "aggregationUnavailableDetail": "暂时无法打开此服务器的内容，请返回重试。",
+  "aggregationEmpty": "暂无内容",
   "aggregationAllFailed": "所选来源全部失败，请逐来源重试",
   "aggregationPartialFailure": "部分来源失败，已保留成功结果",
   "aggregationRetry": "重试此来源",
-  "aggregationMore": "加载此来源更多",
-  "aggregationLocalRecord": "本机确认观看记录",
-  "aggregationResumeActual": "从本机记录的实际来源继续",
-  "aggregationVerifySource": "验证并查找",
-  "aggregationSources": "查找同源",
-  "aggregationConfirmed": "已确认来源",
-  "aggregationCandidate": "待辨认候选（非确认续播来源）",
-  "aggregationUnknown": "未知",
-  "aggregationLoading": "加载中",
-  "aggregationAvailable": "已返回",
-  "aggregationTimeout": "超时",
-  "aggregationOffline": "离线",
-  "aggregationNeedsLogin": "需登录",
-  "aggregationForbidden": "无权限",
-  "aggregationFailed": "查询失败",
-  "aggregationRevoked": "许可已撤销",
   "aggregationEpisodeLookup": "查找此集",
   "aggregationEpisodeMapping": "核对分季与分集对应",
   "aggregationEpisodeMappingWarning": "仅季号和集号相同不能证明同一集。请先核对两份版本是否采用相同的分季和分集方式；不确定时不会提供可直接续播的来源。",
@@ -2427,34 +2396,6 @@
       }
     }
   },
-  "comparisonHint": "选择来源查看详情，播放不会自动切换。",
-  "comparisonVerified": "已确认是同一作品",
-  "comparisonUnverified": "尚未确认是同一作品，请先核对详情",
-  "comparisonSearchDone": "查找完成",
-  "comparisonSearchPending": "正在查找其他版本…",
-  "comparisonSearchPartial": "部分内容未能加载",
-  "comparisonNoVersionDetails": "版本信息未知，可进入详情查看",
-  "comparisonVersions": "共 {count} 个版本",
-  "@comparisonVersions": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "comparisonTracks": "音轨 {audio} 条 · 字幕 {subtitles} 条",
-  "@comparisonTracks": {
-    "placeholders": {
-      "audio": {
-        "type": "int"
-      },
-      "subtitles": {
-        "type": "int"
-      }
-    }
-  },
-  "comparisonPasswordTitle": "验证进入密码",
-  "comparisonPasswordPrompt": "验证后查找这台服务器中的对应影片。",
   "playbackReconnecting": "正在重新连接…",
   "playbackTryingAlternative": "正在尝试备用线路…",
   "playbackRecoveryStopped": "连接尚未恢复",
@@ -2477,7 +2418,11 @@
   "playbackRetryAfterPermission": "权限恢复后重试",
   "playbackRetryAfter": "{seconds} 秒后可重试",
   "@playbackRetryAfter": {
-    "placeholders": { "seconds": { "type": "int" } }
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
   },
   "playbackLinePending": "正在连接，成功后才会保存选择",
   "playbackLineFixed": "固定线路",
@@ -2488,5 +2433,15 @@
         "type": "String"
       }
     }
-  }
+  },
+  "sourceSelectionAction": "选择影片来源",
+  "sourceSelectionEmpty": "暂未找到其他来源",
+  "sourceSelectionRetry": "部分来源加载失败，重试",
+  "sourceSelectionMore": "继续查找",
+  "sourceSelectionCheckDetails": "请核对影片详情",
+  "sourceSelectionHint": "选择来源查看详情，播放不会自动切换。",
+  "sourceSelectionPasswordTitle": "输入访问密码",
+  "sourceSelectionPasswordPrompt": "输入这台服务器的本机密码，查看可选来源。",
+  "sourceSelectionUnlock": "解锁",
+  "sourceSelectionUnavailable": "暂时无法加载影片来源，请重试。"
 }
