@@ -94,6 +94,24 @@ void main() {
     await settle(tester);
   }
 
+  /// WebDAV 动作链含真实文件 IO:固定预算或单次 settle 在慢速 CI runner 上
+  /// 都可能先于反馈渲染返回。tap 在 runAsync 窗口发起,随后逐轮
+  /// "真实 IO 窗口 + settle 帧推进"直到完成条件出现,至多 [rounds] 轮。
+  Future<void> runWebDavActionUntil(
+    WidgetTester tester,
+    Future<void> Function() action,
+    bool Function() done, {
+    int rounds = 100,
+  }) async {
+    await tester.runAsync<void>(action);
+    for (var i = 0; i < rounds && !done(); i++) {
+      await tester.runAsync<void>(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await settle(tester);
+    }
+  }
+
   /// 先让 initState 里的 webdav.json 加载完成,再断言回显。逐轮开窗,
   /// 让 fake zone 里挂起的读链在窗口边界推进。
   Future<void> flushWebDavLoad(WidgetTester tester) async {
@@ -621,8 +639,11 @@ void main() {
         webdavClientFactory: (_) => fake,
       );
       await expandSection(tester, '备份与同步');
-      await tester.tap(find.byKey(SettingsPage.webDavTestConnectionKey));
-      await settle(tester);
+      await runWebDavActionUntil(
+        tester,
+        () => tester.tap(find.byKey(SettingsPage.webDavTestConnectionKey)),
+        () => find.text(message).evaluate().isNotEmpty,
+      );
       expect(find.text(message), findsOneWidget, reason: message);
     }
   }, tags: ['integration']);
@@ -688,19 +709,12 @@ void main() {
     await expandSection(tester, '备份与同步');
 
     // 采集链在真实事件循环里跑到本地损坏分支。
-    await tester.runAsync<void>(
-      () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
-    );
-    // 不能用固定预算等待:CI 慢机上真实文件 IO 后的反馈渲染晚于预算耗尽,
-    // 需逐轮"真实 IO 窗口 + 帧推进"直到文案出现。
     const corruptionNotice = '本地配置文件损坏，本次操作已取消';
-    for (var i = 0; i < 100; i++) {
-      await tester.runAsync<void>(
-        () => Future<void>.delayed(const Duration(milliseconds: 10)),
-      );
-      await settle(tester);
-      if (find.text(corruptionNotice).evaluate().isNotEmpty) break;
-    }
+    await runWebDavActionUntil(
+      tester,
+      () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
+      () => find.text(corruptionNotice).evaluate().isNotEmpty,
+    );
 
     expect(find.text(corruptionNotice), findsOneWidget);
     expect(fake.uploadedBytes, isNull);
@@ -801,8 +815,11 @@ void main() {
         webdavClientFactory: (_) => fake,
       );
       await expandSection(tester, '备份与同步');
-      await tester.tap(find.byKey(SettingsPage.webDavRestoreKey));
-      await settle(tester);
+      await runWebDavActionUntil(
+        tester,
+        () => tester.tap(find.byKey(SettingsPage.webDavRestoreKey)),
+        () => find.text(message).evaluate().isNotEmpty,
+      );
       expect(find.text(message), findsOneWidget, reason: message);
       // 拒绝路径零写入,servers.json 保持原样。
       final servers = jsonDecode(
@@ -826,13 +843,20 @@ void main() {
       );
       await expandSection(tester, '备份与同步');
 
-      await tester.tap(find.byKey(SettingsPage.webDavBackupKey));
-      await settle(tester);
-      expect(find.text('请先填写 WebDAV 服务器地址'), findsOneWidget);
+      const missingAddressNotice = '请先填写 WebDAV 服务器地址';
+      await runWebDavActionUntil(
+        tester,
+        () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
+        () => find.text(missingAddressNotice).evaluate().isNotEmpty,
+      );
+      expect(find.text(missingAddressNotice), findsOneWidget);
 
-      await tester.tap(find.byKey(SettingsPage.webDavRestoreKey));
-      await settle(tester);
-      expect(find.text('请先填写 WebDAV 服务器地址'), findsNWidgets(2));
+      await runWebDavActionUntil(
+        tester,
+        () => tester.tap(find.byKey(SettingsPage.webDavRestoreKey)),
+        () => find.text(missingAddressNotice).evaluate().length >= 2,
+      );
+      expect(find.text(missingAddressNotice), findsNWidgets(2));
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
