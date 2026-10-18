@@ -295,10 +295,11 @@ void main() {
       expect(backCenter.dy, lessThan(bar.bottom));
       await tester.tap(back);
       await settle(tester);
-      final inception = find.text('Inception');
-      await tester.ensureVisible(inception.first);
+      final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
+      await Scrollable.ensureVisible(tester.element(inception), alignment: .5);
       await settle(tester);
-      await tester.tap(inception.first);
+      expect(inception.hitTestable(), findsOneWidget);
+      await tester.tap(inception);
       await settle(tester);
       await tester.tap(find.byKey(PlayerKeys.open));
       await tester.pump();

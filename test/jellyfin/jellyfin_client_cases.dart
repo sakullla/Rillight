@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/jellyfin/jellyfin_client.dart';
 import 'package:rillight/media_server/authentication.dart';
@@ -496,11 +497,24 @@ void main() {
         throwsA(failure(MediaServerFailureKind.sessionExpired)),
       );
       expect(expired, isTrue);
-      final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = socket.port;
-      await socket.close();
+      // A released ephemeral port can be reused by another test. Supply the
+      // connection failure explicitly so this checks error translation.
+      final offlineDio = Dio()
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) => handler.reject(
+              DioException.connectionError(
+                requestOptions: options,
+                reason: 'Synthetic connection refused',
+                error: const SocketException('Synthetic connection refused'),
+              ),
+            ),
+          ),
+        );
+      addTearDown(offlineDio.close);
+      final offline = JellyfinClient(device: device, dio: offlineDio);
       await expectLater(
-        client.getPublicInfo(Uri.parse('http://127.0.0.1:$port')),
+        offline.getPublicInfo(fake.url),
         throwsA(failure(MediaServerFailureKind.unreachable)),
       );
     },
