@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/rendering.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -1584,6 +1585,16 @@ void main() {
           findsNothing,
         );
         final play = find.byKey(const Key('mobile-detail-play'));
+        final seriesPoster = tester.getRect(
+          find.byKey(PhoneItemBanner.posterKey),
+        );
+        final seriesFavorite = tester.getRect(
+          find.byKey(const Key('phone-detail-favorite')),
+        );
+        final seriesPlay = tester.getRect(play);
+        expect(seriesFavorite.left, greaterThan(seriesPoster.right));
+        expect(seriesFavorite.bottom, lessThan(seriesPlay.top));
+        expect(seriesPlay.width, closeTo(360 - 32, 1));
         expect(
           tester
               .widget<AppTooltip>(
@@ -1621,6 +1632,32 @@ void main() {
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
         expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
         expect(findAppTooltip('下一集'), findsOneWidget);
+        final episodePlay = tester.getRect(
+          find.byKey(const Key('mobile-detail-play')),
+        );
+        final episodeFavorite = tester.getRect(
+          find.byKey(const Key('phone-detail-favorite')),
+        );
+        final episodePlayed = tester.getRect(
+          find.byKey(CatalogKeys.playedToggle),
+        );
+        final episodeRestart = tester.getRect(
+          find.byKey(const Key('phone-detail-play-start')),
+        );
+        final episodeNext = tester.getRect(find.byKey(CatalogKeys.nextEpisode));
+        expect(episodeFavorite.bottom, lessThan(episodePlay.top));
+        expect(episodePlayed.bottom, lessThan(episodePlay.top));
+        expect(episodeRestart.top, greaterThan(episodePlay.bottom));
+        expect(episodeNext.top, closeTo(episodeRestart.top, 1));
+        for (final text in ['收藏', '标记已看', '从头播放', '下一集']) {
+          expect(
+            tester
+                .renderObject<RenderParagraph>(find.text(text))
+                .didExceedMaxLines,
+            isFalse,
+            reason: text,
+          );
+        }
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await settle(tester);
         expect(find.text('The next night.'), findsOneWidget);

@@ -723,6 +723,26 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                         handoff,
                                       )
                                     : _bannerMeta(l, item),
+                                statusActions:
+                                    item != null &&
+                                        (controller.supportsFavorite ||
+                                            !item.isSeries)
+                                    ? _DetailStatusActions(
+                                        played: item.isSeries
+                                            ? null
+                                            : item.userData.played,
+                                        onTogglePlayed: controller.playedBusy
+                                            ? null
+                                            : _togglePlayed,
+                                        favorite: controller.supportsFavorite
+                                            ? item.userData.favorite
+                                            : null,
+                                        onToggleFavorite:
+                                            controller.favoriteBusy
+                                            ? null
+                                            : _toggleFavorite,
+                                      )
+                                    : null,
                                 actions: item == null
                                     ? (pending
                                           ? _PhoneDetailPending.action(context)
@@ -747,19 +767,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                         progressLabel: target == null
                                             ? null
                                             : remainingLabel(l, target),
-                                        played: item.isSeries
-                                            ? null
-                                            : item.userData.played,
-                                        onTogglePlayed: controller.playedBusy
-                                            ? null
-                                            : _togglePlayed,
-                                        favorite: controller.supportsFavorite
-                                            ? item.userData.favorite
-                                            : null,
-                                        onToggleFavorite:
-                                            controller.favoriteBusy
-                                            ? null
-                                            : _toggleFavorite,
                                         showRestart:
                                             !item.isSeries &&
                                             target?.canResume == true,
@@ -791,7 +798,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                     : preferBackdrop,
                                 maxWidth: imageWidth,
                                 posterItem: handoff?.item ?? item,
-                                hideTitle: _barSolid,
                               ),
                             ),
                           if (pending)
@@ -998,10 +1004,68 @@ class _PhoneDetailBar extends StatelessWidget {
   }
 }
 
-//// 头部主操作：播放钮（`mobile-detail-play`）通栏，续播时下面是一条进度和
-/// 「剩余 N 分钟」。再往下是一排图标加文字的次级操作：已看切换
-/// （[CatalogKeys.playedToggle]）、从头播放（`phone-detail-play-start`）、
-/// 上一集/下一集，只有可用时才出现，等宽排开。
+/// 头部右上角状态胶囊：收藏（`phone-detail-favorite`）与已看切换
+/// （[CatalogKeys.playedToggle]），填充头部右上留白并释放下方播放控制区宽度。
+class _DetailStatusActions extends StatelessWidget {
+  const _DetailStatusActions({
+    this.played,
+    this.onTogglePlayed,
+    this.favorite,
+    this.onToggleFavorite,
+  });
+
+  static const favoriteKey = Key('phone-detail-favorite');
+
+  final bool? played;
+  final VoidCallback? onTogglePlayed;
+  final bool? favorite;
+  final VoidCallback? onToggleFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final favorite = this.favorite;
+    final played = this.played;
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        if (favorite != null)
+          Semantics(
+            toggled: favorite,
+            child: _SecondaryAction(
+              key: favoriteKey,
+              icon: AppIcons.favorite,
+              iconFill: favorite ? AppIcons.filled : AppIcons.outline,
+              label: favorite ? l.phoneFavorited : l.phoneFavorite,
+              highlighted: favorite,
+              compact: true,
+              onPressed: onToggleFavorite,
+            ),
+          ),
+        if (played != null)
+          Semantics(
+            toggled: played,
+            child: _SecondaryAction(
+              key: CatalogKeys.playedToggle,
+              icon: AppIcons.checkCircle,
+              iconFill: played ? AppIcons.filled : AppIcons.outline,
+              label: played ? l.mobileWatched : l.markPlayed,
+              tooltip: played ? l.markUnplayed : l.markPlayed,
+              highlighted: played,
+              compact: true,
+              onPressed: onTogglePlayed,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 头部主操作：播放钮（`mobile-detail-play`）通栏，续播时下面是一条进度和
+/// 「剩余 N 分钟」。再往下是播放与切集控制：从头播放（`phone-detail-play-start`）、
+/// 上一集/下一集，只有可用时才出现，横向胶囊等宽排开。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
     required this.label,
@@ -1012,15 +1076,9 @@ class _DetailPlayActions extends StatelessWidget {
     required this.onRestart,
     this.progress,
     this.progressLabel,
-    this.played,
-    this.onTogglePlayed,
-    this.favorite,
-    this.onToggleFavorite,
     this.onPrevious,
     this.onNext,
   });
-
-  static const favoriteKey = Key('phone-detail-favorite');
 
   static const double _height = 52;
 
@@ -1036,14 +1094,6 @@ class _DetailPlayActions extends StatelessWidget {
   /// 续播进度 0–1；为 null 时不画进度行。
   final double? progress;
   final String? progressLabel;
-
-  /// 已看状态；为 null（剧集）时不提供已看切换。
-  final bool? played;
-  final VoidCallback? onTogglePlayed;
-
-  /// 收藏状态；为 null（服务不支持收藏）时不提供收藏切换。
-  final bool? favorite;
-  final VoidCallback? onToggleFavorite;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
 
@@ -1052,43 +1102,9 @@ class _DetailPlayActions extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final played = this.played;
-    final favorite = this.favorite;
     final progress = this.progress;
     final progressLabel = this.progressLabel;
-    final singleSecondary =
-        favorite != null &&
-        played == null &&
-        !showRestart &&
-        onPrevious == null &&
-        onNext == null;
     final secondary = <Widget>[
-      if (favorite != null)
-        Semantics(
-          toggled: favorite,
-          child: _SecondaryAction(
-            key: favoriteKey,
-            icon: AppIcons.favorite,
-            iconFill: favorite ? AppIcons.filled : AppIcons.outline,
-            label: favorite ? l.phoneFavorited : l.phoneFavorite,
-            highlighted: favorite,
-            inline: singleSecondary,
-            onPressed: onToggleFavorite,
-          ),
-        ),
-      if (played != null)
-        Semantics(
-          toggled: played,
-          child: _SecondaryAction(
-            key: CatalogKeys.playedToggle,
-            icon: AppIcons.checkCircle,
-            iconFill: played ? AppIcons.filled : AppIcons.outline,
-            label: played ? l.mobileWatched : l.markPlayed,
-            tooltip: played ? l.markUnplayed : l.markPlayed,
-            highlighted: played,
-            onPressed: onTogglePlayed,
-          ),
-        ),
       if (showRestart)
         _SecondaryAction(
           key: const Key('phone-detail-play-start'),
@@ -1136,16 +1152,7 @@ class _DetailPlayActions extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (singleSecondary)
-          Row(
-            children: [
-              Expanded(child: playButton),
-              const SizedBox(width: AppSpacing.xs),
-              secondary.single,
-            ],
-          )
-        else
-          playButton,
+        playButton,
         if (progress != null && progress > 0) ...[
           const SizedBox(height: AppSpacing.sm),
           Semantics(
@@ -1182,7 +1189,7 @@ class _DetailPlayActions extends StatelessWidget {
             ),
           ),
         ],
-        if (secondary.isNotEmpty && !singleSecondary) ...[
+        if (secondary.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
@@ -1198,8 +1205,9 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 次级操作：单操作（如剧集收藏）与主播放钮同行胶囊排布；
-/// 多操作（电影/单集）为均分圆角卡片，图标与文字上下居中，消除单侧空白。
+/// 次级与状态操作：
+/// - [compact] 用于头部右上角的收藏/已看状态胶囊（紧凑圆润胶囊）；
+/// - 默认用于播放钮下方的从头播放/上一集/下一集（横向图标加文字，宽敞不截断）。
 class _SecondaryAction extends StatelessWidget {
   const _SecondaryAction({
     super.key,
@@ -1209,7 +1217,7 @@ class _SecondaryAction extends StatelessWidget {
     this.iconFill = AppIcons.filled,
     this.tooltip,
     this.highlighted = false,
-    this.inline = false,
+    this.compact = false,
   });
 
   final IconData icon;
@@ -1220,7 +1228,7 @@ class _SecondaryAction extends StatelessWidget {
   final String? tooltip;
   final VoidCallback? onPressed;
   final bool highlighted;
-  final bool inline;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1229,7 +1237,7 @@ class _SecondaryAction extends StatelessWidget {
     final enabled = onPressed != null;
     final duration = AppMotion.durationOf(context, AppMotion.fast);
     final grow = (MediaQuery.textScalerOf(context).scale(14) / 14)
-        .clamp(1.0, 1.35)
+        .clamp(1.0, 1.3)
         .toDouble();
     final iconColor = !enabled
         ? scheme.onSurface.withValues(alpha: .38)
@@ -1240,7 +1248,7 @@ class _SecondaryAction extends StatelessWidget {
         ? scheme.onSurface.withValues(alpha: .38)
         : highlighted
         ? scheme.primary
-        : scheme.onSurfaceVariant;
+        : scheme.onSurface;
     final animatedIcon = AnimatedSwitcher(
       duration: duration,
       switchInCurve: AppMotion.emphasized,
@@ -1251,12 +1259,12 @@ class _SecondaryAction extends StatelessWidget {
       child: Icon(
         icon,
         key: ValueKey(highlighted),
-        size: (inline ? 20 : 21) * grow,
+        size: (compact ? 16 : 18) * grow,
         color: iconColor,
         fill: iconFill,
       ),
     );
-    final borderRadius = BorderRadius.circular(inline ? 999 : AppRadii.lg);
+    final borderRadius = BorderRadius.circular(compact ? 999 : AppRadii.lg);
     return AppTooltip(
       message: tooltip ?? label,
       child: MobilePressFeedback(
@@ -1265,14 +1273,14 @@ class _SecondaryAction extends StatelessWidget {
         child: AnimatedContainer(
           duration: duration,
           curve: AppMotion.standard,
-          constraints: BoxConstraints(
-            minHeight: inline ? _DetailPlayActions._height : 58,
-          ),
+          constraints: BoxConstraints(minHeight: compact ? 34 : 44),
           decoration: BoxDecoration(
             borderRadius: borderRadius,
             color: highlighted
                 ? scheme.primary.withValues(alpha: .18)
-                : scheme.surfaceContainerHigh.withValues(alpha: .68),
+                : scheme.surfaceContainerHigh.withValues(
+                    alpha: compact ? .76 : .68,
+                  ),
             border: Border.all(
               color: highlighted
                   ? scheme.primary.withValues(alpha: .44)
@@ -1285,45 +1293,32 @@ class _SecondaryAction extends StatelessWidget {
             borderRadius: borderRadius,
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: inline ? 16 : 6,
-                vertical: inline ? 10 : 8,
+                horizontal: compact ? 11 : 12,
+                vertical: compact ? 6 : 10,
               ),
-              child: inline
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        animatedIcon,
-                        const SizedBox(width: 6),
-                        Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: iconColor,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    )
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        animatedIcon,
-                        const SizedBox(height: 5),
-                        Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: labelColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+              child: Row(
+                mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  animatedIcon,
+                  SizedBox(width: compact ? 5 : 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          (compact
+                                  ? theme.textTheme.labelMedium
+                                  : theme.textTheme.labelLarge)
+                              ?.copyWith(
+                                color: labelColor,
+                                fontWeight: FontWeight.w600,
+                              ),
                     ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
