@@ -297,11 +297,7 @@ void main() {
       await tester.pumpWidget(
         _wrap(
           host: host,
-          child: PosterCard(
-            item: series,
-            showProgress: true,
-            onTap: () {},
-          ),
+          child: PosterCard(item: series, showProgress: true, onTap: () {}),
         ),
       );
       await tester.pump();

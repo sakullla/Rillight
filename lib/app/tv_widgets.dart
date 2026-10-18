@@ -895,9 +895,7 @@ class TvCardMetrics {
     final image = wide ? w * 9 / 16 : w * 1.5;
     final title = _lineHeight(context, theme.textTheme.bodyMedium);
     final hasSub = subtitle ?? !wide;
-    final sub = hasSub
-        ? _lineHeight(context, theme.textTheme.labelMedium)
-        : 0;
+    final sub = hasSub ? _lineHeight(context, theme.textTheme.labelMedium) : 0;
     return TvCardMetrics(
       width: w,
       imageHeight: image,
@@ -1111,9 +1109,8 @@ class _TvCardState extends State<TvCard> {
                           color: const Color(0xff000000).withValues(alpha: .72),
                           borderRadius: BorderRadius.circular(5 * s),
                           border: Border.all(
-                            color: const Color(
-                              0xffffffff,
-                            ).withValues(alpha: .16),
+                            color: const Color(0xffffffff)
+                                .withValues(alpha: .16),
                             width: .6 * s,
                           ),
                         ),
@@ -1123,9 +1120,8 @@ class _TvCardState extends State<TvCard> {
                             vertical: 2 * s,
                           ),
                           child: Text(
-                            AppLocalizations.of(
-                              context,
-                            ).cardSeasonCount(item.childCount!),
+                            AppLocalizations.of(context)
+                                .cardSeasonCount(item.childCount!),
                             maxLines: 1,
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: const Color(0xffffffff),
@@ -1388,7 +1384,7 @@ class _TvItemRowState extends State<TvItemRow> {
     final wide = widget.wide;
     final s = TvDesign.scaleOf(context);
     final hasSubtitle =
-        widget.subtitle ?? (wide && widget.items.any((i) => i.isEpisode));
+        widget.subtitle ?? (!wide || widget.items.any((i) => i.isEpisode));
     final metrics = TvCardMetrics.of(
       context,
       wide: wide,

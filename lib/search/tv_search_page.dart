@@ -161,10 +161,7 @@ Widget _posterGrid(
 ) {
   return SliverGrid(
     key: const Key('tv-search-grid'),
-    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: metrics.columns,
-      childAspectRatio: metrics.childAspectRatio,
-    ),
+    gridDelegate: metrics.delegate,
     delegate: SliverChildBuilderDelegate(
       (context, index) {
         final item = items[index];

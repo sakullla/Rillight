@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
@@ -29,6 +31,9 @@ class TvLibraryPage extends StatefulWidget {
 class _TvLibraryPageState extends State<TvLibraryPage> {
   BrowseController? _controller;
   final _focus = TvReturnFocus();
+  final TextEditingController _searchController = TextEditingController();
+  final Set<String> _knownGenres = <String>{};
+  bool _genresRequested = false;
 
   @override
   void initState() {
@@ -39,6 +44,19 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   void _onFocus() {
     if (!mounted) return;
     _focus.syncOwned(this);
+  }
+
+  void _prefetchGenres(BrowseController c) {
+    if (_genresRequested) return;
+    _genresRequested = true;
+    unawaited(() async {
+      try {
+        final result = await c.auth.client.getLibraryGenres(widget.viewId);
+        if (mounted && result.isNotEmpty) {
+          setState(() => _knownGenres.addAll(result));
+        }
+      } catch (_) {}
+    }());
   }
 
   @override
@@ -63,7 +81,9 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
       final genre = widget.initialGenre;
       if (genre != null && genre.isNotEmpty) {
         controller.genre = genre;
+        controller.genres = [genre];
       }
+      _prefetchGenres(controller);
       controller.load();
       return controller;
     }();
@@ -77,12 +97,17 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   void dispose() {
     FocusManager.instance.removeListener(_onFocus);
     _focus.dispose();
+    _searchController.dispose();
     _controller?.dispose();
     super.dispose();
   }
 
   Future<void> _filter() async {
     final c = _controller!;
+    final mergedGenres = {
+      ..._knownGenres,
+      ...c.items.expand((item) => item.genres),
+    }.toList()..sort();
     await showAppDialog<void>(
       context: context,
       useRootNavigator: false,
@@ -105,18 +130,22 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
             years: c.years,
             genres: c.genres,
           ),
-          sort: CatalogSort.values.firstWhere(
-            (s) => s.sortBy == c.sortBy,
-            orElse: () => c.defaultSort,
-          ),
+          sort: c.currentSort,
+          sortOrder: c.sortOrder,
           years: c.items
               .map((item) => item.productionYear)
               .whereType<int>()
               .toSet()
               .toList(),
-          genres: c.items.expand((item) => item.genres).toSet().toList(),
-          loadGenres: () =>
-              AuthScope.of(context).client.getLibraryGenres(widget.viewId),
+          genres: mergedGenres,
+          loadGenres: () async {
+            final res = await AuthScope.of(context).client
+                .getLibraryGenres(widget.viewId);
+            if (mounted && res.isNotEmpty) {
+              setState(() => _knownGenres.addAll(res));
+            }
+            return res;
+          },
           onApply: (filters, sort) => c.filter(
             type: filters.type.itemType,
             watch: filters.watch.param,
@@ -124,8 +153,71 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
             genres: filters.genres,
             sortBy: (sort ?? c.defaultSort).sortBy,
           ),
+          onApplyWithOrder: (filters, sort, sortOrder) => c.filter(
+            type: filters.type.itemType,
+            watch: filters.watch.param,
+            years: filters.years,
+            genres: filters.genres,
+            sortBy: (sort ?? c.defaultSort).sortBy,
+            sortOrder: sortOrder,
+          ),
         ),
       ),
+    );
+  }
+
+  Future<void> _pickSort(BrowseController c) async {
+    final l = AppLocalizations.of(context);
+    final options = CatalogSort.optionsFor(
+      c.items,
+      capabilities: c.auth.client.capabilities,
+    );
+    await showAppDialog<void>(
+      context: context,
+      useRootNavigator: false,
+      builder: (dialogContext) => AppDialog(
+        title: Text(l.sortBy),
+        content: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final option in options)
+              TvAction(
+                key: Key('tv-library-quick-sort-${option.sortBy}'),
+                autofocus: option == c.currentSort,
+                pill: true,
+                selected: option == c.currentSort,
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  c.selectSort(option);
+                },
+                child: Text(option.label(l)),
+              ),
+          ],
+        ),
+        actions: [
+          TvAction(
+            pill: true,
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(l.libraryFilterCancel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _clearAll(BrowseController c) {
+    _searchController.clear();
+    c.filter(
+      type: null,
+      watch: null,
+      year: null,
+      genre: null,
+      years: const [],
+      genres: const [],
+      sortBy: c.defaultSort.sortBy,
+      sortOrder: c.defaultSort.sortOrder,
+      searchTerm: '',
     );
   }
 
@@ -139,13 +231,53 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
       listenable: c,
       builder: (context, _) {
         _focus.retain(c.items.map((item) => item.id));
+        for (final item in c.items) {
+          _knownGenres.addAll(item.genres);
+        }
+        final genreList = [..._knownGenres]..sort();
         final s = TvDesign.scaleOf(context);
         final padding = TvFrame.contentPadding(context);
         final active = _hasActiveFilters(c);
+        final activeCount = _activeFilterDimensionCount(c);
+        final isAsc =
+            CatalogSort.normalizeSortOrder(c.sortOrder) == 'Ascending';
+        final filterSummary = _filterSummary(c, l);
         return TvFrame(
           title: library?.name ?? l.libraries,
-          subtitle: active ? _filterSummary(c) : null,
+          subtitle: filterSummary.isEmpty ? null : filterSummary,
           actions: [
+            SizedBox(
+              width: 190 * s,
+              child: TvInput(
+                key: const Key('tv-library-search'),
+                pill: true,
+                label: l.searchHint,
+                controller: _searchController,
+                leading: const Icon(AppIcons.search, fill: AppIcons.filled),
+                onSubmitted: () => c.setSearchTerm(_searchController.text),
+              ),
+            ),
+            TvAction(
+              key: const Key('tv-library-quick-sort'),
+              pill: true,
+              leading: Icon(
+                isAsc ? CupertinoIcons.sort_up : CupertinoIcons.sort_down,
+              ),
+              onPressed: () => _pickSort(c),
+              child: Text(c.currentSort.label(l)),
+            ),
+            if (c.currentSort.supportsOrderToggle)
+              TvAction(
+                key: const Key('tv-library-sort-order'),
+                pill: true,
+                leading: Icon(
+                  isAsc ? CupertinoIcons.arrow_up : CupertinoIcons.arrow_down,
+                ),
+                onPressed: c.toggleSortOrder,
+                child: Text(
+                  isAsc ? l.filterSortAscending : l.filterSortDescending,
+                ),
+              ),
             TvAction(
               key: const Key('tv-library-filter'),
               autofocus: true,
@@ -156,8 +288,20 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                 fill: active ? AppIcons.filled : AppIcons.outline,
               ),
               onPressed: _filter,
-              child: Text(l.libraryFilter),
+              child: Text(
+                activeCount > 0
+                    ? '${l.libraryFilter} ($activeCount)'
+                    : l.libraryFilter,
+              ),
             ),
+            if (active)
+              TvAction(
+                key: const Key('tv-library-clear'),
+                pill: true,
+                leading: const Icon(AppIcons.close, fill: AppIcons.filled),
+                onPressed: () => _clearAll(c),
+                child: Text(l.libraryFilterClear),
+              ),
           ],
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -170,6 +314,51 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                   key: PageStorageKey('tv-library-${widget.viewId}'),
                   scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
                   slivers: [
+                    if (genreList.isNotEmpty)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          padding.left,
+                          0,
+                          padding.right,
+                          8 * s,
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          child: SizedBox(
+                            height: 44 * s,
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              children: [
+                                Padding(
+                                  padding: EdgeInsets.only(right: 8 * s),
+                                  child: TvAction(
+                                    key: const Key(
+                                      'tv-library-quick-genre-all',
+                                    ),
+                                    pill: true,
+                                    selected:
+                                        c.genres.isEmpty && c.genre == null,
+                                    onPressed: () => c.toggleGenre(null),
+                                    child: Text(l.libraryFilterAll),
+                                  ),
+                                ),
+                                for (final genre in genreList)
+                                  Padding(
+                                    padding: EdgeInsets.only(right: 8 * s),
+                                    child: TvAction(
+                                      key: Key('tv-library-quick-genre-$genre'),
+                                      pill: true,
+                                      selected:
+                                          c.genres.contains(genre) ||
+                                          c.genre == genre,
+                                      onPressed: () => c.toggleGenre(genre),
+                                      child: Text(genre),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     if (c.loadingMore || c.loading)
                       SliverPadding(
                         padding: EdgeInsets.fromLTRB(
@@ -209,7 +398,16 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                           padding.right,
                           0,
                         ),
-                        sliver: _posterGrid(c.items, metrics, _focus),
+                        sliver: _posterGrid(
+                          c.items,
+                          metrics,
+                          _focus,
+                          onNearBottom: () {
+                            if (c.hasMore && !c.loading && !c.loadingMore) {
+                              c.load(more: true);
+                            }
+                          },
+                        ),
                       ),
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(
@@ -262,19 +460,31 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
 Widget _posterGrid(
   List<MediaItem> items,
   TvGridMetrics metrics,
-  TvReturnFocus focus,
-) {
+  TvReturnFocus focus, {
+  VoidCallback? onNearBottom,
+}) {
   return SliverGrid(
     key: const Key('tv-library-grid'),
     gridDelegate: metrics.delegate,
     delegate: SliverChildBuilderDelegate(
       (context, index) {
         final item = items[index];
-        return TvPoster(
-          key: ValueKey(item.id),
-          item: item,
-          imageMaxWidth: metrics.imageMaxWidth,
-          focusNode: focus.nodeFor(item.id),
+        return Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (focused) {
+            if (focused &&
+                onNearBottom != null &&
+                index >= items.length - metrics.columns * 2) {
+              onNearBottom();
+            }
+          },
+          child: TvPoster(
+            key: ValueKey(item.id),
+            item: item,
+            imageMaxWidth: metrics.imageMaxWidth,
+            focusNode: focus.nodeFor(item.id),
+          ),
         );
       },
       childCount: items.length,
@@ -294,9 +504,19 @@ bool _hasActiveFilters(BrowseController c) =>
     c.genre != null ||
     c.years.isNotEmpty ||
     c.genres.isNotEmpty ||
-    c.sortBy != c.defaultSort.sortBy;
+    c.searchTerm.isNotEmpty ||
+    c.sortBy != c.defaultSort.sortBy ||
+    CatalogSort.normalizeSortOrder(c.sortOrder) !=
+        CatalogSort.normalizeSortOrder(c.defaultSort.sortOrder);
 
-String _filterSummary(BrowseController c) {
+int _activeFilterDimensionCount(BrowseController c) =>
+    (c.type == null ? 0 : 1) +
+    (c.watch == null ? 0 : 1) +
+    (c.years.isEmpty && c.year == null ? 0 : 1) +
+    (c.genres.isEmpty && c.genre == null ? 0 : 1) +
+    (c.searchTerm.isEmpty ? 0 : 1);
+
+String _filterSummary(BrowseController c, AppLocalizations l) {
   final watch = CatalogWatchFilter.values.firstWhere(
     (v) => v.param == c.watch,
     orElse: () => CatalogWatchFilter.all,
@@ -305,13 +525,16 @@ String _filterSummary(BrowseController c) {
     (v) => v.itemType == c.type,
     orElse: () => CatalogTypeFilter.all,
   );
-  return [
+  final parts = <String>[
+    if (c.totalCount != null) l.browseLoaded(c.totalCount!),
     if (type != CatalogTypeFilter.all) type.label,
     if (watch != CatalogWatchFilter.all) watch.label,
     ...c.genres,
-    if (c.genre != null) c.genre!,
+    if (c.genre != null && !c.genres.contains(c.genre)) c.genre!,
     ...c.years.map((year) => '$year'),
-  ].join(' · ');
+    if (c.searchTerm.isNotEmpty) '“${c.searchTerm}”',
+  ];
+  return parts.join(' · ');
 }
 
 /// 页面 State 存活期间记住最后聚焦的条目 id。

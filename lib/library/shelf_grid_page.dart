@@ -163,11 +163,9 @@ class ShelfGridPage extends StatefulWidget {
     required double availableWidth,
     bool episodes = false,
     bool wide = false,
-    double labelExtent = 38.0,
+    double labelExtent = 54.0,
   }) {
     const spacing = AppSpacing.md;
-    // PosterCard 非 wide 布局文字行占位:xs 间距 + 标题行,
-    // 与 MediaShelf 行高口径一致。横图分集/继续观看用 16:9。
     final landscape = episodes || wide;
     final maxExtent = landscape
         ? maxEpisodeExtentFor(screenWidth)
@@ -206,7 +204,7 @@ class ShelfGridPage extends StatefulWidget {
                     item: item,
                     width: constraints.maxWidth,
                     wide: wide,
-                    showProgress: wide && onRemoveFromResume != null,
+                    showProgress: !wide || onRemoveFromResume != null,
                     hoverScale: 1,
                     onTap: onTap,
                     onRemoveFromResume: onRemoveFromResume,
@@ -268,7 +266,14 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
   MediaServerException? _error;
   MediaServerException? _pageError;
-  late CatalogSort _sort = _defaultSort;
+  CatalogSort? _sortState;
+  String? _sortOrderOverride;
+  String _searchTerm = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  CatalogSort get _sort => _sortState ?? _defaultSort;
+  String get _sortOrder =>
+      CatalogSort.normalizeSortOrder(_sortOrderOverride, fallback: _sort);
 
   /// 片库组合筛选:类型/年份/流派/已看,与排序叠加生效。
   late ShelfFilters _filters = widget.initialGenre == null
@@ -278,6 +283,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   /// 筛选取值维度:从已加载条目聚合,只增不减,翻页/筛选后取值稳定。
   final Set<int> _knownYears = {};
   final Set<String> _knownGenres = {};
+  bool _genresRequested = false;
 
   CatalogCache? _scopeCache;
   MediaServerClient? _overrideClient;
@@ -295,10 +301,57 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   MediaServerClient _activeClient() =>
       _overrideClient ?? AuthScope.of(context).client;
 
+  String get _serverKey => _activeClient().baseUrl?.toString() ?? '';
+
+  void _initOrRestoreSort() {
+    if (_filterable && widget.parentId != null) {
+      final remembered = LibrarySortMemory.read(
+        serverKey: _serverKey,
+        parentId: widget.parentId!,
+        capabilities: _activeClient().capabilities,
+      );
+      if (remembered != null) {
+        _sortState = remembered.$1;
+        _sortOrderOverride = remembered.$2;
+        return;
+      }
+    }
+    _sortState = _defaultSort;
+    _sortOrderOverride = _defaultSort.sortOrder;
+  }
+
+  void _persistSort() {
+    if (!_filterable || widget.parentId == null) return;
+    LibrarySortMemory.write(
+      serverKey: _serverKey,
+      parentId: widget.parentId!,
+      sort: _sort,
+      sortOrder: _sortOrder,
+    );
+  }
+
+  void _prefetchLibraryGenres() {
+    if (!_filterable || _genresRequested) return;
+    _genresRequested = true;
+    final parentId = widget.parentId;
+    unawaited(() async {
+      try {
+        final result = await _activeClient().getLibraryGenres(parentId);
+        if (mounted && result.isNotEmpty) {
+          setState(() => _knownGenres.addAll(result));
+        }
+      } catch (_) {}
+    }());
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _overrideClient = ShelfClientOverride.maybeOf(context);
+    if (_sortState == null) {
+      _initOrRestoreSort();
+      _prefetchLibraryGenres();
+    }
   }
 
   CatalogSort get _defaultSort => widget.includeItemTypes == 'Episode'
@@ -370,7 +423,14 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   void dispose() {
     _scrollController.removeListener(_maybeLoadMore);
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
   }
 
   @override
@@ -382,13 +442,15 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         oldWidget.itemId != widget.itemId ||
         oldWidget.recursive != widget.recursive ||
         oldWidget.moviesOrSeriesOnly != widget.moviesOrSeriesOnly) {
-      _sort = _defaultSort;
+      _genresRequested = false;
+      _initOrRestoreSort();
+      _prefetchLibraryGenres();
       _filters = const ShelfFilters();
+      _searchTerm = '';
+      _searchController.clear();
       _knownYears.clear();
       _knownGenres.clear();
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0);
-      }
+      _scrollToTop();
       _load();
     }
   }
@@ -446,7 +508,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
   Future<void> _load({bool preserveContent = false}) async {
     final gen = ++_loadGen;
-    // 切排序/手动刷新保留已有内容增量刷新,不清空整页骨架屏重来。
     setState(() {
       _pageError = null;
       if (preserveContent) {
@@ -465,7 +526,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     });
     final client = _activeClient();
     if (!preserveContent) {
-      // 先显:命中缓存立即渲染,后台重拉完成后无感更新。
       final hit = await _cache.lookup(
         _requestFor(client, 0, ShelfGridPage.pageSize),
       );
@@ -517,7 +577,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       setState(() {
         _loading = false;
         _refreshing = false;
-        // 先显缓存内容时保留显示,可经手动刷新重试;否则展示错误。
         _error = error;
       });
     }
@@ -565,7 +624,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       if (!mounted || gen != _loadGen) {
         return;
       }
-      // 分页追加失败不打断已有内容,保留重试机会(再次滚动到底部重试)。
       setState(() {
         _loadingMore = false;
         _pageError = error;
@@ -584,6 +642,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   ) {
     final userId = client.userId ?? '';
     final sortable = client.supportsShelfSorting(widget.source);
+    final effectiveOrder = _sort.supportsOrderToggle
+        ? _sortOrder
+        : _sort.sortOrder;
+    final trimmedSearch = _searchTerm.trim();
     switch (widget.source) {
       case 'resume':
         return catalogResumeRequest(
@@ -591,7 +653,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           limit: limit,
           startIndex: startIndex,
           sortBy: sortable ? _sort.sortBy : null,
-          sortOrder: sortable ? _sort.sortOrder : null,
+          sortOrder: sortable ? effectiveOrder : null,
         );
       case 'nextup':
         return catalogNextUpRequest(
@@ -599,7 +661,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           limit: limit,
           startIndex: startIndex,
           sortBy: sortable ? _sort.sortBy : null,
-          sortOrder: sortable ? _sort.sortOrder : null,
+          sortOrder: sortable ? effectiveOrder : null,
         );
       case 'latest-movies':
         return catalogItemsRequest(
@@ -609,7 +671,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           limit: limit,
           startIndex: startIndex,
           sortBy: sortable ? _sort.sortBy : null,
-          sortOrder: sortable ? _sort.sortOrder : null,
+          sortOrder: sortable ? effectiveOrder : null,
         );
       case 'latest-series':
         return catalogItemsRequest(
@@ -619,7 +681,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           limit: limit,
           startIndex: startIndex,
           sortBy: sortable ? _sort.sortBy : null,
-          sortOrder: sortable ? _sort.sortOrder : null,
+          sortOrder: sortable ? effectiveOrder : null,
         );
       case 'similar':
         return catalogSimilarRequest(
@@ -627,18 +689,19 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           itemId: widget.itemId ?? '',
           limit: limit,
           sortBy: sortable ? _sort.sortBy : null,
-          sortOrder: sortable ? _sort.sortOrder : null,
+          sortOrder: sortable ? effectiveOrder : null,
         );
       default:
         return catalogItemsRequest(
           userId: userId,
           parentId: widget.parentId,
+          searchTerm: trimmedSearch.isEmpty ? null : trimmedSearch,
           includeItemTypes: _effectiveIncludeItemTypes,
           recursive: widget.recursive,
           limit: limit,
           startIndex: startIndex,
           sortBy: sortable ? _sort.sortBy : null,
-          sortOrder: sortable ? _sort.sortOrder : null,
+          sortOrder: sortable ? effectiveOrder : null,
           filters: _filters.watch.param == null
               ? null
               : [_filters.watch.param!],
@@ -681,22 +744,80 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
   }
 
-  void _selectSort(CatalogSort sort) {
-    if (sort == _sort) {
+  void _selectSort(CatalogSort sort, {String? sortOrder}) {
+    final nextOrder = !sort.supportsOrderToggle
+        ? sort.sortOrder
+        : sortOrder != null && sortOrder.isNotEmpty
+        ? CatalogSort.normalizeSortOrder(sortOrder, fallback: sort)
+        : sort.sortOrder;
+    if (sort == _sort && nextOrder == _sortOrder) {
       return;
     }
-    setState(() => _sort = sort);
-    // 在已有内容上增量刷新,不出现整页骨架屏重来。
+    setState(() {
+      _sortState = sort;
+      _sortOrderOverride = nextOrder;
+    });
+    _persistSort();
+    _scrollToTop();
     _load(preserveContent: true);
   }
 
-  void _selectFilters(ShelfFilters filters) {
-    if (filters == _filters) {
+  void _toggleSortOrder() {
+    if (!_sort.supportsOrderToggle) return;
+    setState(() {
+      _sortOrderOverride = CatalogSort.flipSortOrder(_sortOrder);
+    });
+    _persistSort();
+    _scrollToTop();
+    _load(preserveContent: true);
+  }
+
+  void _setSearchTerm(String value) {
+    final next = value.trim();
+    if (next == _searchTerm) return;
+    setState(() => _searchTerm = next);
+    _scrollToTop();
+    _load(preserveContent: true);
+  }
+
+  void _selectFilters(
+    ShelfFilters filters, {
+    CatalogSort? sort,
+    String? sortOrder,
+  }) {
+    var changed = filters != _filters;
+    if (sort != null && sort != _sort) {
+      _sortState = sort;
+      changed = true;
+    }
+    if (sortOrder != null && sortOrder != _sortOrder) {
+      _sortOrderOverride = CatalogSort.normalizeSortOrder(
+        sortOrder,
+        fallback: _sort,
+      );
+      changed = true;
+    }
+    if (!changed) {
       return;
     }
     setState(() => _filters = filters);
-    // 与切排序一致:保留已有内容增量刷新,不整页骨架屏重来。
+    _persistSort();
+    _scrollToTop();
     _load(preserveContent: true);
+  }
+
+  void _toggleQuickGenre(String? genre) {
+    if (genre == null || genre.trim().isEmpty) {
+      _selectFilters(_filters.copyWith(genres: const []));
+      return;
+    }
+    final next = [..._filters.genres];
+    if (next.contains(genre)) {
+      next.remove(genre);
+    } else {
+      next.add(genre);
+    }
+    _selectFilters(_filters.copyWith(genres: next));
   }
 
   @override
@@ -712,8 +833,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             titleOverride: widget.titleOverride,
             showTitle: widget.showTitle,
             sort: _sort,
+            sortOrder: _sortOrder,
             options: const [],
             onSort: _selectSort,
+            onToggleSortOrder: _toggleSortOrder,
             showSort: false,
             onRefresh: _manualRefresh,
             refreshing: true,
@@ -722,6 +845,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             yearOptions: _yearOptions,
             genreOptions: _genreOptions,
             onFiltersChanged: _filterable ? _selectFilters : null,
+            onToggleGenre: _filterable ? _toggleQuickGenre : null,
+            searchController: _filterable ? _searchController : null,
+            onSearchChanged: _filterable ? _setSearchTerm : null,
           ),
           Expanded(
             child: SkeletonPosterGrid(
@@ -748,11 +874,13 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             titleOverride: widget.titleOverride,
             showTitle: widget.showTitle,
             sort: _sort,
+            sortOrder: _sortOrder,
             options: CatalogSort.optionsFor(
               _items,
               capabilities: _activeClient().capabilities,
             ),
             onSort: _selectSort,
+            onToggleSortOrder: _toggleSortOrder,
             showSort: false,
             onRefresh: _manualRefresh,
             refreshing: false,
@@ -761,6 +889,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             yearOptions: _yearOptions,
             genreOptions: _genreOptions,
             onFiltersChanged: _filterable ? _selectFilters : null,
+            onToggleGenre: _filterable ? _toggleQuickGenre : null,
+            searchController: _filterable ? _searchController : null,
+            onSearchChanged: _filterable ? _setSearchTerm : null,
           ),
           Expanded(
             child: AppErrorView(
@@ -780,9 +911,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       shortcuts: catalogGridArrowShortcuts,
       child: FocusTraversalGroup(
         policy: ReadingOrderTraversalPolicy(),
-        // 列数只依赖页面盒约束宽度,用 box LayoutBuilder 在滚动视图外算一次。
-        // 不能用 SliverLayoutBuilder:SliverConstraints 含 scrollOffset,
-        // 每滚一帧都不同,会让 SliverGrid 连同整屏卡片每帧重建。
         child: LayoutBuilder(
           builder: (context, constraints) {
             final gridDelegate = ShelfGridPage.gridDelegateFor(
@@ -801,7 +929,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                   : MediaShelf.posterLabelExtentFor(context),
             );
             return NotificationListener<ScrollNotification>(
-              // 页内大标题滚出后,外壳顶栏接过标题并显示分隔线。
               onNotification: (notification) {
                 if (notification.depth == 0 &&
                     notification.metrics.axis == Axis.vertical) {
@@ -813,7 +940,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
               child: MediaImageScrollListener(
                 child: CustomScrollView(
                   controller: _scrollController,
-                  // 预构建半屏即可,快滑时少把屏幕外海报提前打进磁盘/解码。
                   scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
                   slivers: [
                     SliverToBoxAdapter(
@@ -822,8 +948,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                         titleOverride: widget.titleOverride,
                         showTitle: widget.showTitle,
                         sort: _sort,
+                        sortOrder: _sortOrder,
                         options: options,
                         onSort: _selectSort,
+                        onToggleSortOrder: _toggleSortOrder,
                         showSort:
                             _items.isNotEmpty &&
                             _activeClient().supportsShelfSorting(widget.source),
@@ -838,6 +966,11 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                         yearOptions: _yearOptions,
                         genreOptions: _genreOptions,
                         onFiltersChanged: _filterable ? _selectFilters : null,
+                        onToggleGenre: _filterable ? _toggleQuickGenre : null,
+                        searchController: _filterable
+                            ? _searchController
+                            : null,
+                        onSearchChanged: _filterable ? _setSearchTerm : null,
                       ),
                     ),
                     if (_error != null)
@@ -1011,8 +1144,10 @@ class _Header extends StatelessWidget {
     this.titleOverride,
     this.showTitle = true,
     required this.sort,
+    required this.sortOrder,
     required this.options,
     required this.onSort,
+    required this.onToggleSortOrder,
     required this.showSort,
     this.onRefresh,
     this.refreshing = false,
@@ -1022,6 +1157,9 @@ class _Header extends StatelessWidget {
     this.yearOptions = const [],
     this.genreOptions = const [],
     this.onFiltersChanged,
+    this.onToggleGenre,
+    this.searchController,
+    this.onSearchChanged,
     this.serverOrder = false,
   });
 
@@ -1029,26 +1167,26 @@ class _Header extends StatelessWidget {
   final Widget? titleOverride;
   final bool showTitle;
   final CatalogSort sort;
+  final String sortOrder;
   final List<CatalogSort> options;
-  final ValueChanged<CatalogSort> onSort;
+  final void Function(CatalogSort, {String? sortOrder}) onSort;
+  final VoidCallback onToggleSortOrder;
   final bool showSort;
   final bool serverOrder;
 
-  /// 手动刷新入口:绕过缓存立即重拉。null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
   final bool refreshing;
   final int? loadedCount;
 
-  /// 当前筛选状态;null 时不显示筛选控件(非片库来源)。
   final ShelfFilters? filters;
-
-  /// 电影+剧集混合网格才提供类型筛选。
   final bool typeFilterable;
-
-  /// 年份/流派可选值(从已加载条目聚合)。
   final List<int> yearOptions;
   final List<String> genreOptions;
-  final ValueChanged<ShelfFilters>? onFiltersChanged;
+  final void Function(ShelfFilters, {CatalogSort? sort, String? sortOrder})?
+  onFiltersChanged;
+  final ValueChanged<String?>? onToggleGenre;
+  final TextEditingController? searchController;
+  final ValueChanged<String>? onSearchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1065,6 +1203,7 @@ class _Header extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               )
             : null);
+    final isAsc = CatalogSort.normalizeSortOrder(sortOrder) == 'Ascending';
     return Padding(
       padding: EdgeInsets.fromLTRB(
         AppSpacing.page,
@@ -1075,8 +1214,6 @@ class _Header extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 刷新是偶尔才用的维护动作，收在标题行右端的安静图标里；
-          // 下方工具条只留筛选和排序两个浏览控件。
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -1091,6 +1228,7 @@ class _Header extends StatelessWidget {
                         l10n.browseLoaded(loadedCount!),
                         style: textTheme.bodySmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
@@ -1122,10 +1260,41 @@ class _Header extends StatelessWidget {
               if (filters != null && onFiltersChanged != null)
                 _FilterBar(
                   filters: filters!,
+                  sort: sort,
+                  sortOrder: sortOrder,
                   typeFilterable: typeFilterable,
                   yearOptions: yearOptions,
                   genreOptions: genreOptions,
                   onChanged: onFiltersChanged!,
+                ),
+              if (searchController != null && onSearchChanged != null)
+                SizedBox(
+                  width: 200,
+                  child: AppTextField(
+                    key: const Key('catalog-grid-search-field'),
+                    controller: searchController,
+                    placeholder: l10n.searchHint,
+                    onChanged: onSearchChanged,
+                    prefix: const Icon(
+                      AppIcons.search,
+                      fill: AppIcons.filled,
+                      size: 16,
+                    ),
+                    suffix: searchController!.text.isEmpty
+                        ? null
+                        : AppIconButton(
+                            tooltip: l10n.libraryFilterClear,
+                            onPressed: () {
+                              searchController!.clear();
+                              onSearchChanged!('');
+                            },
+                            icon: const Icon(
+                              AppIcons.close,
+                              fill: AppIcons.filled,
+                              size: 16,
+                            ),
+                          ),
+                  ),
                 ),
               if (serverOrder) Text(l10n.providerServerOrder),
               if (showSort) ...[
@@ -1133,10 +1302,9 @@ class _Header extends StatelessWidget {
                   key: CatalogKeys.sortBy,
                   tooltip: l10n.sortBy,
                   padding: EdgeInsets.zero,
-                  // 胶囊自己就是按钮外形,外层不再铺悬停底面。
                   style: const AppButtonStyle(hoverColor: Color(0x00000000)),
                   selected: sort,
-                  onSelected: onSort,
+                  onSelected: (selected) => onSort(selected),
                   items: [
                     for (final option in options)
                       AppMenuEntry<CatalogSort>(
@@ -1155,7 +1323,9 @@ class _Header extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            CupertinoIcons.sort_down,
+                            isAsc
+                                ? CupertinoIcons.sort_up
+                                : CupertinoIcons.sort_down,
                             size: 18,
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -1172,9 +1342,68 @@ class _Header extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (sort.supportsOrderToggle)
+                  _HeaderChip(
+                    child: AppTooltip(
+                      message: isAsc
+                          ? l10n.filterSortAscending
+                          : l10n.filterSortDescending,
+                      child: AppSurfaceAction(
+                        key: const Key('catalog-grid-sort-order'),
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: onToggleSortOrder,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          child: Icon(
+                            isAsc
+                                ? CupertinoIcons.sort_up
+                                : CupertinoIcons.sort_down,
+                            size: 16,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ],
           ),
+          if (filters != null &&
+              onToggleGenre != null &&
+              genreOptions.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.xs),
+                    child: OptionPill(
+                      key: const Key('catalog-grid-quick-genre-all'),
+                      label: l10n.libraryFilterAll,
+                      selected: filters!.genres.isEmpty,
+                      onPressed: () => onToggleGenre!(null),
+                    ),
+                  ),
+                  for (final genre in genreOptions)
+                    if (!filters!.genres.contains(genre))
+                      Padding(
+                        padding: const EdgeInsets.only(right: AppSpacing.xs),
+                        child: OptionPill(
+                          key: Key('catalog-grid-quick-genre-$genre'),
+                          label: genre,
+                          selected: false,
+                          onPressed: () => onToggleGenre!(genre),
+                        ),
+                      ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1199,8 +1428,6 @@ class _HeaderChipState extends State<_HeaderChip> {
     final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final active = widget.active;
-    // 浅色页面上用白底细边的胶囊,与选项面板里的胶囊同一种质感;
-    // 悬停时底面加深一档、描边加重,作为可点反馈。
     final rest = active
         ? scheme.primaryContainer
         : (light ? scheme.surfaceContainerLowest : scheme.surfaceContainerHigh);
@@ -1234,6 +1461,8 @@ class _HeaderChipState extends State<_HeaderChip> {
 class _FilterBar extends StatelessWidget {
   const _FilterBar({
     required this.filters,
+    required this.sort,
+    required this.sortOrder,
     required this.typeFilterable,
     required this.yearOptions,
     required this.genreOptions,
@@ -1241,10 +1470,13 @@ class _FilterBar extends StatelessWidget {
   });
 
   final ShelfFilters filters;
+  final CatalogSort sort;
+  final String sortOrder;
   final bool typeFilterable;
   final List<int> yearOptions;
   final List<String> genreOptions;
-  final ValueChanged<ShelfFilters> onChanged;
+  final void Function(ShelfFilters, {CatalogSort? sort, String? sortOrder})
+  onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1275,7 +1507,7 @@ class _FilterBar extends StatelessWidget {
       if (filters.genres.isNotEmpty)
         _activeChip(
           context,
-          label: filters.genres.join("、"),
+          label: filters.genres.join('、'),
           onDeleted: () => onChanged(filters.copyWith(genres: const [])),
         ),
     ];
@@ -1348,6 +1580,8 @@ class _FilterBar extends StatelessWidget {
                     AuthScope.of(context).client)
                 .capabilities,
         initial: filters,
+        sort: sort,
+        sortOrder: sortOrder,
         years: yearOptions,
         genres: genreOptions,
         loadGenres: () {
@@ -1364,7 +1598,9 @@ class _FilterBar extends StatelessWidget {
           return client.getLibraryGenres(parentId);
         },
         typeFilterable: typeFilterable,
-        onApply: (next, _) => onChanged(next),
+        onApply: (next, nextSort) => onChanged(next, sort: nextSort),
+        onApplyWithOrder: (next, nextSort, nextOrder) =>
+            onChanged(next, sort: nextSort, sortOrder: nextOrder),
       ),
     ),
   );

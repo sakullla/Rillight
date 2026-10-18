@@ -503,9 +503,7 @@ void main() {
       await tester.ensureVisible(premiereSort);
       await tester.tap(premiereSort);
       await settle(tester);
-      final sortOrderAfterPremiere = find.byKey(
-        const Key('flat-sort-order'),
-      );
+      final sortOrderAfterPremiere = find.byKey(const Key('flat-sort-order'));
       expect(sortOrderAfterPremiere, findsOneWidget);
       await tester.ensureVisible(sortOrderAfterPremiere);
       await tester.tap(sortOrderAfterPremiere);

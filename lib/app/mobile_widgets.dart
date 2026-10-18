@@ -645,7 +645,11 @@ double phonePosterCardLabelExtent(
 
 /// 片库海报文字区:单行加粗主标题 + 单行「年份 ★评分」元信息(剧集季数已移入封面左上角标)。
 double phoneLibraryPosterLabelExtent(BuildContext context) =>
-    phonePosterCardLabelExtent(context, titleLines: 1, includeSeasonLine: false);
+    phonePosterCardLabelExtent(
+      context,
+      titleLines: 1,
+      includeSeasonLine: false,
+    );
 
 /// Readable poster widths: 360dp uses two columns, 412dp uses three.
 /// System text scaling reduces columns instead of shrinking labels.

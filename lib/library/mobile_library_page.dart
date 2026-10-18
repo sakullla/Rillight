@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
@@ -6,6 +8,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -18,21 +21,26 @@ import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-String _sortLabel(AppLocalizations l10n, String sortBy) {
-  for (final sort in CatalogSort.values) {
-    if (sort.sortBy == sortBy) {
-      return sort.label(l10n);
-    }
-  }
-  return CatalogSort.initial.label(l10n);
-}
-
 bool _hasCriteria(BrowseController controller) {
   return controller.type != null ||
       controller.watch != null ||
       controller.year != null ||
       controller.genre != null ||
-      controller.sortBy != controller.defaultSort.sortBy;
+      controller.years.isNotEmpty ||
+      controller.genres.isNotEmpty ||
+      controller.searchTerm.isNotEmpty ||
+      controller.sortBy != controller.defaultSort.sortBy ||
+      controller.sortOrder != controller.defaultSort.sortOrder;
+}
+
+int _activeFilterDimensionCount(BrowseController controller) {
+  var count = 0;
+  if (controller.type != null) count++;
+  if (controller.watch != null) count++;
+  if (controller.years.isNotEmpty || controller.year != null) count++;
+  if (controller.genres.isNotEmpty || controller.genre != null) count++;
+  if (controller.searchTerm.isNotEmpty) count++;
+  return count;
 }
 
 class MobileLibraryPage extends StatefulWidget {
@@ -48,9 +56,13 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
   static const double _loadMoreThreshold = 600;
 
   final ScrollController _scroll = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _searchVisible = false;
   bool _nearEndLoadArmed = true;
   final Set<int> _years = {};
   final Set<String> _genres = {};
+  bool _genresRequested = false;
   BrowseController? _controller;
   AuthController? _auth;
   CatalogCache? _cache;
@@ -70,6 +82,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       return;
     }
     _controller = _newController()..load();
+    _prefetchLibraryGenres();
   }
 
   @override
@@ -82,7 +95,24 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
     _controller?.dispose();
     _years.clear();
     _genres.clear();
+    _genresRequested = false;
+    _searchController.clear();
+    _searchVisible = false;
     _controller = _newController()..load();
+    _prefetchLibraryGenres();
+  }
+
+  void _prefetchLibraryGenres() {
+    if (_genresRequested || _auth == null) return;
+    _genresRequested = true;
+    unawaited(() async {
+      try {
+        final result = await _auth!.client.getLibraryGenres(widget.viewId);
+        if (mounted && result.isNotEmpty) {
+          setState(() => _genres.addAll(result));
+        }
+      } catch (_) {}
+    }());
   }
 
   BrowseController _newController() {
@@ -113,6 +143,8 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
   void dispose() {
     _scroll.removeListener(_maybeLoadMore);
     _scroll.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _controller?.removeListener(_rememberDimensions);
     _controller?.dispose();
     super.dispose();
@@ -134,6 +166,12 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
           _genres.add(name);
         }
       }
+    }
+  }
+
+  void _scrollToTop() {
+    if (_scroll.hasClients) {
+      _scroll.jumpTo(0);
     }
   }
 
@@ -169,8 +207,30 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
   void _clearFilters() {
     final controller = _controller;
     if (controller != null) {
-      controller.filter(sortBy: controller.defaultSort.sortBy);
+      _searchController.clear();
+      setState(() => _searchVisible = false);
+      _scrollToTop();
+      controller.filter(
+        sortBy: controller.defaultSort.sortBy,
+        sortOrder: controller.defaultSort.sortOrder,
+        searchTerm: '',
+      );
     }
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searchVisible = !_searchVisible;
+      if (!_searchVisible && _searchController.text.isNotEmpty) {
+        _searchController.clear();
+        _scrollToTop();
+        _controller?.setSearchTerm('');
+      } else if (_searchVisible) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _searchFocusNode.requestFocus();
+        });
+      }
+    });
   }
 
   Future<void> _openFilters() async {
@@ -202,16 +262,31 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
           (value) => value.sortBy == controller.sortBy,
           orElse: () => controller.defaultSort,
         ),
+        sortOrder: controller.sortOrder,
         years: years,
         genres: genres,
         loadGenres: () => _auth!.client.getLibraryGenres(widget.viewId),
-        onApply: (filters, sort) => controller.filter(
-          type: filters.type.itemType,
-          watch: filters.watch.param,
-          years: filters.years,
-          genres: filters.genres,
-          sortBy: (sort ?? controller.defaultSort).sortBy,
-        ),
+        onApply: (filters, sort) {
+          _scrollToTop();
+          controller.filter(
+            type: filters.type.itemType,
+            watch: filters.watch.param,
+            years: filters.years,
+            genres: filters.genres,
+            sortBy: (sort ?? controller.defaultSort).sortBy,
+          );
+        },
+        onApplyWithOrder: (filters, sort, sortOrder) {
+          _scrollToTop();
+          controller.filter(
+            type: filters.type.itemType,
+            watch: filters.watch.param,
+            years: filters.years,
+            genres: filters.genres,
+            sortBy: (sort ?? controller.defaultSort).sortBy,
+            sortOrder: sortOrder,
+          );
+        },
       ),
     );
   }
@@ -239,7 +314,12 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       listenable: controller,
       builder: (context, _) {
         final active = _hasCriteria(controller);
+        final activeDims = _activeFilterDimensionCount(controller);
         final total = controller.totalCount;
+        final genreList = [..._genres]..sort();
+        final filterLabel = activeDims > 0
+            ? '${l10n.libraryFilter} $activeDims'
+            : l10n.libraryFilter;
         return CupertinoPageScaffold(
           navigationBar: PhoneTopBar(
             title: Text(
@@ -248,45 +328,246 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: AppButton.icon(
-              key: const Key('phone-library-filter'),
-              onPressed: _openFilters,
-              style: AppButtonStyle(
-                // 未筛选时是安静的文字按钮,不在顶栏边缘压一块色块;
-                // 有条件时才换成实底,一眼看出当前列表被筛过。
-                backgroundColor: active
-                    ? scheme.primary
-                    : const Color(0x00000000),
-                foregroundColor: active ? scheme.onPrimary : scheme.onSurface,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(48, 44),
-                shape: const StadiumBorder(),
-                textStyle: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppIconButton(
+                  key: const Key('phone-library-search-toggle'),
+                  tooltip: l10n.search,
+                  onPressed: _toggleSearch,
+                  icon: Icon(
+                    AppIcons.search,
+                    fill: (_searchVisible || controller.searchTerm.isNotEmpty)
+                        ? AppIcons.filled
+                        : AppIcons.outline,
+                    size: 18,
+                    color: (_searchVisible || controller.searchTerm.isNotEmpty)
+                        ? scheme.primary
+                        : scheme.onSurface,
+                  ),
                 ),
-              ),
-              icon: Icon(
-                AppIcons.filter,
-                fill: active ? AppIcons.filled : AppIcons.outline,
-                size: 17,
-              ),
-              label: Text(l10n.libraryFilter),
-              variant: AppButtonVariant.tinted,
+                const SizedBox(width: 4),
+                AppButton.icon(
+                  key: const Key('phone-library-filter'),
+                  onPressed: _openFilters,
+                  style: AppButtonStyle(
+                    backgroundColor: active
+                        ? scheme.primary
+                        : const Color(0x00000000),
+                    foregroundColor: active
+                        ? scheme.onPrimary
+                        : scheme.onSurface,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(48, 44),
+                    shape: const StadiumBorder(),
+                    textStyle: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  icon: Icon(
+                    AppIcons.filter,
+                    fill: active ? AppIcons.filled : AppIcons.outline,
+                    size: 17,
+                  ),
+                  label: Text(filterLabel),
+                  variant: AppButtonVariant.tinted,
+                ),
+              ],
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (total != null && total > 0)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.xs,
-                    AppSpacing.md,
-                    0,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final gridWidth = constraints.maxWidth - AppSpacing.md * 2;
+              return MediaImageScrollListener(
+                child: AppRefresh(
+                  onRefresh: controller.load,
+                  child: CustomScrollView(
+                    controller: _scroll,
+                    key: PageStorageKey('library-${widget.viewId}'),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _PhoneQuickHeader(
+                          controller: controller,
+                          total: total,
+                          genres: genreList,
+                          searchVisible:
+                              _searchVisible ||
+                              controller.searchTerm.isNotEmpty,
+                          searchController: _searchController,
+                          searchFocusNode: _searchFocusNode,
+                          onSearchChanged: (value) {
+                            _scrollToTop();
+                            controller.setSearchTerm(value);
+                          },
+                          onClear: _clearFilters,
+                          onSortSelected: (sort) {
+                            _scrollToTop();
+                            controller.selectSort(sort);
+                          },
+                          onToggleSortOrder: () {
+                            _scrollToTop();
+                            controller.toggleSortOrder();
+                          },
+                          onToggleGenre: (genre) {
+                            _scrollToTop();
+                            controller.toggleGenre(genre);
+                          },
+                        ),
+                      ),
+                      if (controller.loading && controller.items.isEmpty)
+                        const SliverPadding(
+                          padding: EdgeInsets.all(AppSpacing.md),
+                          sliver: SliverToBoxAdapter(child: _LibrarySkeleton()),
+                        )
+                      else
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.xs,
+                            AppSpacing.md,
+                            AppSpacing.md +
+                                MediaQuery.paddingOf(context).bottom,
+                          ),
+                          sliver: SliverMainAxisGroup(
+                            slivers: [
+                              if (controller.loadingMore ||
+                                  (controller.loading &&
+                                      controller.items.isNotEmpty))
+                                const SliverToBoxAdapter(
+                                  child: AppLoadingBar(),
+                                ),
+                              if (controller.error != null)
+                                SliverToBoxAdapter(
+                                  child: MobileFailureState(
+                                    message: catalogFailureMessage(
+                                      l10n,
+                                      controller.error!,
+                                    ),
+                                    onRetry: () => controller.load(
+                                      more:
+                                          controller.items.isNotEmpty &&
+                                          controller.hasMore,
+                                    ),
+                                  ),
+                                ),
+                              if (!controller.loading &&
+                                  controller.error == null &&
+                                  controller.items.isEmpty)
+                                SliverToBoxAdapter(
+                                  child: MobileEmptyState(
+                                    message: l10n.mobileEmpty,
+                                    actionLabel: _hasCriteria(controller)
+                                        ? l10n.libraryFilterClear
+                                        : l10n.mobileRefresh,
+                                    onAction: _hasCriteria(controller)
+                                        ? _clearFilters
+                                        : () => controller.load(),
+                                  ),
+                                ),
+                              if (controller.items.isNotEmpty)
+                                _PhonePosterSliver(
+                                  items: controller.items,
+                                  gridWidth: gridWidth,
+                                ),
+                              if (controller.hasMore &&
+                                  controller.error == null)
+                                SliverToBoxAdapter(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(
+                                      top: AppSpacing.md,
+                                    ),
+                                    child: Align(
+                                      alignment: Alignment.center,
+                                      child: AppButton(
+                                        key: const Key('phone-library-more'),
+                                        style: const AppButtonStyle(
+                                          minimumSize: Size(48, 48),
+                                        ),
+                                        onPressed:
+                                            controller.loading ||
+                                                controller.loadingMore
+                                            ? null
+                                            : () => controller.load(more: true),
+                                        variant: AppButtonVariant.tinted,
+                                        child: Text(l10n.mobileLoadMore),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PhoneQuickHeader extends StatelessWidget {
+  const _PhoneQuickHeader({
+    required this.controller,
+    required this.total,
+    required this.genres,
+    required this.searchVisible,
+    required this.searchController,
+    required this.searchFocusNode,
+    required this.onSearchChanged,
+    required this.onClear,
+    required this.onSortSelected,
+    required this.onToggleSortOrder,
+    required this.onToggleGenre,
+  });
+
+  final BrowseController controller;
+  final int? total;
+  final List<String> genres;
+  final bool searchVisible;
+  final TextEditingController searchController;
+  final FocusNode searchFocusNode;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClear;
+  final ValueChanged<CatalogSort> onSortSelected;
+  final VoidCallback onToggleSortOrder;
+  final ValueChanged<String?> onToggleGenre;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final sortOptions = CatalogSort.optionsFor(
+      controller.items,
+      capabilities: controller.auth.client.capabilities,
+    );
+    final currentSort = controller.currentSort;
+    final isAsc =
+        CatalogSort.normalizeSortOrder(controller.sortOrder) == 'Ascending';
+    final hasActive = _hasCriteria(controller);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+            4,
+          ),
+          child: Row(
+            children: [
+              if (total != null && total! > 0)
+                Expanded(
                   child: Text(
-                    l10n.browseLoaded(total),
+                    l10n.browseLoaded(total!),
                     key: const Key('phone-library-count'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -295,162 +576,145 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
-                ),
-              _ActiveFilters(controller: controller, onClear: _clearFilters),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final gridWidth = constraints.maxWidth - AppSpacing.md * 2;
-                    return MediaImageScrollListener(
-                      child: AppRefresh(
-                        onRefresh: controller.load,
-                        child: CustomScrollView(
-                          controller: _scroll,
-                          key: PageStorageKey('library-${widget.viewId}'),
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          scrollCacheExtent: const ScrollCacheExtent.viewport(
-                            0.5,
-                          ),
-                          slivers: [
-                            if (controller.loading && controller.items.isEmpty)
-                              const SliverPadding(
-                                padding: EdgeInsets.all(AppSpacing.md),
-                                sliver: SliverToBoxAdapter(
-                                  child: _LibrarySkeleton(),
-                                ),
-                              )
-                            else
-                              SliverPadding(
-                                padding: EdgeInsets.fromLTRB(
-                                  AppSpacing.md,
-                                  AppSpacing.xs,
-                                  AppSpacing.md,
-                                  AppSpacing.md +
-                                      MediaQuery.paddingOf(context).bottom,
-                                ),
-                                sliver: SliverMainAxisGroup(
-                                  slivers: [
-                                    if (controller.loadingMore ||
-                                        (controller.loading &&
-                                            controller.items.isNotEmpty))
-                                      const SliverToBoxAdapter(
-                                        child: AppLoadingBar(),
-                                      ),
-                                    if (controller.error != null)
-                                      SliverToBoxAdapter(
-                                        child: MobileFailureState(
-                                          message: catalogFailureMessage(
-                                            l10n,
-                                            controller.error!,
-                                          ),
-                                          onRetry: () => controller.load(
-                                            more:
-                                                controller.items.isNotEmpty &&
-                                                controller.hasMore,
-                                          ),
-                                        ),
-                                      ),
-                                    if (!controller.loading &&
-                                        controller.error == null &&
-                                        controller.items.isEmpty)
-                                      SliverToBoxAdapter(
-                                        child: MobileEmptyState(
-                                          message: l10n.mobileEmpty,
-                                          actionLabel: _hasCriteria(controller)
-                                              ? l10n.libraryFilterClear
-                                              : l10n.mobileRefresh,
-                                          onAction: _hasCriteria(controller)
-                                              ? _clearFilters
-                                              : () => controller.load(),
-                                        ),
-                                      ),
-                                    if (controller.items.isNotEmpty)
-                                      _PhonePosterSliver(
-                                        items: controller.items,
-                                        gridWidth: gridWidth,
-                                      ),
-                                    if (controller.hasMore &&
-                                        controller.error == null)
-                                      SliverToBoxAdapter(
-                                        child: Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: AppSpacing.md,
-                                          ),
-                                          child: Align(
-                                            alignment: Alignment.center,
-                                            child: AppButton(
-                                              key: const Key(
-                                                'phone-library-more',
-                                              ),
-                                              style: AppButtonStyle(
-                                                minimumSize: const Size(48, 48),
-                                              ),
-                                              onPressed:
-                                                  controller.loading ||
-                                                      controller.loadingMore
-                                                  ? null
-                                                  : () => controller.load(
-                                                      more: true,
-                                                    ),
-                                              variant: AppButtonVariant.tinted,
-                                              child: Text(l10n.mobileLoadMore),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                          ],
+                )
+              else
+                const Spacer(),
+              AppMenuButton<CatalogSort>(
+                key: const Key('phone-library-quick-sort'),
+                tooltip: l10n.sortBy,
+                padding: EdgeInsets.zero,
+                selected: currentSort,
+                onSelected: onSortSelected,
+                items: [
+                  for (final option in sortOptions)
+                    AppMenuEntry<CatalogSort>(
+                      value: option,
+                      child: Text(option.label(l10n)),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        CupertinoIcons.sort_down,
+                        size: 15,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        currentSort.label(l10n),
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: scheme.onSurface,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
               ),
+              if (currentSort.supportsOrderToggle)
+                AppIconButton(
+                  key: const Key('phone-library-sort-order'),
+                  tooltip: isAsc
+                      ? l10n.filterSortAscending
+                      : l10n.filterSortDescending,
+                  onPressed: onToggleSortOrder,
+                  icon: Icon(
+                    isAsc ? CupertinoIcons.sort_up : CupertinoIcons.sort_down,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              if (hasActive && controller.items.isNotEmpty)
+                AppButton(
+                  key: const Key('phone-library-reset'),
+                  style: const AppButtonStyle(
+                    minimumSize: Size(44, 32),
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                  onPressed: onClear,
+                  variant: AppButtonVariant.plain,
+                  child: Text(l10n.libraryFilterClear),
+                ),
             ],
           ),
-        );
-      },
+        ),
+        if (searchVisible)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              6,
+            ),
+            child: AppTextField(
+              key: const Key('phone-library-search-field'),
+              controller: searchController,
+              focusNode: searchFocusNode,
+              placeholder: l10n.searchHint,
+              onChanged: onSearchChanged,
+              prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
+              suffix: searchController.text.isEmpty
+                  ? null
+                  : AppIconButton(
+                      tooltip: l10n.libraryFilterClear,
+                      onPressed: () {
+                        searchController.clear();
+                        onSearchChanged('');
+                      },
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                    ),
+            ),
+          ),
+        _ActiveAndGenreQuickBar(
+          controller: controller,
+          genres: genres,
+          onClear: onClear,
+          onToggleGenre: onToggleGenre,
+        ),
+      ],
     );
   }
 }
 
-class _ActiveFilters extends StatelessWidget {
-  const _ActiveFilters({required this.controller, required this.onClear});
+class _ActiveAndGenreQuickBar extends StatelessWidget {
+  const _ActiveAndGenreQuickBar({
+    required this.controller,
+    required this.genres,
+    required this.onClear,
+    required this.onToggleGenre,
+  });
 
   final BrowseController controller;
+  final List<String> genres;
   final VoidCallback onClear;
+  final ValueChanged<String?> onToggleGenre;
 
   Widget _chip(BuildContext context, {required Key key, required String text}) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.xs),
-      child: _chipBody(theme, scheme, key: key, text: text),
-    );
-  }
-
-  Widget _chipBody(
-    AppUiThemeData theme,
-    AppColorScheme scheme, {
-    required Key key,
-    required String text,
-  }) {
-    return Container(
-      key: key,
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        maxLines: 1,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: scheme.onPrimaryContainer,
-          fontWeight: FontWeight.w600,
+      child: Container(
+        key: key,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.primaryContainer,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: scheme.onPrimaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -459,22 +723,16 @@ class _ActiveFilters extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (!_hasCriteria(controller)) {
+    final hasActive = _hasCriteria(controller);
+    if (!hasActive && genres.isEmpty) {
       return const SizedBox.shrink();
     }
-    // 已选条件排成一行横滑胶囊,固定在标题下方,不随海报滚走。
     return SizedBox(
       height: 44,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(AppSpacing.md, 4, AppSpacing.md, 8),
         children: [
-          if (controller.sortBy != controller.defaultSort.sortBy)
-            _chip(
-              context,
-              key: const Key('phone-library-active-sort'),
-              text: _sortLabel(l10n, controller.sortBy),
-            ),
           if (controller.type == 'Movie')
             _chip(
               context,
@@ -498,32 +756,41 @@ class _ActiveFilters extends StatelessWidget {
                   )
                   .label,
             ),
-          if (controller.year != null)
+          if (controller.year != null || controller.years.isNotEmpty)
             _chip(
               context,
               key: const Key('phone-library-active-year'),
               text: controller.years.join('、'),
             ),
-          if (controller.genre != null)
+          if (controller.genre != null || controller.genres.isNotEmpty)
             _chip(
               context,
               key: const Key('phone-library-active-genre'),
               text: controller.genres.join('、'),
             ),
-          if (_hasCriteria(controller) && controller.items.isNotEmpty)
-            AppButton(
-              key: const Key('phone-library-reset'),
-              style: AppButtonStyle(
-                minimumSize: const Size(44, 32),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
+          if (genres.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.xs),
+              child: OptionPill(
+                key: const Key('phone-library-quick-genre-all'),
+                label: l10n.libraryFilterAll,
+                selected: controller.genres.isEmpty && controller.genre == null,
+                onPressed: () => onToggleGenre(null),
               ),
-              onPressed: onClear,
-              variant: AppButtonVariant.plain,
-              child: Text(l10n.libraryFilterClear),
             ),
+            for (final genre in genres)
+              if (!controller.genres.contains(genre) &&
+                  controller.genre != genre)
+                Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.xs),
+                  child: OptionPill(
+                    key: Key('phone-library-quick-genre-$genre'),
+                    label: genre,
+                    selected: false,
+                    onPressed: () => onToggleGenre(genre),
+                  ),
+                ),
+          ],
         ],
       ),
     );
@@ -589,9 +856,21 @@ class _LibrarySkeleton extends StatelessWidget {
   }
 }
 
-/// Narrow phones use two readable columns; larger phones fit three.
-int phoneLibraryColumnCount(double width, {double textScale = 1}) =>
-    mobileGridColumnCount(width, textScale: textScale);
+/// Standard portrait phones (360dp–430dp, textScale < 1.35) use 3 dense columns;
+/// wider screens use 4–6 columns; extreme text scaling (>= 1.35) degrades to 2.
+int phoneLibraryColumnCount(double width, {double textScale = 1}) {
+  if (textScale >= 1.35) {
+    return ((width + AppSpacing.sm) / (128 * textScale.clamp(1.0, 2.0)))
+        .floor()
+        .clamp(1, 6);
+  }
+  final effectiveWidth = width + AppSpacing.md * 2;
+  if (effectiveWidth < 340) return 2;
+  if (effectiveWidth <= 460) return 3;
+  if (effectiveWidth <= 640) return 4;
+  if (effectiveWidth <= 840) return 5;
+  return 6;
+}
 
 class _PhonePosterSliver extends StatelessWidget {
   const _PhonePosterSliver({required this.items, required this.gridWidth});
@@ -607,14 +886,7 @@ class _PhonePosterSliver extends StatelessWidget {
       textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
     );
     final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
-    // 季数行只有剧集才有:纯电影片库不预留这一行,行与行之间不再空出一截。
-    final label = phonePosterCardLabelExtent(
-      context,
-      titleLines: 2,
-      includeSeasonLine: items.any(
-        (item) => item.isSeries && (item.childCount ?? 0) > 0,
-      ),
-    );
+    final label = phoneLibraryPosterLabelExtent(context);
     final imageWidth = catalogPosterMaxWidth(
       cellWidth,
       MediaQuery.devicePixelRatioOf(context),
@@ -622,7 +894,6 @@ class _PhonePosterSliver extends StatelessWidget {
     return SliverGrid(
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns,
-        // 文字区已按两行标题预留高度,行距不必再加大。
         mainAxisSpacing: AppSpacing.sm,
         crossAxisSpacing: spacing,
         childAspectRatio: cellWidth / (cellWidth * 1.5 + label),
@@ -640,12 +911,10 @@ class _PhonePosterDelegate extends SliverChildBuilderDelegate {
           return PhoneGridPosterCard(
             key: ValueKey('phone-library-poster-${item.id}'),
             item: item,
-            // 与首页 rail 同 ShellRoute 子树,同条目会重复注册 Hero 标签;
-            // 与搜索页对齐关闭飞行,代价是片库→详情无 hero 动画(可接受)。
             hero: false,
             imageMaxWidth: imageMaxWidth,
-            titleMaxLines: 2,
-            seasonCountCaption: true,
+            titleMaxLines: 1,
+            seasonCountCaption: false,
             onTap: item.isPhotoAlbum
                 ? () => context.push(
                     AppRoutes.shelfItems(

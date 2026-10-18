@@ -204,9 +204,8 @@ class _PosterTopLeftBadges extends StatelessWidget {
                   border: label == watchedText
                       ? null
                       : Border.all(
-                          color: const Color(
-                            0xffffffff,
-                          ).withValues(alpha: 0.16),
+                          color: const Color(0xffffffff)
+                              .withValues(alpha: 0.16),
                           width: 0.6,
                         ),
                 ),
@@ -281,11 +280,7 @@ class _PosterYearRatingMeta extends StatelessWidget {
                 color: scheme.primary,
               ),
               const SizedBox(width: 2),
-              Text(
-                rating.toStringAsFixed(1),
-                maxLines: 1,
-                style: metaStyle,
-              ),
+              Text(rating.toStringAsFixed(1), maxLines: 1, style: metaStyle),
             ],
           ],
         ),

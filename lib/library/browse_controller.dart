@@ -43,8 +43,7 @@ class BrowseController extends ChangeNotifier {
   CatalogSort get defaultSort =>
       CatalogSort.initialFor(auth.client.capabilities);
 
-  CatalogSort get currentSort =>
-      CatalogSort.tryBySortBy(sortBy) ?? defaultSort;
+  CatalogSort get currentSort => CatalogSort.tryBySortBy(sortBy) ?? defaultSort;
 
   String get sortOrder {
     final override = _sortOrderOverride;

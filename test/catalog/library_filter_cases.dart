@@ -500,6 +500,32 @@ void main() {
       );
       expect(query, contains('Years=2024,2020'));
       expect(query, contains('Genres=SciFi|Comedy'));
+
+      // Sort order toggle & in-library keyword filter on desktop ShelfGridPage.
+      await tester.tap(find.byKey(const Key('catalog-grid-sort-order')));
+      await settle(tester);
+      expect(
+        server.requests.lastWhere(
+          (request) =>
+              request.contains('/Users/') && request.contains('/Items?'),
+        ),
+        contains('SortOrder=Ascending'),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('catalog-grid-search-field')),
+        '科幻',
+      );
+      await settle(tester);
+      expect(
+        Uri.decodeQueryComponent(
+          server.requests.lastWhere(
+            (request) =>
+                request.contains('/Users/') && request.contains('/Items?'),
+          ),
+        ),
+        contains('SearchTerm=科幻'),
+      );
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

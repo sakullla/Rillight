@@ -134,7 +134,11 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   void _apply() {
     if (widget.onApplyWithOrder != null) {
-      widget.onApplyWithOrder!(_draft, _sort, _sort == null ? null : _sortOrder);
+      widget.onApplyWithOrder!(
+        _draft,
+        _sort,
+        _sort == null ? null : _sortOrder,
+      );
     } else {
       widget.onApply(_draft, _sort);
     }
@@ -530,9 +534,8 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       for (final year in _draft.years)
         _summary(
           '$year',
-          () => _draft = _draft.copyWith(
-            years: [..._draft.years]..remove(year),
-          ),
+          () =>
+              _draft = _draft.copyWith(years: [..._draft.years]..remove(year)),
         ),
       for (final genre in _draft.genres)
         _summary(
@@ -621,7 +624,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
           Icon(icon, size: 16, color: scheme.primary),
           const SizedBox(width: 6),
           Text(
-            title,
+            '$title ·',
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: scheme.onSurface,
@@ -672,9 +675,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     final canToggleOrder = current != null && current.supportsOrderToggle;
     final isAsc = CatalogSort.normalizeSortOrder(_sortOrder) == 'Ascending';
     final orderLabel = isAsc ? l.filterSortAscending : l.filterSortDescending;
-    final orderIcon = isAsc
-        ? CupertinoIcons.sort_up
-        : CupertinoIcons.sort_down;
+    final orderIcon = isAsc ? CupertinoIcons.sort_up : CupertinoIcons.sort_down;
 
     final Widget? orderButton = canToggleOrder
         ? (widget.television
@@ -745,9 +746,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 label: value.label,
                 selected: _draft.type == value,
                 autofocus:
-                    widget.television &&
-                    _sort == null &&
-                    _draft.type == value,
+                    widget.television && _sort == null && _draft.type == value,
                 onPressed: () => _draft = _draft.copyWith(type: value),
               ),
           ],
@@ -858,15 +857,16 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     AppLocalizations l,
     String query,
   ) {
-    final years = (query.isNotEmpty
-            ? (<int>{
-                ...widget.years,
-                ..._draft.years,
-                for (var y = DateTime.now().year; y >= 1900; y--) y,
-              }.toList()..sort((a, b) => b.compareTo(a)))
-            : _visibleYears())
-        .where((y) => query.isEmpty || '$y'.contains(query))
-        .toList();
+    final years =
+        (query.isNotEmpty
+                ? (<int>{
+                    ...widget.years,
+                    ..._draft.years,
+                    for (var y = DateTime.now().year; y >= 1900; y--) y,
+                  }.toList()..sort((a, b) => b.compareTo(a)))
+                : _visibleYears())
+            .where((y) => query.isEmpty || '$y'.contains(query))
+            .toList();
 
     return Column(
       key: _key('year-section'),
