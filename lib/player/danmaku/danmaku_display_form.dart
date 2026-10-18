@@ -75,7 +75,7 @@ class _DanmakuPreview extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: const Color(0xff161a20),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadii.md),
       ),
       child: Stack(
         children: [
@@ -564,11 +564,10 @@ class _TypeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final selectedFill = scheme.onSurface.withValues(alpha: 0.92);
     final idleFill = scheme.onSurface.withValues(alpha: 0.08);
     return Container(
       decoration: BoxDecoration(
-        color: selected ? selectedFill : idleFill,
+        color: selected ? scheme.primary : idleFill,
         borderRadius: BorderRadius.circular(999),
       ),
       child: AppSurfaceAction(
@@ -582,7 +581,7 @@ class _TypeChip extends StatelessWidget {
             style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
               color: selected
-                  ? scheme.surface
+                  ? scheme.onPrimary
                   : scheme.onSurface.withValues(alpha: 0.72),
             ),
           ),
@@ -868,7 +867,7 @@ class _HudChoiceBar<T extends Object> extends StatelessWidget {
                 child: Container(
                   decoration: BoxDecoration(
                     color: segment.value == value
-                        ? scheme.onSurface.withValues(alpha: 0.92)
+                        ? scheme.primary
                         : const Color(0x00000000),
                     borderRadius: BorderRadius.circular(999),
                   ),
@@ -876,7 +875,7 @@ class _HudChoiceBar<T extends Object> extends StatelessWidget {
                     onTap: () => onChanged(segment.value),
                     borderRadius: BorderRadius.circular(999),
                     child: SizedBox(
-                      height: 28,
+                      height: AppControlHeight.sm,
                       child: Center(
                         child: DefaultTextStyle(
                           style:
@@ -886,7 +885,7 @@ class _HudChoiceBar<T extends Object> extends StatelessWidget {
                                         ? FontWeight.w600
                                         : FontWeight.w500,
                                     color: segment.value == value
-                                        ? scheme.surface
+                                        ? scheme.onPrimary
                                         : scheme.onSurface.withValues(
                                             alpha: 0.64,
                                           ),

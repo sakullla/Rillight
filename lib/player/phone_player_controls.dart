@@ -733,7 +733,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           fit: BoxFit.scaleDown,
           child: Text(
             playerRateLabel(c.playbackRate),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
           ),
         ),
         action: () => _openMore(section: 'speed'),
@@ -763,7 +763,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (var index = 0; index < buttons.length; index++) ...[
-          if (index > 0) const SizedBox(width: 2),
+          if (index > 0) const SizedBox(width: AppSpacing.xxs),
           buttons[index],
         ],
       ],
@@ -985,25 +985,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                         icon: const Icon(AppIcons.back, fill: AppIcons.filled),
                       ),
                     Expanded(
-                      child: Text(
-                        switch (section) {
-                          'skip' => l.playerSkipSettings,
-                          'speed' => l.mobileSpeed,
-                          'quality' => l.quality,
-                          'tracks' =>
-                            c.canSwitchAudioTrack
-                                ? l.mobileTracks
-                                : l.subtitleTrack,
-                          'danmaku' => l.danmaku,
-                          'source' => l.mobileSource,
-                          'picture' => l.playerPictureSettings,
-                          'output' => l.playbackOutputSection,
-                          _ => l.mobileMore,
-                        },
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      child: Text(switch (section) {
+                        'skip' => l.playerSkipSettings,
+                        'speed' => l.mobileSpeed,
+                        'quality' => l.quality,
+                        'tracks' =>
+                          c.canSwitchAudioTrack
+                              ? l.mobileTracks
+                              : l.subtitleTrack,
+                        'danmaku' => l.danmaku,
+                        'source' => l.mobileSource,
+                        'picture' => l.playerPictureSettings,
+                        'output' => l.playbackOutputSection,
+                        _ => l.mobileMore,
+                      }, style: theme.textTheme.titleLarge),
                     ),
                     // 长列表分区显示条目数,让用户对规模有预期。
                     if (switch (section) {
@@ -1742,11 +1737,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     decoration: BoxDecoration(
                       color: AppUiTheme.of(context).colorScheme.surface,
                       borderRadius: const BorderRadius.horizontal(
-                        left: Radius.circular(20),
+                        left: Radius.circular(AppRadii.overlay),
                       ),
                       border: Border.all(
-                        color: AppUiTheme.of(context).colorScheme.primary
-                            .withValues(alpha: .55),
+                        color: AppEdge.of(
+                          AppUiTheme.of(context).brightness,
+                          strong: true,
+                        ),
                       ),
                     ),
                     child: builder(context),

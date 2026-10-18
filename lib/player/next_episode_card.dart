@@ -52,7 +52,7 @@ class NextEpisodeCard extends StatelessWidget {
             : 440.0;
         final showThumb = width >= 310;
         const ink = Color(0xEB151822);
-        final radius = BorderRadius.circular(16);
+        final radius = BorderRadius.circular(AppRadii.lg);
         return SizedBox(
           width: width,
           child: Container(
@@ -80,7 +80,7 @@ class NextEpisodeCard extends StatelessWidget {
                       if (showThumb) ...[
                         DecoratedBox(
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(AppRadii.md),
                             border: Border.all(
                               color: const Color(0x24FFFFFF),
                               width: 0.8,
@@ -88,7 +88,7 @@ class NextEpisodeCard extends StatelessWidget {
                           ),
                           position: DecorationPosition.foreground,
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(AppRadii.md),
                             child: MediaImage(
                               item: offer.item,
                               width: 76,
@@ -131,7 +131,6 @@ class NextEpisodeCard extends StatelessWidget {
                                       color: const Color(0xCCFFFFFF),
                                       fontSize: 11.5,
                                       height: 1.2,
-                                      fontWeight: FontWeight.w600,
                                       fontFeatures: const [
                                         FontFeature.tabularFigures(),
                                       ],
@@ -149,7 +148,7 @@ class NextEpisodeCard extends StatelessWidget {
                                 color: CupertinoColors.white,
                                 fontSize: 14,
                                 height: 1.25,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
@@ -168,7 +167,7 @@ class NextEpisodeCard extends StatelessWidget {
                           shape: const StadiumBorder(),
                           textStyle: const TextStyle(
                             fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                         icon: const Icon(

@@ -102,10 +102,7 @@ class PlayerEpisodeBrowser extends StatelessWidget {
                       (tv
                               ? theme.textTheme.headlineSmall
                               : theme.textTheme.titleMedium)
-                          ?.copyWith(
-                            color: scheme.onSurface,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          ?.copyWith(color: scheme.onSurface),
                 ),
               ),
               if (!tv && seasons.length > 1)
@@ -294,7 +291,6 @@ class _SeasonMenu extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: scheme.onSurface,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
