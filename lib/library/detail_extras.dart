@@ -103,16 +103,20 @@ class DetailGenreRow extends StatelessWidget {
               child: AppSurfaceAction(
                 borderRadius: BorderRadius.circular(999),
                 onTap: () => openGenreShelf(context, item, genre),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: 5,
-                  ),
-                  child: Text(
-                    genre,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: .9),
-                      fontWeight: FontWeight.w600,
+                child: SizedBox(
+                  height: AppControlHeight.sm,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                    ),
+                    child: Align(
+                      widthFactor: 1,
+                      child: Text(
+                        genre,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: scheme.onSurface,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -138,7 +142,7 @@ class DetailGenreRow extends StatelessWidget {
   }
 }
 
-/// 头部流派胶囊:细描边圆角胶囊,悬停时底面加深一档,提示可以点开流派片库。
+/// 头部流派胶囊:主色淡染的安静胶囊 + 发丝描边,悬停时底面加深一档,提示可以点开流派片库。
 class _GenrePill extends StatefulWidget {
   const _GenrePill({required this.child});
 
@@ -154,7 +158,6 @@ class _GenrePillState extends State<_GenrePill> {
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final light = scheme.brightness == Brightness.light;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -162,14 +165,10 @@ class _GenrePillState extends State<_GenrePill> {
         duration: AppMotion.durationOf(context, AppMotion.fast),
         curve: AppMotion.standard,
         decoration: ShapeDecoration(
-          color: scheme.onSurface.withValues(
-            alpha: _hovered ? (light ? .08 : .14) : (light ? .03 : .07),
-          ),
+          color: scheme.primaryContainer.withValues(alpha: _hovered ? .5 : .32),
           shape: StadiumBorder(
             side: BorderSide(
-              color: scheme.onSurface.withValues(
-                alpha: _hovered ? .22 : (light ? .12 : .16),
-              ),
+              color: AppEdge.of(scheme.brightness, strong: _hovered),
             ),
           ),
         ),
@@ -295,10 +294,8 @@ class _ExternalLinkButton extends StatelessWidget {
         ],
         Text(
           name,
-          style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
-            color: scheme.onSurfaceVariant,
-            fontWeight: FontWeight.w600,
-          ),
+          style: AppUiTheme.of(context).textTheme.labelLarge
+              ?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
     );

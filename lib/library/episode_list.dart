@@ -85,14 +85,13 @@ class EpisodeGridMetrics {
 }
 
 abstract final class _EpisodeCardStyles {
-  static TextStyle? title(AppUiThemeData theme) =>
-      theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600);
+  static TextStyle? title(AppUiThemeData theme) => theme.textTheme.titleSmall;
 
   static TextStyle? meta(AppUiThemeData theme) => theme.textTheme.bodySmall
       ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
 
-  static TextStyle? overview(AppUiThemeData theme) => theme.textTheme.bodySmall
-      ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4);
+  static TextStyle? overview(AppUiThemeData theme) => theme.textTheme.bodyMedium
+      ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.5);
 }
 
 /// 分集分区:响应式卡片网格(16:9 剧照 + 「N. 标题」+ 播出日期 + 两行简介),
@@ -266,9 +265,7 @@ class _EpisodeListState extends State<EpisodeList> {
                         children: [
                           Text(
                             l10n.episodesRow,
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: theme.textTheme.titleLarge,
                           ),
                           if (summary != null && summary.isNotEmpty)
                             Padding(
@@ -498,7 +495,10 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final premiere = item.premiereDate;
     final overview = plainOverview(item.overview);
     final revealed = _hovered || _focused;
-    final fill = revealed
+    // 当前集:主色淡染底 + 左缘主色细条,不用描边。悬停只在非当前集上加浅底。
+    final fill = selected
+        ? scheme.primaryContainer.withValues(alpha: 0.5)
+        : revealed
         ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
         : const Color(0x00000000);
     return MouseRegion(
@@ -510,71 +510,86 @@ class _EpisodeRowState extends State<EpisodeRow> {
           borderRadius: BorderRadius.circular(AppRadii.lg),
         ),
         clipBehavior: Clip.antiAlias,
-        child: AppSurfaceAction(
-          key: CatalogKeys.episode(item.id),
-          onTap: widget.onTap,
-          onFocusChange: (value) => setState(() => _focused = value),
-          onSecondaryTapDown: (details) {
-            unawaited(_openMenu(context, details.globalPosition));
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(EpisodeGridMetrics.inset),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: _EpisodeThumb(
-                    item: item,
-                    runtime: runtime,
-                    hovered: revealed,
-                    selected: selected,
-                    playLabel: playLabel,
-                    onPlay: widget.onPlay,
-                    played: played,
-                    busyPlayed: widget.busyPlayed,
-                    onTogglePlayed: widget.onTogglePlayed,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _EpisodeCardStyles.title(theme)?.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    color: selected
-                        ? scheme.primary
-                        : played
-                        ? scheme.onSurfaceVariant
-                        : scheme.onSurface,
-                  ),
-                ),
-
-                if (premiere != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    formatDateYmd(premiere),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _EpisodeCardStyles.meta(theme)?.copyWith(
-                      fontFeatures: const [FontFeature.tabularFigures()],
+        child: Stack(
+          children: [
+            AppSurfaceAction(
+              key: CatalogKeys.episode(item.id),
+              onTap: widget.onTap,
+              onFocusChange: (value) => setState(() => _focused = value),
+              onSecondaryTapDown: (details) {
+                unawaited(_openMenu(context, details.globalPosition));
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(EpisodeGridMetrics.inset),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: _EpisodeThumb(
+                        item: item,
+                        runtime: runtime,
+                        hovered: revealed,
+                        selected: selected,
+                        playLabel: playLabel,
+                        onPlay: widget.onPlay,
+                        played: played,
+                        busyPlayed: widget.busyPlayed,
+                        onTogglePlayed: widget.onTogglePlayed,
+                      ),
                     ),
-                  ),
-                ],
-                if (overview != null && overview.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    overview,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: _EpisodeCardStyles.overview(theme),
-                  ),
-                ],
-              ],
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _EpisodeCardStyles.title(theme)?.copyWith(
+                        fontWeight: selected ? FontWeight.w700 : null,
+                        color: played && !selected
+                            ? scheme.onSurfaceVariant
+                            : scheme.onSurface,
+                      ),
+                    ),
+
+                    if (premiere != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        formatDateYmd(premiere),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _EpisodeCardStyles.meta(theme)?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                    if (overview != null && overview.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        overview,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: _EpisodeCardStyles.overview(theme),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
-          ),
+            if (selected)
+              Positioned(
+                left: 0,
+                top: AppSpacing.md,
+                bottom: AppSpacing.md,
+                child: Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(AppRadii.xs),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -623,9 +638,7 @@ class _EpisodeThumb extends StatelessWidget {
           position: DecorationPosition.foreground,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadii.md),
-            border: selected
-                ? Border.all(color: scheme.primary, width: 2)
-                : Border.all(color: scheme.onSurface.withValues(alpha: .08)),
+            border: Border.all(color: AppEdge.of(scheme.brightness)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(AppRadii.md),
@@ -794,7 +807,6 @@ class EpisodeThumbBadge extends StatelessWidget {
           maxLines: 1,
           style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
             color: const Color(0xffffffff),
-            fontWeight: FontWeight.w600,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
