@@ -7,10 +7,6 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'catalog/desktop_provider_filter_test.dart',
-    caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
-  );
-  group(
     'home/library_tiles_test.dart',
     caseEntrypoints['home/library_tiles_cases.dart']!,
   );
@@ -35,8 +31,12 @@ void main() {
     caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
   );
   group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'mobile/search_cached_refresh_test.dart',
+    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
   );
   group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
+  group(
+    'tv/tv_lan_pair_test.dart [part 2]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
+  );
 }

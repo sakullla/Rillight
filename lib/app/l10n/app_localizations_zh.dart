@@ -2407,4 +2407,89 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get updateLater => '稍后处理';
+
+  @override
+  String get settingsWebDavSection => '备份与同步';
+
+  @override
+  String get settingsWebDavSectionSummary => '手动备份完整配置到自备 WebDAV，换机可一键恢复';
+
+  @override
+  String get settingsWebDavAddress => '服务器地址';
+
+  @override
+  String get settingsWebDavAddressHint => '例如 https://dav.example.com:5006';
+
+  @override
+  String get settingsWebDavUsername => '账号';
+
+  @override
+  String get settingsWebDavPassword => '密码';
+
+  @override
+  String get settingsWebDavPasswordShow => '显示密码';
+
+  @override
+  String get settingsWebDavPasswordHide => '隐藏密码';
+
+  @override
+  String get settingsWebDavDirectory => '备份目录';
+
+  @override
+  String get settingsWebDavDirectoryHint => '远端存放备份文件的目录，留空使用根目录';
+
+  @override
+  String get settingsWebDavTestConnection => '测试连接';
+
+  @override
+  String get settingsWebDavConnectionOk => '连接成功';
+
+  @override
+  String get settingsWebDavCredentialError => '账号或密码错误';
+
+  @override
+  String get settingsWebDavDirectoryMissing => '备份目录不存在，请先创建或修改目录';
+
+  @override
+  String settingsWebDavHttpError(int status) {
+    return '服务器返回错误（HTTP $status）';
+  }
+
+  @override
+  String get settingsWebDavUnreachable => '无法连接服务器，请检查地址与网络';
+
+  @override
+  String get settingsWebDavBackup => '立即备份';
+
+  @override
+  String settingsWebDavBackupDone(String time) {
+    return '备份完成 · $time';
+  }
+
+  @override
+  String get settingsWebDavLocalConfigCorrupt => '本地配置文件损坏，本次操作已取消';
+
+  @override
+  String get settingsWebDavBackupFailed => '备份失败，请重试';
+
+  @override
+  String get settingsWebDavRestore => '从备份恢复';
+
+  @override
+  String get settingsWebDavRestored => '已恢复';
+
+  @override
+  String get settingsWebDavNoBackup => '服务器上还没有备份文件';
+
+  @override
+  String get settingsWebDavRestoreRejected => '备份文件校验未通过，本地数据未改动';
+
+  @override
+  String get settingsWebDavRestoreFailed => '恢复失败，请重试';
+
+  @override
+  String get settingsWebDavNotConfigured => '请先填写 WebDAV 服务器地址';
+
+  @override
+  String get settingsWebDavSaveFailed => '配置保存失败，请重试';
 }

@@ -2304,5 +2304,123 @@
   "updateDisableReminder": "不再自动提醒",
   "updateAutoReminderTitle": "启动时自动提醒更新",
   "updateAutoReminderSubtitle": "发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查",
-  "updateLater": "稍后处理"
+  "updateLater": "稍后处理",
+  "settingsWebDavSection": "备份与同步",
+  "@settingsWebDavSection": {
+    "description": "Settings section title for WebDAV backup and restore."
+  },
+  "settingsWebDavSectionSummary": "手动备份完整配置到自备 WebDAV，换机可一键恢复",
+  "@settingsWebDavSectionSummary": {
+    "description": "Summary of the WebDAV backup section."
+  },
+  "settingsWebDavAddress": "服务器地址",
+  "@settingsWebDavAddress": {
+    "description": "Setting row label for the WebDAV server address."
+  },
+  "settingsWebDavAddressHint": "例如 https://dav.example.com:5006",
+  "@settingsWebDavAddressHint": {
+    "description": "Placeholder for the WebDAV server address."
+  },
+  "settingsWebDavUsername": "账号",
+  "@settingsWebDavUsername": {
+    "description": "Setting row label for the WebDAV account name."
+  },
+  "settingsWebDavPassword": "密码",
+  "@settingsWebDavPassword": {
+    "description": "Setting row label for the WebDAV password."
+  },
+  "settingsWebDavPasswordShow": "显示密码",
+  "@settingsWebDavPasswordShow": {
+    "description": "Tooltip to reveal the WebDAV password."
+  },
+  "settingsWebDavPasswordHide": "隐藏密码",
+  "@settingsWebDavPasswordHide": {
+    "description": "Tooltip to hide the WebDAV password."
+  },
+  "settingsWebDavDirectory": "备份目录",
+  "@settingsWebDavDirectory": {
+    "description": "Setting row label for the remote WebDAV backup directory."
+  },
+  "settingsWebDavDirectoryHint": "远端存放备份文件的目录，留空使用根目录",
+  "@settingsWebDavDirectoryHint": {
+    "description": "Hint that an empty directory falls back to the WebDAV root."
+  },
+  "settingsWebDavTestConnection": "测试连接",
+  "@settingsWebDavTestConnection": {
+    "description": "Button that probes the configured WebDAV server."
+  },
+  "settingsWebDavConnectionOk": "连接成功",
+  "@settingsWebDavConnectionOk": {
+    "description": "Notice when the WebDAV connection test succeeds."
+  },
+  "settingsWebDavCredentialError": "账号或密码错误",
+  "@settingsWebDavCredentialError": {
+    "description": "Notice when the WebDAV server rejects the credentials."
+  },
+  "settingsWebDavDirectoryMissing": "备份目录不存在，请先创建或修改目录",
+  "@settingsWebDavDirectoryMissing": {
+    "description": "Notice when the WebDAV directory does not exist."
+  },
+  "settingsWebDavHttpError": "服务器返回错误（HTTP {status}）",
+  "@settingsWebDavHttpError": {
+    "description": "Notice when the WebDAV server returns an unexpected status.",
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsWebDavUnreachable": "无法连接服务器，请检查地址与网络",
+  "@settingsWebDavUnreachable": {
+    "description": "Notice when the WebDAV server cannot be reached."
+  },
+  "settingsWebDavBackup": "立即备份",
+  "@settingsWebDavBackup": {
+    "description": "Button that uploads a full local backup to WebDAV."
+  },
+  "settingsWebDavBackupDone": "备份完成 · {time}",
+  "@settingsWebDavBackupDone": {
+    "description": "Notice when the WebDAV backup upload succeeds.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWebDavLocalConfigCorrupt": "本地配置文件损坏，本次操作已取消",
+  "@settingsWebDavLocalConfigCorrupt": {
+    "description": "Notice when a local configuration file cannot be parsed."
+  },
+  "settingsWebDavBackupFailed": "备份失败，请重试",
+  "@settingsWebDavBackupFailed": {
+    "description": "Notice for an unexpected WebDAV backup failure."
+  },
+  "settingsWebDavRestore": "从备份恢复",
+  "@settingsWebDavRestore": {
+    "description": "Button that downloads and applies the WebDAV backup."
+  },
+  "settingsWebDavRestored": "已恢复",
+  "@settingsWebDavRestored": {
+    "description": "Notice when the WebDAV backup has been applied."
+  },
+  "settingsWebDavNoBackup": "服务器上还没有备份文件",
+  "@settingsWebDavNoBackup": {
+    "description": "Notice when the WebDAV server has no backup file."
+  },
+  "settingsWebDavRestoreRejected": "备份文件校验未通过，本地数据未改动",
+  "@settingsWebDavRestoreRejected": {
+    "description": "Notice when the downloaded backup fails validation."
+  },
+  "settingsWebDavRestoreFailed": "恢复失败，请重试",
+  "@settingsWebDavRestoreFailed": {
+    "description": "Notice for an unexpected WebDAV restore failure."
+  },
+  "settingsWebDavNotConfigured": "请先填写 WebDAV 服务器地址",
+  "@settingsWebDavNotConfigured": {
+    "description": "Notice when an action runs without a WebDAV address."
+  },
+  "settingsWebDavSaveFailed": "配置保存失败，请重试",
+  "@settingsWebDavSaveFailed": {
+    "description": "Notice when the WebDAV configuration cannot be saved."
+  }
 }
