@@ -11,6 +11,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
+import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/player/player_host_command.dart';
@@ -492,6 +493,80 @@ void main() {
     expect(focusedLabel(tester), label);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'tv library page supports sort order toggle, quick genre bar, search, filter modal and auto-pagination',
+    (tester) async {
+      final server = FakeEmbyServer(
+        items: [
+          for (var i = 0; i < 65; i++)
+            FakeEmbyItem(
+              id: 'tv-lib-$i',
+              name: 'Movie ${i.toString().padLeft(2, '0')}',
+              type: 'Movie',
+              parentId: 'view-movies',
+              productionYear: 2020 + (i % 5),
+              communityRating: 8.5,
+              genres: i.isEven ? const ['SciFi'] : const ['Comedy'],
+            ),
+        ],
+      );
+      final (app, _) = await start(tester, server);
+      await login(tester, server);
+      app.router.go('/library/view-movies');
+      await settle(tester);
+      expect(find.byType(TvLibraryPage), findsOneWidget);
+      expect(find.byKey(const Key('tv-library-search')), findsOneWidget);
+      expect(find.byKey(const Key('tv-library-quick-sort')), findsOneWidget);
+      expect(find.byKey(const Key('tv-library-sort-order')), findsOneWidget);
+      expect(
+        find.byKey(const Key('tv-library-quick-genre-all')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('tv-library-quick-genre-SciFi')),
+        findsOneWidget,
+      );
+
+      // Toggle sort order via header action.
+      await tester.tap(find.byKey(const Key('tv-library-sort-order')));
+      await settle(tester);
+      expect(
+        server.requests.any((r) => r.contains('SortOrder=Ascending')),
+        isTrue,
+      );
+
+      // Toggle quick genre SciFi on and off.
+      await tester.tap(find.byKey(const Key('tv-library-quick-genre-SciFi')));
+      await settle(tester);
+      expect(server.requests.any((r) => r.contains('Genres=SciFi')), isTrue);
+      expect(find.byKey(const Key('tv-library-clear')), findsOneWidget);
+
+      // Clear all filters.
+      final beforeClearCount = server.requests.length;
+      await tester.tap(find.byKey(const Key('tv-library-clear')));
+      await settle(tester);
+      expect(
+        server.requests
+            .sublist(beforeClearCount)
+            .any(
+              (r) =>
+                  r.contains('ParentId=view-movies') && !r.contains('Genres='),
+            ),
+        isTrue,
+      );
+
+      // Switch library viewId to verify didUpdateWidget reloads.
+      app.router.go('/library/view-tv');
+      await settle(tester);
+      expect(
+        server.requests.any((r) => r.contains('ParentId=view-tv')),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
 
 class _FailingRecoveryStore extends MemoryPlaybackSessionSnapshotStore {

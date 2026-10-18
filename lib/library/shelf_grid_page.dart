@@ -784,8 +784,14 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     ShelfFilters filters, {
     CatalogSort? sort,
     String? sortOrder,
+    bool clearSearch = false,
   }) {
     var changed = filters != _filters;
+    if (clearSearch && _searchTerm.isNotEmpty) {
+      _searchController.clear();
+      _searchTerm = '';
+      changed = true;
+    }
     if (sort != null && sort != _sort) {
       _sortState = sort;
       changed = true;
@@ -967,6 +973,13 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                         genreOptions: _genreOptions,
                         onFiltersChanged: _filterable ? _selectFilters : null,
                         onToggleGenre: _filterable ? _toggleQuickGenre : null,
+                        onGenresLoaded: _filterable
+                            ? (genres) {
+                                if (mounted && genres.isNotEmpty) {
+                                  setState(() => _knownGenres.addAll(genres));
+                                }
+                              }
+                            : null,
                         searchController: _filterable
                             ? _searchController
                             : null,
@@ -1158,6 +1171,7 @@ class _Header extends StatelessWidget {
     this.genreOptions = const [],
     this.onFiltersChanged,
     this.onToggleGenre,
+    this.onGenresLoaded,
     this.searchController,
     this.onSearchChanged,
     this.serverOrder = false,
@@ -1182,9 +1196,15 @@ class _Header extends StatelessWidget {
   final bool typeFilterable;
   final List<int> yearOptions;
   final List<String> genreOptions;
-  final void Function(ShelfFilters, {CatalogSort? sort, String? sortOrder})?
+  final void Function(
+    ShelfFilters, {
+    CatalogSort? sort,
+    String? sortOrder,
+    bool clearSearch,
+  })?
   onFiltersChanged;
   final ValueChanged<String?>? onToggleGenre;
+  final ValueChanged<List<String>>? onGenresLoaded;
   final TextEditingController? searchController;
   final ValueChanged<String>? onSearchChanged;
 
@@ -1265,6 +1285,10 @@ class _Header extends StatelessWidget {
                   typeFilterable: typeFilterable,
                   yearOptions: yearOptions,
                   genreOptions: genreOptions,
+                  onGenresLoaded: onGenresLoaded,
+                  hasSearch:
+                      searchController != null &&
+                      searchController!.text.trim().isNotEmpty,
                   onChanged: onFiltersChanged!,
                 ),
               if (searchController != null && onSearchChanged != null)
@@ -1390,16 +1414,15 @@ class _Header extends StatelessWidget {
                     ),
                   ),
                   for (final genre in genreOptions)
-                    if (!filters!.genres.contains(genre))
-                      Padding(
-                        padding: const EdgeInsets.only(right: AppSpacing.xs),
-                        child: OptionPill(
-                          key: Key('catalog-grid-quick-genre-$genre'),
-                          label: genre,
-                          selected: false,
-                          onPressed: () => onToggleGenre!(genre),
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: AppSpacing.xs),
+                      child: OptionPill(
+                        key: Key('catalog-grid-quick-genre-$genre'),
+                        label: genre,
+                        selected: filters!.genres.contains(genre),
+                        onPressed: () => onToggleGenre!(genre),
                       ),
+                    ),
                 ],
               ),
             ),
@@ -1467,6 +1490,8 @@ class _FilterBar extends StatelessWidget {
     required this.yearOptions,
     required this.genreOptions,
     required this.onChanged,
+    this.onGenresLoaded,
+    this.hasSearch = false,
   });
 
   final ShelfFilters filters;
@@ -1475,7 +1500,14 @@ class _FilterBar extends StatelessWidget {
   final bool typeFilterable;
   final List<int> yearOptions;
   final List<String> genreOptions;
-  final void Function(ShelfFilters, {CatalogSort? sort, String? sortOrder})
+  final ValueChanged<List<String>>? onGenresLoaded;
+  final bool hasSearch;
+  final void Function(
+    ShelfFilters, {
+    CatalogSort? sort,
+    String? sortOrder,
+    bool clearSearch,
+  })
   onChanged;
 
   @override
@@ -1504,7 +1536,7 @@ class _FilterBar extends StatelessWidget {
           label: filters.years.join('、'),
           onDeleted: () => onChanged(filters.copyWith(years: const [])),
         ),
-      if (filters.genres.isNotEmpty)
+      if (genreOptions.isEmpty && filters.genres.isNotEmpty)
         _activeChip(
           context,
           label: filters.genres.join('、'),
@@ -1517,7 +1549,7 @@ class _FilterBar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _HeaderChip(
-          active: filters.isNotEmpty,
+          active: filters.isNotEmpty || hasSearch,
           child: AppTooltip(
             message: l10n.libraryFilter,
             child: AppSurfaceAction(
@@ -1558,11 +1590,11 @@ class _FilterBar extends StatelessWidget {
           ),
         ),
         ...chips,
-        if (filters.isNotEmpty)
+        if (filters.isNotEmpty || hasSearch)
           AppIconButton(
             key: gridFilterClearKey,
             tooltip: l10n.libraryFilterClear,
-            onPressed: () => onChanged(const ShelfFilters()),
+            onPressed: () => onChanged(const ShelfFilters(), clearSearch: true),
             icon: const Icon(AppIcons.close, fill: AppIcons.filled, size: 18),
           ),
       ],
@@ -1584,7 +1616,7 @@ class _FilterBar extends StatelessWidget {
         sortOrder: sortOrder,
         years: yearOptions,
         genres: genreOptions,
-        loadGenres: () {
+        loadGenres: () async {
           final uri = GoRouter.maybeOf(context)
               ?.routeInformationProvider
               .value
@@ -1595,7 +1627,9 @@ class _FilterBar extends StatelessWidget {
           final client =
               ShelfClientOverride.maybeOf(context) ??
               AuthScope.of(context).client;
-          return client.getLibraryGenres(parentId);
+          final res = await client.getLibraryGenres(parentId);
+          onGenresLoaded?.call(res);
+          return res;
         },
         typeFilterable: typeFilterable,
         onApply: (next, nextSort) => onChanged(next, sort: nextSort),

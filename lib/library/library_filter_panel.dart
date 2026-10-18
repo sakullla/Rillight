@@ -183,10 +183,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     return defaultSet;
   }
 
-  bool get _showSearchField =>
-      _activeSection == 'genre' ||
-      _activeSection == 'year' ||
-      _genres.length > _genreSearchThreshold;
+  bool get _showSearchField => _genres.length > _genreSearchThreshold;
 
   String _applyButtonLabel(AppLocalizations l) =>
       _count > 0 ? '${l.filterApply} ($_count)' : l.filterApply;
@@ -285,39 +282,14 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 ),
               const AppDivider(height: 1),
               Expanded(child: _buildFlatBody(context, phone: false)),
-              const AppDivider(height: 1),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-                  child: Row(
-                    children: [
-                      if (widget.television) ...[
-                        Expanded(
-                          child: TvAction(
-                            key: _key('clear'),
-                            onPressed: _reset,
-                            child: Text(l.filterReset),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TvAction(
-                            key: _key('cancel'),
-                            onPressed: () => Navigator.pop(context),
-                            child: Text(l.libraryFilterCancel),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TvAction(
-                            key: _key('apply'),
-                            emphasized: true,
-                            onPressed: _apply,
-                            child: Text(_applyButtonLabel(l)),
-                          ),
-                        ),
-                      ] else ...[
+              if (!widget.television) ...[
+                const AppDivider(height: 1),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+                    child: Row(
+                      children: [
                         AppButton(
                           key: _key('clear'),
                           onPressed: _reset,
@@ -338,10 +310,10 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
@@ -563,31 +535,6 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_showSearchField) ...[
-            if (tv)
-              TvInput(
-                key: _key('genre-search'),
-                label: l.filterSearchOptions,
-                controller: _search,
-                onSubmitted: () => setState(() {}),
-              )
-            else
-              AppTextField(
-                key: _key('genre-search'),
-                controller: _search,
-                onChanged: (_) => setState(() {}),
-                placeholder: l.filterSearchOptions,
-                prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
-                suffix: query.isEmpty
-                    ? null
-                    : AppIconButton(
-                        tooltip: l.filterReset,
-                        onPressed: () => setState(_search.clear),
-                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
-                      ),
-              ),
-            const SizedBox(height: 12),
-          ],
           if (_sort != null) ...[
             _buildSortSection(context, l),
             const SizedBox(height: 16),
@@ -601,6 +548,37 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
           _buildGenreSection(context, l, query),
           const SizedBox(height: 16),
           _buildYearSection(context, l, query),
+          if (tv) ...[
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: TvAction(
+                    key: _key('clear'),
+                    onPressed: _reset,
+                    child: Text(l.filterReset),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TvAction(
+                    key: _key('cancel'),
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(l.libraryFilterCancel),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TvAction(
+                    key: _key('apply'),
+                    emphasized: true,
+                    onPressed: _apply,
+                    child: Text(_applyButtonLabel(l)),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -819,6 +797,31 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
         if (_loadingGenres) ...[
           const AppLoadingBar(),
           const SizedBox(height: 8),
+        ],
+        if (_showSearchField) ...[
+          if (widget.television)
+            TvInput(
+              key: _key('genre-search'),
+              label: l.filterSearchOptions,
+              controller: _search,
+              onSubmitted: () => setState(() {}),
+            )
+          else
+            AppTextField(
+              key: _key('genre-search'),
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              placeholder: l.filterSearchOptions,
+              prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
+              suffix: query.isEmpty
+                  ? null
+                  : AppIconButton(
+                      tooltip: l.filterReset,
+                      onPressed: () => setState(_search.clear),
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                    ),
+            ),
+          const SizedBox(height: 10),
         ],
         Wrap(
           spacing: widget.television ? 10 : 8,

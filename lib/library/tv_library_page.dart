@@ -31,9 +31,16 @@ class TvLibraryPage extends StatefulWidget {
 class _TvLibraryPageState extends State<TvLibraryPage> {
   BrowseController? _controller;
   final _focus = TvReturnFocus();
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _knownGenres = <String>{};
   bool _genresRequested = false;
+
+  void _scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+  }
 
   @override
   void initState() {
@@ -59,34 +66,36 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
     }());
   }
 
+  BrowseController _createController() {
+    final controller = BrowseController(
+      auth: AuthScope.of(context),
+      cache: CatalogScope.of(context).cache,
+      parentId: widget.viewId,
+      includeItemTypes:
+          widget.initialType ??
+          switch (CatalogScope.of(context).libraries
+              .where((item) => item.id == widget.viewId)
+              .firstOrNull
+              ?.collectionTypeNormalized) {
+            'movies' => 'Movie',
+            'tvshows' => 'Series',
+            _ => 'Movie,Series',
+          },
+    );
+    final genre = widget.initialGenre;
+    if (genre != null && genre.isNotEmpty) {
+      controller.genre = genre;
+      controller.genres = [genre];
+    }
+    _prefetchGenres(controller);
+    controller.load();
+    return controller;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _controller ??= () {
-      final controller = BrowseController(
-        auth: AuthScope.of(context),
-        cache: CatalogScope.of(context).cache,
-        parentId: widget.viewId,
-        includeItemTypes:
-            widget.initialType ??
-            switch (CatalogScope.of(context).libraries
-                .where((item) => item.id == widget.viewId)
-                .firstOrNull
-                ?.collectionTypeNormalized) {
-              'movies' => 'Movie',
-              'tvshows' => 'Series',
-              _ => 'Movie,Series',
-            },
-      );
-      final genre = widget.initialGenre;
-      if (genre != null && genre.isNotEmpty) {
-        controller.genre = genre;
-        controller.genres = [genre];
-      }
-      _prefetchGenres(controller);
-      controller.load();
-      return controller;
-    }();
+    _controller ??= _createController();
     _focus.noteRoute(
       ModalRoute.of(context)?.isCurrent ?? true,
       () => _focus.allowRestore(this),
@@ -94,9 +103,25 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   }
 
   @override
+  void didUpdateWidget(TvLibraryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.viewId != widget.viewId ||
+        oldWidget.initialType != widget.initialType ||
+        oldWidget.initialGenre != widget.initialGenre) {
+      _controller?.dispose();
+      _knownGenres.clear();
+      _genresRequested = false;
+      _searchController.clear();
+      _controller = _createController();
+      _scrollToTop();
+    }
+  }
+
+  @override
   void dispose() {
     FocusManager.instance.removeListener(_onFocus);
     _focus.dispose();
+    _scrollController.dispose();
     _searchController.dispose();
     _controller?.dispose();
     super.dispose();
@@ -146,21 +171,27 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
             }
             return res;
           },
-          onApply: (filters, sort) => c.filter(
-            type: filters.type.itemType,
-            watch: filters.watch.param,
-            years: filters.years,
-            genres: filters.genres,
-            sortBy: (sort ?? c.defaultSort).sortBy,
-          ),
-          onApplyWithOrder: (filters, sort, sortOrder) => c.filter(
-            type: filters.type.itemType,
-            watch: filters.watch.param,
-            years: filters.years,
-            genres: filters.genres,
-            sortBy: (sort ?? c.defaultSort).sortBy,
-            sortOrder: sortOrder,
-          ),
+          onApply: (filters, sort) {
+            _scrollToTop();
+            c.filter(
+              type: filters.type.itemType,
+              watch: filters.watch.param,
+              years: filters.years,
+              genres: filters.genres,
+              sortBy: (sort ?? c.defaultSort).sortBy,
+            );
+          },
+          onApplyWithOrder: (filters, sort, sortOrder) {
+            _scrollToTop();
+            c.filter(
+              type: filters.type.itemType,
+              watch: filters.watch.param,
+              years: filters.years,
+              genres: filters.genres,
+              sortBy: (sort ?? c.defaultSort).sortBy,
+              sortOrder: sortOrder,
+            );
+          },
         ),
       ),
     );
@@ -189,6 +220,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                 selected: option == c.currentSort,
                 onPressed: () {
                   Navigator.of(dialogContext).pop();
+                  _scrollToTop();
                   c.selectSort(option);
                 },
                 child: Text(option.label(l)),
@@ -208,6 +240,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
 
   void _clearAll(BrowseController c) {
     _searchController.clear();
+    _scrollToTop();
     c.filter(
       type: null,
       watch: null,
@@ -254,7 +287,10 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                 label: l.searchHint,
                 controller: _searchController,
                 leading: const Icon(AppIcons.search, fill: AppIcons.filled),
-                onSubmitted: () => c.setSearchTerm(_searchController.text),
+                onSubmitted: () {
+                  _scrollToTop();
+                  c.setSearchTerm(_searchController.text);
+                },
               ),
             ),
             TvAction(
@@ -273,7 +309,10 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                 leading: Icon(
                   isAsc ? CupertinoIcons.arrow_up : CupertinoIcons.arrow_down,
                 ),
-                onPressed: c.toggleSortOrder,
+                onPressed: () {
+                  _scrollToTop();
+                  c.toggleSortOrder();
+                },
                 child: Text(
                   isAsc ? l.filterSortAscending : l.filterSortDescending,
                 ),
@@ -311,6 +350,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
               );
               return MediaImageScrollListener(
                 child: CustomScrollView(
+                  controller: _scrollController,
                   key: PageStorageKey('tv-library-${widget.viewId}'),
                   scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
                   slivers: [
@@ -337,7 +377,10 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                                     pill: true,
                                     selected:
                                         c.genres.isEmpty && c.genre == null,
-                                    onPressed: () => c.toggleGenre(null),
+                                    onPressed: () {
+                                      _scrollToTop();
+                                      c.toggleGenre(null);
+                                    },
                                     child: Text(l.libraryFilterAll),
                                   ),
                                 ),
@@ -350,7 +393,10 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                                       selected:
                                           c.genres.contains(genre) ||
                                           c.genre == genre,
-                                      onPressed: () => c.toggleGenre(genre),
+                                      onPressed: () {
+                                        _scrollToTop();
+                                        c.toggleGenre(genre);
+                                      },
                                       child: Text(genre),
                                     ),
                                   ),

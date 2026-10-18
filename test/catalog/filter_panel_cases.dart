@@ -5,6 +5,7 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
+import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -514,6 +515,125 @@ void main() {
       expect(appliedFilters, isNotNull);
       expect(appliedSort, CatalogSort.premiereDate);
       expect(appliedSortOrder, 'Ascending');
+    },
+  );
+
+  testWidgets(
+    'television filter panel traverses sort -> type -> watch -> genre -> year -> actions via D-pad and hides genre search when <= 16',
+    (tester) async {
+      tester.view.physicalSize = const Size(960, 540);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      ShelfFilters? appliedFilters;
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          theme: AppUiTheme.tvDark(),
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: CupertinoPageScaffold(
+            child: LibraryFilterPanel(
+              keyPrefix: 'tv-filter',
+              television: true,
+              initial: const ShelfFilters(),
+              sort: CatalogSort.dateUpdated,
+              sortOrder: 'Descending',
+              genres: const ['科幻', '动作', '喜剧'],
+              years: const [2024, 2023],
+              onApply: (filters, _) {
+                appliedFilters = filters;
+              },
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      // Genre search field is hidden when genres.length <= 16.
+      expect(find.byKey(const Key('tv-filter-genre-search')), findsNothing);
+
+      bool isFocusedInSection(String sectionKey) {
+        final primary = FocusManager.instance.primaryFocus;
+        final ctx = primary?.context;
+        if (ctx == null) return false;
+        final section = find.byKey(Key(sectionKey));
+        return find
+            .ancestor(of: find.byWidget(ctx.widget), matching: section)
+            .evaluate()
+            .isNotEmpty;
+      }
+
+      // Focus first sort action and traverse downwards across every section.
+      final firstSort = find.byKey(
+        const Key('tv-filter-sort-DateLastContentAdded'),
+      );
+      await tester.tap(firstSort);
+      await settle(tester);
+
+      var sawType = false;
+      var sawWatch = false;
+      var sawGenre = false;
+      var sawYear = false;
+      var sawBottomAction = false;
+
+      for (var step = 0; step < 12; step++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await settle(tester);
+        if (isFocusedInSection('tv-filter-type-section')) sawType = true;
+        if (isFocusedInSection('tv-filter-watch-section')) sawWatch = true;
+        if (isFocusedInSection('tv-filter-genre-section')) sawGenre = true;
+        if (isFocusedInSection('tv-filter-year-section')) sawYear = true;
+        final primary = FocusManager.instance.primaryFocus?.context;
+        if (primary != null) {
+          for (final bottomKey in [
+            'tv-filter-clear',
+            'tv-filter-cancel',
+            'tv-filter-apply',
+          ]) {
+            if (find
+                .ancestor(
+                  of: find.byWidget(primary.widget),
+                  matching: find.byKey(Key(bottomKey)),
+                )
+                .evaluate()
+                .isNotEmpty) {
+              sawBottomAction = true;
+            }
+          }
+        }
+        if (sawBottomAction) break;
+      }
+
+      expect(sawType, isTrue, reason: 'D-pad down should visit type section');
+      expect(sawWatch, isTrue, reason: 'D-pad down should visit watch section');
+      expect(sawGenre, isTrue, reason: 'D-pad down should visit genre section');
+      expect(sawYear, isTrue, reason: 'D-pad down should visit year section');
+      expect(
+        sawBottomAction,
+        isTrue,
+        reason: 'D-pad down should reach bottom action bar',
+      );
+
+      for (var step = 0; step < 3; step++) {
+        final primary = FocusManager.instance.primaryFocus?.context;
+        if (primary != null &&
+            find
+                .ancestor(
+                  of: find.byWidget(primary.widget),
+                  matching: find.byKey(const Key('tv-filter-apply')),
+                )
+                .evaluate()
+                .isNotEmpty) {
+          break;
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await settle(tester);
+      }
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await settle(tester);
+      expect(appliedFilters, isNotNull);
+      expect(tester.takeException(), isNull);
     },
   );
 }

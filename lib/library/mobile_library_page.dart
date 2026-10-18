@@ -265,7 +265,13 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
         sortOrder: controller.sortOrder,
         years: years,
         genres: genres,
-        loadGenres: () => _auth!.client.getLibraryGenres(widget.viewId),
+        loadGenres: () async {
+          final res = await _auth!.client.getLibraryGenres(widget.viewId);
+          if (mounted && res.isNotEmpty) {
+            setState(() => _genres.addAll(res));
+          }
+          return res;
+        },
         onApply: (filters, sort) {
           _scrollToTop();
           controller.filter(
@@ -695,25 +701,45 @@ class _ActiveAndGenreQuickBar extends StatelessWidget {
   final VoidCallback onClear;
   final ValueChanged<String?> onToggleGenre;
 
-  Widget _chip(BuildContext context, {required Key key, required String text}) {
+  Widget _chip(
+    BuildContext context, {
+    required Key key,
+    required String text,
+    required VoidCallback onDeleted,
+  }) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.xs),
-      child: Container(
+      child: MobilePressable(
         key: key,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          text,
-          maxLines: 1,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: scheme.onPrimaryContainer,
-            fontWeight: FontWeight.w600,
+        onTap: onDeleted,
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                text,
+                maxLines: 1,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: scheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                AppIcons.close,
+                fill: AppIcons.filled,
+                size: 13,
+                color: scheme.onPrimaryContainer,
+              ),
+            ],
           ),
         ),
       ),
@@ -738,12 +764,30 @@ class _ActiveAndGenreQuickBar extends StatelessWidget {
               context,
               key: const Key('phone-library-active-type'),
               text: l10n.mobileMovies,
+              onDeleted: () => controller.filter(
+                type: null,
+                watch: controller.watch,
+                years: controller.years,
+                genres: controller.genres,
+                sortBy: controller.sortBy,
+                sortOrder: controller.sortOrder,
+                searchTerm: controller.searchTerm,
+              ),
             ),
           if (controller.type == 'Series')
             _chip(
               context,
               key: const Key('phone-library-active-type'),
               text: l10n.mobileSeries,
+              onDeleted: () => controller.filter(
+                type: null,
+                watch: controller.watch,
+                years: controller.years,
+                genres: controller.genres,
+                sortBy: controller.sortBy,
+                sortOrder: controller.sortOrder,
+                searchTerm: controller.searchTerm,
+              ),
             ),
           if (controller.watch != null)
             _chip(
@@ -755,18 +799,48 @@ class _ActiveAndGenreQuickBar extends StatelessWidget {
                     orElse: () => CatalogWatchFilter.all,
                   )
                   .label,
+              onDeleted: () => controller.filter(
+                type: controller.type,
+                watch: null,
+                years: controller.years,
+                genres: controller.genres,
+                sortBy: controller.sortBy,
+                sortOrder: controller.sortOrder,
+                searchTerm: controller.searchTerm,
+              ),
             ),
           if (controller.year != null || controller.years.isNotEmpty)
             _chip(
               context,
               key: const Key('phone-library-active-year'),
               text: controller.years.join('、'),
+              onDeleted: () => controller.filter(
+                type: controller.type,
+                watch: controller.watch,
+                year: null,
+                years: const [],
+                genres: controller.genres,
+                sortBy: controller.sortBy,
+                sortOrder: controller.sortOrder,
+                searchTerm: controller.searchTerm,
+              ),
             ),
-          if (controller.genre != null || controller.genres.isNotEmpty)
+          if (genres.isEmpty &&
+              (controller.genre != null || controller.genres.isNotEmpty))
             _chip(
               context,
               key: const Key('phone-library-active-genre'),
               text: controller.genres.join('、'),
+              onDeleted: () => controller.filter(
+                type: controller.type,
+                watch: controller.watch,
+                years: controller.years,
+                genre: null,
+                genres: const [],
+                sortBy: controller.sortBy,
+                sortOrder: controller.sortOrder,
+                searchTerm: controller.searchTerm,
+              ),
             ),
           if (genres.isNotEmpty) ...[
             Padding(
@@ -779,17 +853,17 @@ class _ActiveAndGenreQuickBar extends StatelessWidget {
               ),
             ),
             for (final genre in genres)
-              if (!controller.genres.contains(genre) &&
-                  controller.genre != genre)
-                Padding(
-                  padding: const EdgeInsets.only(right: AppSpacing.xs),
-                  child: OptionPill(
-                    key: Key('phone-library-quick-genre-$genre'),
-                    label: genre,
-                    selected: false,
-                    onPressed: () => onToggleGenre(genre),
-                  ),
+              Padding(
+                padding: const EdgeInsets.only(right: AppSpacing.xs),
+                child: OptionPill(
+                  key: Key('phone-library-quick-genre-$genre'),
+                  label: genre,
+                  selected:
+                      controller.genres.contains(genre) ||
+                      controller.genre == genre,
+                  onPressed: () => onToggleGenre(genre),
                 ),
+              ),
           ],
         ],
       ),

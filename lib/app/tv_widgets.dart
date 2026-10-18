@@ -301,7 +301,7 @@ class _TvActionState extends State<TvAction>
     }
   }
 
-  /// 目标已完整落在屏内(避开顶部导航与底部安全区)时不滚动:
+  /// 目标已完整落在屏内(避开顶部导航与底部安全区)且落在所属垂直可滚动视口内时不滚动:
   /// 在 hero 按钮间移动不会把舞台推走,只有越界时才把目标移到视口中央。
   bool _comfortablyVisible() {
     final box = context.findRenderObject();
@@ -309,6 +309,15 @@ class _TvActionState extends State<TvAction>
     final size = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     final rect = box.localToGlobal(Offset.zero) & box.size;
+    final scrollable = Scrollable.maybeOf(context, axis: Axis.vertical);
+    final scrollBox = scrollable?.context.findRenderObject();
+    if (scrollBox is RenderBox && scrollBox.hasSize && scrollBox.attached) {
+      final scrollRect = scrollBox.localToGlobal(Offset.zero) & scrollBox.size;
+      if (rect.top < scrollRect.top + 8 * s ||
+          rect.bottom > scrollRect.bottom - 8 * s) {
+        return false;
+      }
+    }
     return rect.top >= 64 * s &&
         rect.bottom <= size.height - 20 * s &&
         rect.left >= 0 &&
