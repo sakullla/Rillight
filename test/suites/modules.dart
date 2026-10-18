@@ -169,17 +169,20 @@ import '../tv/tv_frame_cases.dart' as case166;
 import '../tv/tv_home_featured_cases.dart' as case167;
 import '../tv/tv_lan_pair_cases.dart' as case168;
 import '../tv/tv_player_controls_cases.dart' as case169;
-import '../widgets/app_button_cases.dart' as case170;
-import '../widgets/app_empty_view_cases.dart' as case171;
-import '../widgets/app_hover_card_cases.dart' as case172;
-import '../widgets/artwork_crop_cases.dart' as case173;
-import '../widgets/backdrop_scrim_cases.dart' as case174;
-import '../widgets/desktop_back_button_cases.dart' as case175;
-import '../widgets/liquid_glass_cases.dart' as case176;
-import '../widgets/media_image_cases.dart' as case177;
-import '../widgets/poster_card_cases.dart' as case178;
-import '../widgets/scrim_icon_button_cases.dart' as case179;
-import '../widgets/skeleton_cases.dart' as case180;
+import '../webdav/webdav_backup_cases.dart' as case170;
+import '../webdav/webdav_client_cases.dart' as case171;
+import '../webdav/webdav_config_cases.dart' as case172;
+import '../widgets/app_button_cases.dart' as case173;
+import '../widgets/app_empty_view_cases.dart' as case174;
+import '../widgets/app_hover_card_cases.dart' as case175;
+import '../widgets/artwork_crop_cases.dart' as case176;
+import '../widgets/backdrop_scrim_cases.dart' as case177;
+import '../widgets/desktop_back_button_cases.dart' as case178;
+import '../widgets/liquid_glass_cases.dart' as case179;
+import '../widgets/media_image_cases.dart' as case180;
+import '../widgets/poster_card_cases.dart' as case181;
+import '../widgets/scrim_icon_button_cases.dart' as case182;
+import '../widgets/skeleton_cases.dart' as case183;
 
 // Import every module once; registering one group calls only its main().
 // Importing widget modules alone does not install Flutter's HTTP mock.
@@ -354,17 +357,20 @@ final caseEntrypoints = <String, void Function()>{
   'tv/tv_home_featured_cases.dart': case167.main,
   'tv/tv_lan_pair_cases.dart': case168.main,
   'tv/tv_player_controls_cases.dart': case169.main,
-  'widgets/app_button_cases.dart': case170.main,
-  'widgets/app_empty_view_cases.dart': case171.main,
-  'widgets/app_hover_card_cases.dart': case172.main,
-  'widgets/artwork_crop_cases.dart': case173.main,
-  'widgets/backdrop_scrim_cases.dart': case174.main,
-  'widgets/desktop_back_button_cases.dart': case175.main,
-  'widgets/liquid_glass_cases.dart': case176.main,
-  'widgets/media_image_cases.dart': case177.main,
-  'widgets/poster_card_cases.dart': case178.main,
-  'widgets/scrim_icon_button_cases.dart': case179.main,
-  'widgets/skeleton_cases.dart': case180.main,
+  'webdav/webdav_backup_cases.dart': case170.main,
+  'webdav/webdav_client_cases.dart': case171.main,
+  'webdav/webdav_config_cases.dart': case172.main,
+  'widgets/app_button_cases.dart': case173.main,
+  'widgets/app_empty_view_cases.dart': case174.main,
+  'widgets/app_hover_card_cases.dart': case175.main,
+  'widgets/artwork_crop_cases.dart': case176.main,
+  'widgets/backdrop_scrim_cases.dart': case177.main,
+  'widgets/desktop_back_button_cases.dart': case178.main,
+  'widgets/liquid_glass_cases.dart': case179.main,
+  'widgets/media_image_cases.dart': case180.main,
+  'widgets/poster_card_cases.dart': case181.main,
+  'widgets/scrim_icon_button_cases.dart': case182.main,
+  'widgets/skeleton_cases.dart': case183.main,
   'aggregation/presentation_cases.dart#0': () => case5.mainShard(0, 3),
   'aggregation/presentation_cases.dart#1': () => case5.mainShard(1, 3),
   'aggregation/presentation_cases.dart#2': () => case5.mainShard(2, 3),
