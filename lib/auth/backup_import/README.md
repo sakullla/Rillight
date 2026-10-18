@@ -10,12 +10,14 @@ Supported mappings:
 
 | Container | Emby | Jellyfin |
 | --- | --- | --- |
-| Hills v2 JSON | `isJellyfin: false` or absent | `isJellyfin: true` |
+| Hills v2/v3 JSON | `isJellyfin: false` or absent | `isJellyfin: true` |
 | Rodel common config | `type: "emby"` | `type: "jellyfin"` |
 | Rodel native `.rpb` | verified `Config.Type == 3` | not yet mapped |
 
 Other common-config types and unverified native row types are counted as
-unsupported, not coerced into Emby. Native `.rpb` Jellyfin support needs a verified
+unsupported, not coerced into Emby. Hills v3 shares the v2 container and
+decryption key; its records only add fields (a strict superset), so both
+versions parse through the same mapping. Native `.rpb` Jellyfin support needs a verified
 row discriminator and a synthetic regression fixture before it can be enabled.
 
 Encrypted containers still require `BackupImportKeys` supplied by the embedding

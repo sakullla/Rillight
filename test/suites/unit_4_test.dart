@@ -15,84 +15,84 @@ void main() {
     caseEntrypoints['aggregation/query_cases.dart']!,
   );
   group(
-    'aggregation/server_sections_test.dart',
-    caseEntrypoints['aggregation/server_sections_cases.dart']!,
+    'app/source_route_extra_codec_test.dart',
+    caseEntrypoints['app/source_route_extra_codec_cases.dart']!,
   );
   group(
     'app/window_geometry_test.dart',
     caseEntrypoints['app/window_geometry_cases.dart']!,
   );
   group(
-    'auth/backup_import/environment_keys_test.dart',
-    caseEntrypoints['auth/backup_import/environment_keys_cases.dart']!,
+    'auth/playback_cleanup_authority_test.dart',
+    caseEntrypoints['auth/playback_cleanup_authority_cases.dart']!,
   );
   group(
-    'auth/provider_user_agent_test.dart',
-    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
+    'auth/provider_session_ownership_test.dart',
+    caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
   );
   group(
     'auth/server_import_test.dart',
     caseEntrypoints['auth/server_import_cases.dart']!,
   );
   group(
-    'auth/server_list_store_test.dart',
-    caseEntrypoints['auth/server_list_store_cases.dart']!,
+    'catalog/detail_controller_test.dart',
+    caseEntrypoints['catalog/detail_controller_cases.dart']!,
   );
   group(
-    'emby/aggregation_metadata_test.dart',
-    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
+    'emby/emby_device_test.dart',
+    caseEntrypoints['emby/emby_device_cases.dart']!,
+  );
+  group(
+    'emby/emby_url_test.dart',
+    caseEntrypoints['emby/emby_url_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 2]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#1']!,
   );
   group(
-    'player/danmaku/danmaku_hash_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_hash_cases.dart']!,
+    'player/cache/range_lease_index_test.dart',
+    caseEntrypoints['player/cache/range_lease_index_cases.dart']!,
+  );
+  group(
+    'player/cache_crc32_test.dart',
+    caseEntrypoints['player/cache_crc32_cases.dart']!,
+  );
+  group(
+    'player/capability_record_test.dart',
+    caseEntrypoints['player/capability_record_cases.dart']!,
+  );
+  group(
+    'player/catalog_preference_negotiation_test.dart',
+    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_layout_test.dart',
     caseEntrypoints['player/danmaku/danmaku_layout_cases.dart']!,
   );
   group(
-    'player/danmaku/danmaku_settings_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_settings_cases.dart']!,
-  );
-  group(
-    'player/emby_playback_client_test.dart',
-    caseEntrypoints['player/emby_playback_client_cases.dart']!,
-  );
-  group(
-    'player/hls_redirect_chain_test.dart',
-    caseEntrypoints['player/hls_redirect_chain_cases.dart']!,
-  );
-  group(
-    'player/playback_check_in_test.dart',
-    caseEntrypoints['player/playback_check_in_cases.dart']!,
-  );
-  group(
     'player/playback_http_proxy_test.dart [part 3]',
     caseEntrypoints['player/playback_http_proxy_cases.dart#2']!,
   );
   group(
-    'player/player_host_command_test.dart',
-    caseEntrypoints['player/player_host_command_cases.dart']!,
+    'player/playback_session_snapshot_test.dart',
+    caseEntrypoints['player/playback_session_snapshot_cases.dart']!,
+  );
+  group(
+    'player/playback_wake_lock_test.dart',
+    caseEntrypoints['player/playback_wake_lock_cases.dart']!,
+  );
+  group(
+    'player/player_runtime_options_test.dart',
+    caseEntrypoints['player/player_runtime_options_cases.dart']!,
   );
   group(
     'player/player_settings_test.dart',
     caseEntrypoints['player/player_settings_cases.dart']!,
   );
   group(
-    'player/player_startup_test.dart',
-    caseEntrypoints['player/player_startup_cases.dart']!,
-  );
-  group(
     'player/provider_part_playback_test.dart',
     caseEntrypoints['player/provider_part_playback_cases.dart']!,
-  );
-  group(
-    'player/provider_process_boundary_test.dart',
-    caseEntrypoints['player/provider_process_boundary_cases.dart']!,
   );
   group(
     'player/response_read_ahead_test.dart [part 2]',
