@@ -3,7 +3,9 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
-import 'package:rillight/auth/source_management.dart';
+import 'package:rillight/auth/server_editor.dart';
+
+import 'server_ui_harness.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -51,7 +53,7 @@ Dio _dio() {
 void main() {
   setUp(isolateImageCache);
   testWidgets(
-    'selected Plex Home authorization survives real app login redirect',
+    'Plex Home keeps owner until commit and cancellation keeps the selected account',
     (tester) async {
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1;
@@ -115,10 +117,7 @@ void main() {
       final oldSource = await tester.runAsync(
         () => auth.sources.ensureSession(auth.session!.server.id),
       );
-      final oldPermit = auth.sources.permit(
-        oldSource!.account,
-        sessionOnly: true,
-      );
+      final oldPermit = auth.sources.permit(oldSource!.account);
       expect(oldPermit.isValid, isTrue);
       expect(oldClient.accessToken, 'owner-resource');
       final homeGate = Completer<void>();
@@ -186,9 +185,10 @@ void main() {
         );
         app.router.go(AppRoutes.mine);
         await settle(tester);
-        showSourceManagement(tester.element(manage));
+        app.router.go('/servers');
         await settle(tester);
-        final home = find.text('切换 Plex Home 用户');
+        await openServerEditor(tester, auth.session!.server.id);
+        final home = find.byKey(const Key('server-editor-home-account'));
         await tester.ensureVisible(home);
         await tester.tap(home);
         await tester.pump();
@@ -197,25 +197,10 @@ void main() {
           () => Future<void>.delayed(const Duration(milliseconds: 100)),
         );
         await tester.pump(const Duration(milliseconds: 100));
-        expect(
-          auth.session,
-          isNull,
-          reason: 'Old owner authority is revoked before Home IO',
-        );
-        expect(oldPermit.isValid, isFalse);
-        expect(oldClient.accessToken, isNull);
-        expect(auth.client.accessToken, isNull);
-        await expectLater(
-          oldPermit.dispatch((client) => client.getViews()),
-          throwsStateError,
-        );
-        expect(catalog.resume.items, isEmpty);
-        expect(catalog.nextUp.items, isEmpty);
-        expect(catalog.latestMovies.items, isEmpty);
-        expect(catalog.latestSeries.items, isEmpty);
-        expect(catalog.libraries, isEmpty);
-        expect(find.text('Synthetic film'), findsNothing);
-        expect(find.text('Other film'), findsNothing);
+        expect(auth.session?.userId, '1');
+        expect(oldPermit.isValid, isTrue);
+        expect(oldClient.accessToken, 'owner-resource');
+        expect(catalog.latestMovies.items, isNotEmpty);
 
         expect(
           find.byType(ProviderConnectDialog),
@@ -237,7 +222,7 @@ void main() {
         await settle(tester);
         expect(find.byKey(const Key('provider-home-user')), findsOneWidget);
         expect(
-          find.byKey(const Key('provider-cancel')).hitTestable(),
+          find.byKey(const Key('server-flow-back')).hitTestable(),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
@@ -266,8 +251,8 @@ void main() {
         await waitUntil(
           () => find.byKey(const Key('provider-error')).evaluate().isNotEmpty,
         );
-        expect(auth.session, isNull);
-        expect(oldPermit.isValid, isFalse);
+        expect(auth.session?.userId, '1');
+        expect(oldPermit.isValid, isTrue);
         expect(
           find.descendant(
             of: find.byType(ProviderConnectDialog),
@@ -317,43 +302,42 @@ void main() {
         );
         await waitUntil(
           () =>
-              find.byKey(const Key('provider-finish')).evaluate().isNotEmpty &&
-              find.byType(ui.AppLoadingBar).evaluate().isEmpty,
-        );
-        await tester.tap(find.byKey(const Key('provider-finish')));
-        await waitUntil(
-          () =>
               auth.session?.userId == '2' &&
               find.byType(ProviderConnectDialog).evaluate().isEmpty,
         );
         await settle(tester);
         expect(auth.session?.accessToken, 'child-resource');
-        expect(
-          auth.sources.project(AccessRegion.ordinary).single.libraryIds,
-          isEmpty,
+        expect(oldPermit.isValid, isFalse);
+        expect(oldClient.accessToken, isNull);
+        await expectLater(
+          oldPermit.dispatch((client) => client.getViews()),
+          throwsStateError,
         );
-        // Opening Home again revokes Child immediately; cancelling leaves the
-        // ordinary selected session empty and allows the login redirect.
-        await tester.ensureVisible(find.text('切换 Plex Home 用户'));
-        await tester.tap(find.text('切换 Plex Home 用户'));
+        expect(
+          auth.sources.project().single.id,
+          oldSource.account.configuredServerId,
+        );
+        // Cancelling another Home selection preserves the committed child.
+        await tester.ensureVisible(
+          find.byKey(const Key('server-editor-home-account')),
+        );
+        await tester.tap(find.byKey(const Key('server-editor-home-account')));
         await waitUntil(
           () =>
               find.byKey(const Key('provider-home-user')).evaluate().isNotEmpty,
         );
         await settle(tester);
-        await tester.tap(find.byKey(const Key('provider-cancel')));
+        await tester.tap(find.byKey(const Key('server-flow-back')));
         await settle(tester);
         expect(
-          find.byWidgetPredicate(
-            (w) => w is ProviderConnectDialog && !w.inline,
-          ),
+          find.byWidgetPredicate((w) => w is ProviderConnectDialog),
           findsNothing,
         );
-        expect(find.byType(ui.AppDialog), findsNothing);
-        expect(auth.session, isNull);
+        expect(find.byType(ServerEditor), findsOneWidget);
+        expect(auth.session?.userId, '2');
         expect(
           app.router.routeInformationProvider.value.uri.path,
-          AppRoutes.connect,
+          isNot(AppRoutes.connect),
         );
       } finally {
         if (!homeGate.isCompleted) homeGate.complete();

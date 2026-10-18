@@ -22,6 +22,9 @@ class TvShelfPage extends StatefulWidget {
     this.parentId,
     this.includeItemTypes,
     this.onOpen,
+    this.genre,
+    this.recursive = false,
+    this.itemId,
   });
 
   final String source;
@@ -33,14 +36,28 @@ class TvShelfPage extends StatefulWidget {
   /// `items` 来源的片库与类型。
   final String? parentId;
   final String? includeItemTypes;
+  final String? genre;
+  final bool recursive;
+  final String? itemId;
 
   /// 覆盖默认的打开详情(其他服务器的条目要带来源)。
   final void Function(MediaItem item)? onOpen;
 
-  factory TvShelfPage.fromState(GoRouterState state) {
+  factory TvShelfPage.fromState(
+    GoRouterState state, {
+    MediaServerClient? client,
+    ValueChanged<MediaItem>? onOpen,
+  }) {
     return TvShelfPage(
       source: state.pathParameters['source'] ?? '',
       title: state.uri.queryParameters['title'] ?? '',
+      client: client,
+      onOpen: onOpen,
+      parentId: state.uri.queryParameters['parentId'],
+      includeItemTypes: state.uri.queryParameters['includeItemTypes'],
+      genre: state.uri.queryParameters['genre'],
+      recursive: state.uri.queryParameters['recursive'] == '1',
+      itemId: state.uri.queryParameters['itemId'],
     );
   }
 
@@ -130,6 +147,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
   String _title(AppLocalizations l10n) {
     if (widget.title.isNotEmpty) return widget.title;
     return switch (widget.source) {
+      'favorites' => l10n.filterFavorite,
       'resume' => l10n.resumeRow,
       'nextup' => l10n.nextUpRow,
       'latest-movies' => l10n.latestMoviesRow,
@@ -143,6 +161,14 @@ class _TvShelfPageState extends State<TvShelfPage> {
     final sortable = client.supportsShelfSorting(widget.source);
     final sort = CatalogSort.initialFor(client.capabilities);
     return switch (widget.source) {
+      'favorites' => catalogItemsRequest(
+        userId: userId,
+        includeItemTypes: 'Movie,Series',
+        recursive: true,
+        limit: _pageSize,
+        startIndex: startIndex,
+        filters: const ['IsFavorite'],
+      ),
       'resume' => catalogResumeRequest(
         userId: userId,
         limit: _pageSize,
@@ -157,11 +183,19 @@ class _TvShelfPageState extends State<TvShelfPage> {
         sortBy: sortable ? sort.sortBy : null,
         sortOrder: sortable ? sort.sortOrder : null,
       ),
+      'similar' => catalogSimilarRequest(
+        userId: userId,
+        itemId: widget.itemId ?? '',
+        limit: _pageSize,
+        sortBy: sortable ? sort.sortBy : null,
+        sortOrder: sortable ? sort.sortOrder : null,
+      ),
       'items' => catalogItemsRequest(
         userId: userId,
         parentId: widget.parentId,
         includeItemTypes: widget.includeItemTypes,
-        recursive: true,
+        recursive: widget.recursive,
+        genres: widget.genre == null ? const [] : [widget.genre!],
         limit: _pageSize,
         startIndex: startIndex,
         sortBy: sortable ? sort.sortBy : null,
@@ -253,6 +287,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
         _items = merged;
         _fetched = fetched;
         _hasMore =
+            widget.source != 'similar' &&
             page.items.isNotEmpty &&
             (more ? grew : true) &&
             page.hasMore(fetched: fetched, pageSize: _pageSize);

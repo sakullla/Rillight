@@ -1,3 +1,7 @@
+import '../auth/tv_server_selection_page.dart';
+import '../auth/auth_scope.dart';
+import '../home/catalog_scope.dart';
+
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -17,12 +21,14 @@ class TvTopNavBar extends StatelessWidget {
     required this.onSelect,
     required this.onEnter,
     this.homeNode,
+    this.onServerEntered,
     this.username,
     this.overImage = false,
   });
 
   /// 当前面板下标。
   final int index;
+  final VoidCallback? onServerEntered;
 
   /// 确认/点按:只切换面板,焦点留在导航栏。
   final ValueChanged<int> onSelect;
@@ -140,8 +146,28 @@ class TvTopNavBar extends StatelessWidget {
               ],
               const Spacer(),
               if (username case final name? when name.isNotEmpty)
-                IgnorePointer(
-                  child: _UserChip(key: const Key('tv-nav-user'), name: name),
+                SizedBox(
+                  width: 190 * s,
+                  child: TvAction(
+                    key: const Key('tv-nav-user'),
+                    leading: const Icon(AppIcons.server),
+                    onPressed: () => showTvServerSelection(
+                      context,
+                      auth: AuthScope.of(context),
+                      onEntered: () async {
+                        CatalogScope.maybeOf(context)?.reload();
+                        onServerEntered?.call();
+                      },
+                      onLineChanged: () async {
+                        CatalogScope.maybeOf(context)?.reload();
+                      },
+                    ),
+                    child: Text(
+                      AuthScope.of(context).session?.server.displayName ?? name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -204,51 +230,6 @@ class _Brand extends StatelessWidget {
         ),
         SizedBox(width: 8 * s),
         Text(name, style: theme.textTheme.titleMedium),
-      ],
-    );
-  }
-}
-
-class _UserChip extends StatelessWidget {
-  const _UserChip({super.key, required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final s = TvDesign.scaleOf(context);
-    final initial = name.characters.first.toUpperCase();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 160 * s),
-          child: Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        SizedBox(width: 10 * s),
-        Container(
-          width: (15 * s) * 2,
-          height: (15 * s) * 2,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: scheme.primaryContainer,
-          ),
-          child: Text(
-            initial,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: scheme.onPrimaryContainer,
-            ),
-          ),
-        ),
       ],
     );
   }

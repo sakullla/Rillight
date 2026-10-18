@@ -129,26 +129,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     _userAgent.text = server.normalizedUserAgent ?? '';
   }
 
-  Future<void> _manageServers() => showPhoneServerManager(
-    context,
-    auth: AuthScope.of(context),
-    onSelect: (id, lineId) async {
-      final server = AuthScope.of(context).savedServers
-          .firstWhere((s) => s.id == id);
-      setState(() => _select(server.copyWith(activeLineId: lineId)));
-    },
-    onAddServer: () {
-      if (!mounted) return;
-      setState(() {
-        _draft?.selectedServerId = null;
-        _draft?.selectedLineId = null;
-        _address.clear();
-        _path.clear();
-        _username.clear();
-        _password.clear();
-      });
-    },
-  );
+  Future<void> _manageServers() =>
+      showPhoneServerManagerSheet(context, AuthScope.of(context));
 
   void _select(SavedServer server) {
     _applyServer(server);

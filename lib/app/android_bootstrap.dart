@@ -22,11 +22,13 @@ class AndroidBootstrap extends StatefulWidget {
     super.key,
     this.resolveEnvironment,
     this.createAuth,
+    this.createRuntime,
     this.enableUpdates = false,
   });
 
   final Future<PresentationEnvironment> Function()? resolveEnvironment;
   final Future<AuthController> Function()? createAuth;
+  final Future<PlaybackRuntime?> Function(AuthController)? createRuntime;
   final bool enableUpdates;
 
   @override
@@ -36,6 +38,7 @@ class AndroidBootstrap extends StatefulWidget {
 class _AndroidBootstrapState extends State<AndroidBootstrap> {
   RillightApp? _app;
   bool _failed = false;
+  ConfigurationUpgradeFailure? _upgradeFailure;
   bool _detectionFailed = false;
   bool _busy = false;
 
@@ -50,8 +53,11 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
     setState(() {
       _busy = true;
       _failed = false;
+      _upgradeFailure = null;
       _detectionFailed = false;
     });
+    AuthController? pendingAuth;
+    PlaybackRuntime? pendingPlayback;
     try {
       var environment = usePhone
           ? PresentationEnvironment.phone
@@ -82,12 +88,20 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
       // 外观仍在上屏前就绪,避免启动闪一下错误亮度。
       final appearance = AppearanceController();
       final (auth, _, supportDirectory) = await (
-        (widget.createAuth ?? createProductionAuth)(),
+        () async {
+          try {
+            return await (widget.createAuth ?? createProductionAuth)();
+          } on ConfigurationUpgradeFailure catch (error) {
+            _upgradeFailure = error;
+            rethrow;
+          }
+        }(),
         appearance.ready,
         widget.createAuth != null
             ? Future<Directory?>.value()
             : getApplicationSupportDirectory(),
       ).wait;
+      pendingAuth = auth;
       if (!mounted) {
         auth.dispose();
         return;
@@ -101,9 +115,17 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         auth.dispose();
         return;
       }
-      final playback = widget.createAuth == null
+      final playback = widget.createRuntime != null
+          ? await widget.createRuntime!(auth)
+          : widget.createAuth == null
           ? await PlaybackRuntime.production(auth)
           : null;
+      pendingPlayback = playback;
+      if (!mounted) {
+        await playback?.history.close();
+        auth.dispose();
+        return;
+      }
       setState(
         () => _app = RillightApp(
           enableUpdates: widget.enableUpdates,
@@ -116,7 +138,12 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
           appearance: appearance,
         ),
       );
-    } catch (_) {
+      pendingAuth = null;
+      pendingPlayback = null;
+    } catch (error) {
+      await pendingPlayback?.history.close();
+      pendingAuth?.dispose();
+      if (error is ConfigurationUpgradeFailure) _upgradeFailure = error;
       // Startup failures can contain private paths or credentials. Present a
       // recoverable message without dumping exception text into the UI.
       if (mounted) setState(() => _failed = true);
@@ -164,8 +191,26 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
                           Text(
                             _detectionFailed
                                 ? l10n.deviceDetectionFailed
+                                : _upgradeFailure != null
+                                ? (_upgradeFailure!.history
+                                      ? l10n.historyRecoveryFailed
+                                      : l10n.configurationUpgradeFailed)
                                 : l10n.appInitializationFailed,
                           ),
+                          if (_upgradeFailure != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              _upgradeFailure!.history
+                                  ? l10n.historyRecoveryHint
+                                  : l10n.configurationRecoveryHint,
+                            ),
+                            AppSelectableText(
+                              _upgradeFailure!.originalPath ??
+                                  _upgradeFailure!.directory,
+                            ),
+                            if (_upgradeFailure!.backupPath != null)
+                              AppSelectableText(_upgradeFailure!.backupPath!),
+                          ],
                           const SizedBox(height: 16),
                           AppButton(
                             autofocus: true,

@@ -104,6 +104,29 @@ void main() {
     }
   }
 
+  test(
+    'failed Jellyfin selection leaves the previous Emby selection durable',
+    () async {
+      final embyId = auth.session!.server.id;
+      await selectJellyfin();
+      final jellyfinId = auth.session!.server.id;
+      await auth.switchTo(embyId);
+      final before = (await auth.sources.store.load()).lastServerId;
+      jellyfin.serverId = 'changed-remote';
+      await auth.switchTo(jellyfinId);
+      expect(auth.session!.server.id, embyId);
+      expect((await auth.sources.store.load()).lastServerId, before);
+      final restored = AuthController(
+        client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+        credentials: auth.credentials,
+        servers: auth.sources.store,
+      );
+      addTearDown(restored.dispose);
+      await restored.restore();
+      expect(restored.session!.server.id, embyId);
+    },
+  );
+
   test('provider switch replaces captured detail client and discards old catalog/search responses', () async {
     final catalog = CatalogController(auth: auth);
     final search = SearchController(auth: auth, cache: catalog.cache);
@@ -161,27 +184,37 @@ void main() {
     },
   );
 
-  test('selected session survives aggregation scope but Home/relogin authority revokes pending requests', () async {
-    await selectJellyfin();
-    final id = auth.session!.server.id;
-    await auth.sources.configureScope(id, participates: false, libraryIds: {});
-    expect(auth.isLoggedIn, isTrue);
-    expect((await auth.client.getItem('movie-1')).id, 'movie-1');
-    final old = auth.client;
-    final gate = Completer<void>();
-    jellyfin.delay = gate;
-    jellyfin.arrived = Completer<void>();
-    final request = old.getItem('movie-1');
-    final rejection = expectLater(request, throwsA(anything));
-    await jellyfin.arrived!.future;
-    final attempt = await auth.sources.beginAuthorization(
-      serviceType: MediaServerType.jellyfin,
-      region: AccessRegion.ordinary,
-      configuredServerId: id,
-    );
-    expect(auth.isLoggedIn, isFalse);
-    gate.complete();
-    await rejection;
-    attempt.cancel();
-  });
+  test(
+    'selected session survives pending authorization; logout revokes requests',
+    () async {
+      await selectJellyfin();
+      final id = auth.session!.server.id;
+      expect(auth.isLoggedIn, isTrue);
+      expect((await auth.client.getItem('movie-1')).id, 'movie-1');
+      final old = auth.client;
+      final gate = Completer<void>();
+      jellyfin.delay = gate;
+      jellyfin.arrived = Completer<void>();
+      final request = old.getItem('movie-1');
+      await jellyfin.arrived!.future;
+      final attempt = await auth.sources.beginAuthorization(
+        serviceType: MediaServerType.jellyfin,
+        configuredServerId: id,
+      );
+      expect(auth.isLoggedIn, isTrue);
+      gate.complete();
+      expect((await request).id, 'movie-1');
+      final revokedGate = Completer<void>();
+      jellyfin.delay = revokedGate;
+      jellyfin.arrived = Completer<void>();
+      final revoked = old.getItem('movie-1');
+      final rejection = expectLater(revoked, throwsA(anything));
+      await jellyfin.arrived!.future;
+      await auth.sources.logoutSource(id);
+      revokedGate.complete();
+      await rejection;
+      expect(attempt.isValid, isFalse);
+      expect(auth.isLoggedIn, isFalse);
+    },
+  );
 }

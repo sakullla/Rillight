@@ -1084,7 +1084,7 @@ void main() {
       width: 360,
       reduceMotion: true,
       intercept: (dio) {
-        dio.interceptors.add(
+        fakeEmbyTransport(dio).interceptors.add(
           InterceptorsWrapper(
             onRequest: (options, handler) async {
               final uri = options.uri.toString();
@@ -1635,7 +1635,7 @@ void main() {
         width: 360,
         reduceMotion: true,
         intercept: (dio) {
-          dio.interceptors.add(
+          fakeEmbyTransport(dio).interceptors.add(
             InterceptorsWrapper(
               onRequest: (options, handler) async {
                 final path = options.uri.path;
@@ -2237,7 +2237,7 @@ void main() {
         ]);
       },
       intercept: (dio) {
-        dio.interceptors.add(
+        fakeEmbyTransport(dio).interceptors.add(
           InterceptorsWrapper(
             onRequest: (options, handler) async {
               if (options.uri.toString().contains(
@@ -2648,7 +2648,7 @@ Future<_Started> _startDetail(
 }
 
 void _holdItemDetail(Dio dio, Completer<void> gate) {
-  dio.interceptors.add(
+  fakeEmbyTransport(dio).interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) async {
         final uri = options.uri.toString();
@@ -2680,7 +2680,7 @@ Future<_Started> _startLibrary(
     intercept: holdDetail == null
         ? null
         : (dio) {
-            dio.interceptors.add(
+            fakeEmbyTransport(dio).interceptors.add(
               InterceptorsWrapper(
                 onRequest: (options, handler) async {
                   final uri = options.uri.toString();

@@ -224,11 +224,19 @@ class SessionByteCache {
   DiskCacheSession? _disk;
   String? _degradation;
   String? _diskOpenFailure;
+
+  /// Writer contention does not invalidate immutable blocks. Reads still use
+  /// the independent reader and checksum validation to establish availability.
+  bool get hasReadUncertainty {
+    final degradation = _degradation ?? _disk?.degradation;
+    return degradation != null &&
+        degradation != 'disk-timeout' &&
+        degradation != 'disk-lock-timeout';
+  }
+
   // A writer timeout does not invalidate immutable blocks. The independent
   // foreground reader can still verify/read them while publication settles.
-  bool get _diskBlocksReadable =>
-      _disk != null &&
-      (_disk!.degradation == null || _disk!.degradation == 'disk-timeout');
+  bool get _diskBlocksReadable => _disk != null && !hasReadUncertainty;
   bool _closed = false;
   int _memoryBytes = 0;
   int _indexBytes = 0;

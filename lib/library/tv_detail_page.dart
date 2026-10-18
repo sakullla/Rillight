@@ -110,7 +110,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
           itemId: target.id,
           source: request.source,
           libraryId: request.libraryId,
-          regionGeneration: request.regionGeneration,
+          accessGeneration: request.accessGeneration,
           mediaSourceId: c.item?.isSeries == true ? null : c.mediaSourceId,
           autoResume: !fromStart,
         ),

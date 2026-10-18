@@ -228,7 +228,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         itemId: itemId,
         source: request.source,
         libraryId: request.libraryId,
-        regionGeneration: request.regionGeneration,
+        accessGeneration: request.accessGeneration,
         // The displayed first source is a default, not an explicit choice.
         // Only pin it when the user picked a version or one of its tracks on this page.
         mediaSourceId: isTargetEpisode && hasExplicitStreamChoice
@@ -658,6 +658,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             child: Stack(
               children: [
                 AppRefresh(
+                  // 头图铺到状态栏下，浮层顶栏盖在上面。
+                  edgeOffset:
+                      MediaQuery.paddingOf(context).top +
+                      PhoneTopBar.bodyHeight,
                   onRefresh: _refresh,
                   child: CustomScrollView(
                     key: PageStorageKey('detail-${widget.itemId}'),

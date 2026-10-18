@@ -1,3 +1,5 @@
+import '../../auth/server_entry_coordinator.dart';
+
 import 'package:rillight/media_server/media_server_client.dart';
 
 import 'dart:async';
@@ -37,12 +39,10 @@ enum QuerySummary {
   allFailed,
 }
 
-/// Null serverIds means this region's participating services. An empty set
-/// deliberately selects nothing. Library selections are always intersected
-/// with the registry, never used to widen its authority.
+/// Null serverIds means all currently accessible servers. An empty set
+/// deliberately selects nothing. Library IDs are query filters, never authority.
 class QueryScope {
   QueryScope({
-    required this.region,
     Set<String>? serverIds,
     Map<String, Set<String>> libraries = const {},
     this.mode = QueryMode.browse,
@@ -73,7 +73,6 @@ class QueryScope {
       throw ArgumentError('Unsupported loaded-set sort: $sortBy');
     }
   }
-  final AccessRegion region;
   final Set<String>? serverIds;
   final Map<String, Set<String>> libraries;
   final QueryMode mode;
@@ -91,6 +90,7 @@ class QuerySourceKey {
   const QuerySourceKey(this.serverId, this.libraryId);
   final String serverId;
   final String libraryId;
+  bool get isDiscovery => libraryId.isEmpty;
   @override
   bool operator ==(Object other) =>
       other is QuerySourceKey &&
@@ -103,6 +103,7 @@ class QuerySourceKey {
 class SourceQueryState {
   SourceQueryState(this.key);
   final QuerySourceKey key;
+  bool get isDiscovery => key.isDiscovery;
   SourceQueryStatus status = SourceQueryStatus.idle;
   int cursor = 0;
   int? total;
@@ -180,6 +181,33 @@ class AggregationQueryController extends ChangeNotifier {
   /// Source-based scroll anchor survives reliable group merges. UI resolves
   /// it with resolveAnchor after loading more; revoked sources clear it.
   SourceReference? anchor;
+  final Map<String, ServerEntryTicket> _entries = {};
+  bool _allows(String id) =>
+      registry.access.allows(id) ||
+      (_entries[id]?.authorizes(registry.access, id) ?? false);
+  OperationPermit permitFor(SourceAccount account, {String? libraryId}) =>
+      registry.permit(
+        account,
+        libraryId: libraryId,
+        entry: _entries[account.configuredServerId],
+      );
+  ServerEntryTicket? entryFor(String serverId) => _entries[serverId];
+  Future<void> addEntry(ServerEntryTicket entry) async {
+    entry.requireValid();
+    final scope = _scope;
+    if (_disposed ||
+        scope == null ||
+        (scope.serverIds != null &&
+            !scope.serverIds!.contains(entry.serverId))) {
+      entry.cancel();
+      throw StateError('Comparison scope changed');
+    }
+    _entries[entry.serverId]?.cancel();
+    _entries[entry.serverId] = entry;
+    final discovery = SourceQueryState(QuerySourceKey(entry.serverId, ''));
+    _states[discovery.key] = discovery;
+    await _discover(discovery);
+  }
 
   Future<void> retryServer(String serverId) {
     _sanitize();
@@ -204,19 +232,15 @@ class AggregationQueryController extends ChangeNotifier {
 
   bool _selected(QuerySourceKey key) {
     final scope = _scope;
-    if (scope == null || !registry.access.allows(scope.region)) return false;
-    return registry
-        .project(scope.region)
-        .any(
-          (s) =>
-              s.id == key.serverId &&
-              s.participates &&
-              s.scopeKnown &&
-              s.libraryIds.contains(key.libraryId) &&
-              (scope.serverIds == null || scope.serverIds!.contains(s.id)) &&
-              (!scope.libraries.containsKey(s.id) ||
-                  scope.libraries[s.id]!.contains(key.libraryId)),
-        );
+    if (scope == null || !_allows(key.serverId)) return false;
+    return registry.project().any(
+      (s) =>
+          s.id == key.serverId &&
+          (scope.serverIds == null || scope.serverIds!.contains(s.id)) &&
+          (key.isDiscovery ||
+              !scope.libraries.containsKey(s.id) ||
+              scope.libraries[s.id]!.contains(key.libraryId)),
+    );
   }
 
   void _sanitize() {
@@ -318,18 +342,13 @@ class AggregationQueryController extends ChangeNotifier {
     final scope = _scope;
     if (scope == null) return const [];
     return List.unmodifiable(
-      history
-          .records(scope.region)
-          .where(
-            (r) =>
-                !r.played &&
-                _selected(
-                  QuerySourceKey(
-                    r.source.account.configuredServerId,
-                    r.libraryId,
-                  ),
-                ),
-          ),
+      history.records().where(
+        (r) =>
+            !r.played &&
+            _selected(
+              QuerySourceKey(r.source.account.configuredServerId, r.libraryId),
+            ),
+      ),
     );
   }
 
@@ -339,7 +358,6 @@ class AggregationQueryController extends ChangeNotifier {
   }) {
     _sanitize();
     return history.resolveResume(
-      region: _scope!.region,
       index: _index,
       anchor: reference,
       remote: remote.where(
@@ -381,7 +399,7 @@ class AggregationQueryController extends ChangeNotifier {
   }
 
   /// Resets results, counts, errors and anchor synchronously before first await.
-  Future<void> start(QueryScope scope) {
+  Future<void> start(QueryScope scope) async {
     _revision++;
     _scope = scope;
     anchor = null;
@@ -390,30 +408,71 @@ class AggregationQueryController extends ChangeNotifier {
     _index.removeWhere((_) => true);
     _indexDirty = false;
     _sortedWorks = null;
-    if (registry.access.allows(scope.region) &&
-        !(scope.mode == QueryMode.search && scope.keyword.trim().isEmpty)) {
-      for (final server in registry.project(scope.region)) {
-        if (!server.participates ||
-            !server.scopeKnown ||
-            (scope.serverIds != null &&
-                !scope.serverIds!.contains(server.id))) {
+    final revision = _revision;
+    final targets = registry
+        .project()
+        .where(
+          (server) =>
+              _allows(server.id) &&
+              (scope.serverIds == null ||
+                  scope.serverIds!.contains(server.id)) &&
+              !(scope.mode == QueryMode.search && scope.keyword.trim().isEmpty),
+        )
+        .toList();
+    for (final server in targets) {
+      final key = QuerySourceKey(server.id, '');
+      _states[key] = SourceQueryState(key)..status = SourceQueryStatus.loading;
+    }
+    notifyListeners();
+    if (_disposed || revision != _revision) return;
+    final discoveries = _states.values.toList();
+    await Future.wait(discoveries.map(_discover));
+  }
+
+  Future<void> _discover(SourceQueryState discovery) async {
+    final revision = _revision;
+    final attempt = ++discovery.attempt;
+    final scope = _scope!;
+    final serverId = discovery.key.serverId;
+    discovery.status = SourceQueryStatus.loading;
+    discovery.hasMore = false;
+    notifyListeners();
+    bool current() => _owns(discovery, revision, attempt);
+    try {
+      if (!current()) return;
+      final session =
+          await (_entries[serverId] == null
+                  ? registry.ensureSession(serverId)
+                  : registry.prepareEntrySession(serverId))
+              .timeout(timeout);
+      if (!current()) return;
+      final permit = permitFor(session.account);
+      discovery.permit = permit;
+      final views = await permit
+          .dispatch((client) => client.getViews())
+          .timeout(timeout);
+      if (!current() || !permit.isValid) return;
+      _states.remove(discovery.key);
+      final states = <SourceQueryState>[];
+      for (final view in views) {
+        if (view.id.isEmpty ||
+            (scope.libraries.containsKey(serverId) &&
+                !scope.libraries[serverId]!.contains(view.id))) {
           continue;
         }
-        for (final library in server.libraryIds) {
-          if (scope.libraries.containsKey(server.id) &&
-              !scope.libraries[server.id]!.contains(library)) {
-            continue;
-          }
-          final key = QuerySourceKey(server.id, library);
-          _states[key] = SourceQueryState(key);
-        }
+        final key = QuerySourceKey(serverId, view.id);
+        final state = SourceQueryState(key);
+        _states[key] = state;
+        states.add(state);
       }
+      notifyListeners();
+      if (_disposed || revision != _revision) return;
+      await Future.wait(states.map(_load));
+    } catch (error) {
+      if (!current()) return;
+      discovery.status = classifyQueryFailure(error);
+      notifyListeners();
     }
-    final revision = _revision;
-    final states = _states.values.toList();
-    notifyListeners();
-    if (_disposed || revision != _revision) return Future.value();
-    return Future.wait(states.map(_load)).then((_) {});
   }
 
   /// Reuse an already-authorized independent registry session (for detail
@@ -421,7 +480,7 @@ class AggregationQueryController extends ChangeNotifier {
   void useAccount(SourceAccount account, {required String libraryId}) {
     final permit = permitForAccount(registry, account, libraryId: libraryId);
     if (permit == null || !permit.isValid) {
-      throw StateError('Source outside allowed scope');
+      throw StateError('Source access revoked');
     }
     _accounts[account.configuredServerId] = account;
   }
@@ -430,7 +489,7 @@ class AggregationQueryController extends ChangeNotifier {
     final cached = _accounts[id];
     if (cached != null) {
       try {
-        registry.permit(cached, libraryId: library).requireValid();
+        permitFor(cached, libraryId: library).requireValid();
         return cached;
       } on StateError {
         _accounts.remove(id);
@@ -438,11 +497,9 @@ class AggregationQueryController extends ChangeNotifier {
     }
     final pending = _authenticating[id];
     if (pending != null) return pending;
-    final future = registry.acquireAccount(
-      id,
-      region: _scope!.region,
-      libraryId: library,
-    );
+    final future = _entries[id] == null
+        ? registry.acquireAccount(id, libraryId: library)
+        : registry.prepareEntrySession(id).then((session) => session.account);
     _authenticating[id] = future;
     try {
       final account = await future;
@@ -457,6 +514,7 @@ class AggregationQueryController extends ChangeNotifier {
     _sanitize();
     final state = _states[key];
     if (state == null ||
+        state.isDiscovery ||
         !state.hasMore ||
         state.status == SourceQueryStatus.loading) {
       return;
@@ -468,6 +526,10 @@ class AggregationQueryController extends ChangeNotifier {
     _sanitize();
     final state = _states[key];
     if (state == null || state.status == SourceQueryStatus.loading) return;
+    if (state.isDiscovery) {
+      await _discover(state);
+      return;
+    }
     if (state.permit?.isValid == false) {
       state.cursor = 0;
       state.items.clear();
@@ -485,6 +547,7 @@ class AggregationQueryController extends ChangeNotifier {
       state.attempt == attempt &&
       _selected(state.key);
   Future<void> _load(SourceQueryState state) async {
+    if (state.isDiscovery) throw StateError('Discovery is not a media library');
     final revision = _revision;
     final attempt = ++state.attempt;
     final scope = _scope!;
@@ -498,7 +561,7 @@ class AggregationQueryController extends ChangeNotifier {
         state.key.libraryId,
       ).timeout(timeout);
       if (!_owns(state, revision, attempt)) return;
-      permit = registry.permit(account, libraryId: state.key.libraryId);
+      permit = permitFor(account, libraryId: state.key.libraryId);
       state.permit = permit;
       final page = await permit
           .dispatch(
@@ -592,15 +655,13 @@ class AggregationQueryController extends ChangeNotifier {
   }
 
   void _revoked() {
-    if (_scope?.region != AccessRegion.private) return;
-    _revision++;
-    _states.clear();
-    _accounts.clear();
-    _authenticating.clear();
-    anchor = null;
-    _index.removeWhere((_) => true);
-    _indexDirty = false;
-    _sortedWorks = null;
+    _states.removeWhere((key, _) => !_allows(key.serverId));
+    _accounts.removeWhere((id, _) => !_allows(id));
+    _authenticating.removeWhere((id, _) => !_allows(id));
+    if (anchor != null && !_allows(anchor!.account.configuredServerId)) {
+      anchor = null;
+    }
+    _rebuild();
     if (!_disposed) notifyListeners();
   }
 
@@ -615,6 +676,10 @@ class AggregationQueryController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final entry in _entries.values) {
+      entry.cancel();
+    }
+    _entries.clear();
     _revision++;
     registry.access.removeRevocationHook(_revoked);
     registry.removeMembershipCleanup(_membership);

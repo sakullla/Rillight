@@ -1686,6 +1686,7 @@ class TvInput extends StatelessWidget {
     this.onSubmitted,
     this.placeholder,
     this.keyboardType,
+    this.maxLines = 1,
   });
   final String label;
   final TextEditingController controller;
@@ -1701,6 +1702,7 @@ class TvInput extends StatelessWidget {
   /// 值为空时的提示文字;缺省「未填写」式的弱化标签。
   final String? placeholder;
   final TextInputType? keyboardType;
+  final int maxLines;
 
   Future<void> _edit(BuildContext context) async {
     await showAppDialog<void>(
@@ -1720,6 +1722,7 @@ class TvInput extends StatelessWidget {
               autocorrect: false,
               enableSuggestions: !secret,
               keyboardType: keyboardType,
+              maxLines: maxLines,
               style: AppUiTheme.of(context).textTheme.bodyLarge,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => Navigator.pop(context),
@@ -1789,7 +1792,7 @@ class TvInput extends StatelessWidget {
                 ),
                 Text(
                   empty ? (placeholder ?? '—') : text,
-                  maxLines: 1,
+                  maxLines: maxLines,
                   overflow: TextOverflow.ellipsis,
                   style: empty ? TextStyle(color: secondary) : null,
                 ),

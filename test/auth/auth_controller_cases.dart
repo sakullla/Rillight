@@ -111,6 +111,12 @@ void main() {
       username: 'alice',
       password: 'correct-horse',
     );
+    for (final host in ['xn--fsqu00a.example', 'xn--bcher-kva.example']) {
+      adapter.add(
+        FakeEmbyServer(baseUrl: Uri.parse('https://$host'))
+          ..issuedTokens.addAll(server.issuedTokens),
+      );
+    }
     expect(
       await auth.addLine(
         configuredSourceId(auth, server.serverId),
@@ -270,6 +276,55 @@ void main() {
     );
     expect(auth.failure, isNull);
   });
+
+  for (final boundary in ['lock', 'another account']) {
+    test(
+      'retained facade renews repeatedly but cannot cross $boundary',
+      () async {
+        final auth = controller();
+        addTearDown(auth.dispose);
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        final retained = auth.client;
+        for (var renewal = 0; renewal < 3; renewal++) {
+          server.issuedTokens.clear();
+          final oldToken = auth.session!.accessToken;
+          expect(await retained.getViews(), isNotEmpty);
+          expect(auth.session!.accessToken, isNot(oldToken));
+        }
+        if (boundary == 'lock') {
+          final id = auth.session!.server.id;
+          await auth.serverAccess.setPassword(
+            id,
+            'local',
+            'local',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(id, ref),
+          );
+        } else {
+          final other = FakeEmbyServer(
+            baseUrl: Uri.parse('http://other.test:8096'),
+            serverId: 'other-server',
+          );
+          adapter.add(other);
+          await auth.connect(
+            address: other.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+        }
+        // Let the current session's independent library-count request finish.
+        await Future<void>.delayed(Duration.zero);
+        final before = server.requests.length;
+        expect(await retained.onRefreshSession!(), isFalse);
+        await expectLater(retained.getViews(), throwsA(anything));
+        expect(server.requests.length, before);
+      },
+    );
+  }
 
   test('401 without a stored password signs out to the connect form', () async {
     final credentials = MemoryCredentialStore();
@@ -435,7 +490,7 @@ void main() {
       expect(auth.client.baseUrl, isNull);
       expect(auth.savedServers.single.lines, hasLength(2));
       expect(auth.savedServers.single.activeLineId, wanLineId);
-      expect(auth.failure?.detail, 'HTTP 403: 该线路已被禁用');
+      expect(auth.failure?.detail, 'HTTP 403');
     },
   );
 
@@ -505,10 +560,10 @@ void main() {
       expect(auth.client.baseUrl, wan.baseUrl);
       expect(auth.savedServers.single.activeLineId, wanLineId);
       expect(auth.prefill, isNull);
-      expect(auth.failure, isNull);
+      expect(auth.failure, isNotNull);
       expect(auth.lineSwitchFailure, isNotNull);
       expect(auth.lineSwitchFailure?.address, server.baseUrl.toString());
-      expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+      expect(auth.lineSwitchFailure?.detail, '无法连接该线路，请检查连接或重新登录');
     },
   );
 
@@ -516,7 +571,7 @@ void main() {
     'switching to a line with a different server id keeps line and session',
     () async {
       final impostor = FakeEmbyServer(
-        serverId: 'server-id-impostor',
+        serverId: server.serverId,
         serverName: '伪装服务器',
         baseUrl: Uri.parse('http://emby-impostor.test:8096'),
       );
@@ -527,7 +582,9 @@ void main() {
         username: 'alice',
         password: 'correct-horse',
       );
+      impostor.issuedTokens.addAll(server.issuedTokens);
       await auth.appendLines([impostor.baseUrl.toString()]);
+      impostor.serverId = 'server-id-impostor';
       final lineId = auth.savedServers.single.activeLineId;
       final impostorLine = auth.savedServers.single.lines.firstWhere(
         (line) => line.address == impostor.baseUrl.toString(),
@@ -544,7 +601,7 @@ void main() {
       expect(auth.client.baseUrl, server.baseUrl);
       expect(auth.savedServers.single.activeLineId, lineId);
       expect(auth.prefill, isNull);
-      expect(auth.failure, isNull);
+      expect(auth.failure, isNotNull);
       expect(auth.lineSwitchFailure, isNotNull);
       expect(auth.lineSwitchFailure?.detail, '线路返回的服务器身份与当前服务器不一致');
       // The failure state is UI-readable and specific to the target line.

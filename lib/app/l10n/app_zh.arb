@@ -45,42 +45,12 @@
   "desktopSourceRestoreUnavailable": "原来源访问许可已失效，无法恢复。",
   "desktopSourceRestoreFailed": "原来源恢复失败，请检查来源后重试。",
   "aggregation": "聚合",
-  "aggregationLibraryScope": "媒体库范围",
-  "aggregationPrivate": "私密区域",
   "aggregationPrivateLocked": "私密区域已锁定，请先在服务管理中解锁",
-  "aggregationUnavailableDetail": "此来源详情当前不可访问，请返回允许的来源范围",
-  "aggregationAllowedSources": "全部允许来源",
-  "aggregationAllSources": "全部普通来源",
-  "aggregationAllTypes": "全部类型",
-  "aggregationAllWatching": "全部观看状态",
-  "aggregationContinue": "继续观看",
-  "aggregationRecent": "最近更新",
-  "aggregationLoaded": "已加载作品",
-  "aggregationLoadedRemote": "远端已加载作品",
-  "aggregationRemoteEmpty": "远端暂无继续观看项，本机记录仍可用",
-  "aggregationRemoteConflict": "远端观看时间不可信，请明确选择实际来源（不取最大进度）",
-  "aggregationComplete": "范围完整",
-  "aggregationIncomplete": "范围尚不完整 · 仅对已加载结果排序",
-  "aggregationEmptyScope": "未选择可参与的服务或媒体库",
-  "aggregationEmpty": "所选范围没有匹配作品",
+  "aggregationUnavailableDetail": "暂时无法打开此服务器的内容，请返回重试。",
+  "aggregationEmpty": "暂无内容",
   "aggregationAllFailed": "所选来源全部失败，请逐来源重试",
   "aggregationPartialFailure": "部分来源失败，已保留成功结果",
   "aggregationRetry": "重试此来源",
-  "aggregationMore": "加载此来源更多",
-  "aggregationLocalRecord": "本机确认观看记录",
-  "aggregationResumeActual": "从本机记录的实际来源继续",
-  "aggregationSources": "查找同源",
-  "aggregationConfirmed": "已确认来源",
-  "aggregationCandidate": "待辨认候选（非确认续播来源）",
-  "aggregationUnknown": "未知",
-  "aggregationLoading": "加载中",
-  "aggregationAvailable": "已返回",
-  "aggregationTimeout": "超时",
-  "aggregationOffline": "离线",
-  "aggregationNeedsLogin": "需登录",
-  "aggregationForbidden": "无权限",
-  "aggregationFailed": "查询失败",
-  "aggregationRevoked": "许可已撤销",
   "aggregationEpisodeLookup": "查找此集",
   "aggregationEpisodeMapping": "核对分季与分集对应",
   "aggregationEpisodeMappingWarning": "仅季号和集号相同不能证明同一集。请先核对两份版本是否采用相同的分季和分集方式；不确定时不会提供可直接续播的来源。",
@@ -1633,7 +1603,11 @@
   "@phoneHomeEdit": {
     "description": "Home-screen entry and title for reordering or hiding phone home rows."
   },
-  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。",
+  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。",
+  "configurationUpgradeFailed": "配置升级未完成，原始配置已保留。",
+  "historyRecoveryFailed": "播放记录暂时无法读取",
+  "historyRecoveryHint": "请保留下面的原始文件；修复文件或从已存在的备份恢复后重试。",
+  "configurationRecoveryHint": "请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。",
   "@phoneHomeEditHint": {
     "description": "Explains that the home editor does not change the libraries tab."
   },
@@ -2251,11 +2225,35 @@
   "updateNoRelease": "暂时没有可用的正式发布，请稍后重试。",
   "updateInvalidResponse": "更新信息无效，无法确认是否有新版。请稍后重试。",
   "updatePackageVersion": "安装包版本 {version}",
-  "@updatePackageVersion": {"placeholders": {"version": {"type": "String"}}},
+  "@updatePackageVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "updateDownloadingUnknown": "正在下载 · 已下载 {received}",
-  "@updateDownloadingUnknown": {"placeholders": {"received": {"type": "String"}}},
+  "@updateDownloadingUnknown": {
+    "placeholders": {
+      "received": {
+        "type": "String"
+      }
+    }
+  },
   "updateDownloading": "正在下载 {percent}% · {received} / {total}",
-  "@updateDownloading": {"placeholders": {"received": {"type": "String"}, "total": {"type": "String"}, "percent": {"type": "int"}}},
+  "@updateDownloading": {
+    "placeholders": {
+      "received": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      },
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
   "updateVerifying": "正在校验安装包…",
   "updateReady": "安装包已通过完整性校验，可继续安装。",
   "updateCancelled": "下载已取消，可重新下载。",
@@ -2281,14 +2279,184 @@
   "updateIncompatible": "安装包与当前应用身份、签名或版本不兼容，无法安装。可打开 Release 页查看。",
   "updateInstallFailed": "无法启动系统安装流程。请按平台指引处理或重试，也可打开 Release 页。",
   "updateLocalPackage": "本地安装包：{path}",
-  "@updateLocalPackage": {"placeholders": {"path": {"type": "String"}}},
+  "@updateLocalPackage": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
   "updateReminderTitle": "应用更新",
+  "updateLater": "稍后处理",
+  "serversTitle": "服务器",
+  "serversSearch": "搜索名称或地址",
+  "serversEmptyTitle": "添加你的第一台服务器",
+  "serversEmptyHint": "连接 Emby、Jellyfin 或 Plex，开始观看。",
+  "serversNoResults": "没有找到服务器",
+  "serversNoResultsHint": "换个关键词，或清除搜索。",
+  "serversSearchResults": "搜索结果",
+  "serversConnectionError": "连接失败",
+  "serversClearSearch": "清除搜索",
+  "serversMore": "更多操作",
+  "serversEdit": "编辑服务器",
+  "serversRemove": "移除服务器",
+  "serversRemoveHint": "只移除此设备上的配置和登录，不会删除服务器上的内容。",
+  "serversCurrentImpact": "这是当前使用的服务器。继续将结束这台服务器的当前连接。",
+  "serversUp": "上移",
+  "serversDown": "下移",
+  "serversCurrent": "当前使用",
+  "serversLocked": "已锁定",
+  "serversEnter": "进入服务器",
+  "serversLines": "连接线路",
+  "serversAutomatic": "自动选择",
+  "serversAutomaticHint": "连接失败时尝试同一服务器的备用线路。",
+  "serversFixedHint": "选中具体线路后固定使用，失败时由你决定是否更换。",
+  "serversActualLine": "正在使用",
+  "serversNotChecked": "尚未检查",
+  "serversCheck": "检查连接",
+  "serversCheckPassed": "连接正常",
+  "serversCheckFailed": "连接失败，可重试或换线",
+  "serversCheckIdentity": "这个地址属于另一台服务器",
+  "serversCheckLogin": "请重新登录",
+  "serversCheckUnknown": "检查未完成",
+  "serversCheckedAt": "检查于",
+  "serversSave": "保存",
+  "serversCancel": "取消",
+  "serversBack": "返回",
+  "serversName": "显示名称",
+  "serversIcon": "图标",
+  "serversIconDefault": "服务默认",
+  "serversIconHome": "家",
+  "serversIconCinema": "影院",
+  "serversIconCloud": "云端",
+  "serversAccount": "服务器账号",
+  "serversReauthorize": "重新登录 / 更换账号",
+  "serversSignOut": "退出此账号",
+  "serversSignOutHint": "保留服务器配置，下次进入时重新登录。",
+  "serversLinesHint": "同一服务器的不同地址。按顺序使用备用线路。",
+  "serversLineName": "线路名称（可选）",
+  "serversLineAddress": "服务器地址",
+  "serversLineAdd": "添加线路",
+  "serversLineEdit": "编辑线路",
+  "serversLineRemove": "移除这条线路",
+  "serversLineLast": "至少保留一条线路",
+  "serversLineDraftHint": "返回后继续编辑，点击服务器表单的“保存”才生效。",
+  "serversAdvanced": "高级设置",
+  "serversPassword": "进入时需要密码",
+  "serversPasswordHint": "本机进入密码；服务器账号保持登录。",
+  "serversPasswordSet": "设置进入密码",
+  "serversPasswordChange": "修改进入密码",
+  "serversPasswordDisable": "关闭进入密码",
+  "serversPasswordOld": "原进入密码",
+  "serversPasswordNew": "新进入密码",
+  "serversPasswordConfirm": "再次输入密码",
+  "serversPasswordInput": "本机进入密码",
+  "serversPasswordPrompt": "输入此服务器的本机进入密码，继续到原来的页面。",
+  "serversPasswordWrong": "密码不正确。",
+  "serversPasswordUnavailable": "无法读取进入密码。可返回后移除此本机条目，再正常登录添加。",
+  "serversPasswordMismatch": "两次密码不一致",
+  "serversPasswordRequired": "请输入 1–1024 个字符的密码",
+  "serversPasswordSaveFailed": "密码未保存。请检查原密码，稍后重试。",
+  "serversPasswordPending": "将在保存服务器时更新",
+  "serversConnectionImpact": "你正在修改当前连接。保存成功后将重新连接；取消会保留原连接。",
+  "serversSaveFailed": "未保存，请检查输入或连接后重试。",
+  "serversInvalidDraft": "请填写服务器名称和有效地址；线路地址不能重复。",
+  "serversAddTitle": "添加服务器",
+  "serversPaste": "粘贴导入",
+  "serversPasteHint": "仅在你点击后读取剪贴板。确认识别结果后再登录。",
+  "serversPasteText": "粘贴服务器信息",
+  "serversParse": "识别并预览",
+  "serversPasteGroups": "识别到多个账号，请选择要添加的一组",
+  "serversPasteIncomplete": "请检查并补全信息。每次只添加你选择的一组。",
+  "serversPasteUnknown": "未识别到服务器信息，可以修改原文后重试。",
+  "serversPasteExtra": "备用线路（每行一个地址）",
+  "serversPasteName": "名称（可选）",
+  "serversPastePreview": "确认服务器信息",
+  "serversContinue": "继续",
+  "serversEntryPlaybackImpact": "进入另一台服务器后，当前播放将结束，原服务器会重新锁定。",
+  "serversBusy": "正在连接…",
+  "serversConnectionFailed": "连接失败，原连接已保留。请检查线路或重新登录。",
+  "serversRetry": "重试",
+  "serversDone": "完成",
+  "serversChangeAccountHint": "重新授权成功后才替换账号；更换账号会结束原账号的播放。取消保留原登录。",
+  "serversPasswordOff": "未启用",
+  "serversPasswordOn": "已启用",
+  "serversImportFile": "从备份文件导入",
+  "serversSelectType": "选择服务类型",
+  "serversDismiss": "关闭",
+  "serversPasteGroup": "账号组",
+  "serversAddressHidden": "解锁后查看连接信息",
+  "serversNoAccount": "尚未登录",
+  "serversActionFailed": "操作未完成，请稍后重试。",
+  "serversPasswordBackoff": "密码错误。请稍后重试，或返回选择其他服务器。",
+  "serversRemotePassword": "修改服务器账号密码",
+  "serversBasic": "基本信息",
+  "serversPasswordRetryAfter": "{seconds} 秒后可重试",
+  "@serversPasswordRetryAfter": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "playbackReconnecting": "正在重新连接…",
+  "playbackTryingAlternative": "正在尝试备用线路…",
+  "playbackRecoveryStopped": "连接尚未恢复",
+  "playbackRecoveryPositionKept": "观看位置已保留，你可以重试或选择其他线路。",
+  "playbackChooseLine": "选择线路",
+  "playbackLineFailureHint": "线路未切换成功。请重试或选择其他线路。",
+  "playbackSwitchNeedsChoice": "继续前，请确认播放选择",
+  "playbackPositionUnavailable": "这个版本无法从原观看位置继续。可以从头播放，或取消切换。",
+  "playbackTimelineUncertain": "两个版本的时长或片段可能不同，请确认是否沿用原观看位置。",
+  "playbackAudioUnavailable": "原音轨不可用，请选择其他音轨。",
+  "playbackSubtitleUnavailable": "原字幕不可用，请选择其他字幕，或明确关闭字幕。",
+  "playbackUseDefaultAudio": "使用此版本的默认音轨",
+  "playbackContinueWithoutSubtitles": "关闭字幕继续",
+  "playbackStartFromBeginning": "从头播放",
+  "playbackContinueAtPosition": "沿用原观看位置",
+  "playbackCertificateStopped": "无法建立安全连接",
+  "playbackPermissionStopped": "当前账号没有播放权限",
+  "playbackRateLimited": "服务器暂时限制请求",
+  "playbackRetryAfterRepair": "修复后重试",
+  "playbackRetryAfterPermission": "权限恢复后重试",
+  "playbackRetryAfter": "{seconds} 秒后可重试",
+  "@playbackRetryAfter": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "playbackLinePending": "正在连接，成功后才会保存选择",
+  "playbackLineFixed": "固定线路",
+  "playbackLineActual": "正在使用：{line}",
+  "@playbackLineActual": {
+    "placeholders": {
+      "line": {
+        "type": "String"
+      }
+    }
+  },
+  "sourceSelectionAction": "选择影片来源",
+  "sourceSelectionEmpty": "暂未找到其他来源",
+  "sourceSelectionRetry": "部分来源加载失败，重试",
+  "sourceSelectionMore": "继续查找",
+  "sourceSelectionCheckDetails": "请核对影片详情",
+  "sourceSelectionHint": "选择来源查看详情，播放不会自动切换。",
+  "sourceSelectionPasswordTitle": "输入访问密码",
+  "sourceSelectionPasswordPrompt": "输入这台服务器的本机密码，查看可选来源。",
+  "sourceSelectionUnlock": "解锁",
+  "sourceSelectionUnavailable": "暂时无法加载影片来源，请重试。",
   "updateReminderSubtitle": "发现可用更新，可直接在应用内下载校验并安装",
   "updateVersionTransition": "当前 v{current} → 最新 v{target}",
   "@updateVersionTransition": {
     "placeholders": {
-      "current": {"type": "String"},
-      "target": {"type": "String"}
+      "current": {
+        "type": "String"
+      },
+      "target": {
+        "type": "String"
+      }
     }
   },
   "updateCurrentBadge": "已是最新",
@@ -2298,11 +2466,189 @@
   "updateIgnoredBadge": "已忽略 v{version} 提醒",
   "@updateIgnoredBadge": {
     "placeholders": {
-      "version": {"type": "String"}
+      "version": {
+        "type": "String"
+      }
     }
   },
   "updateDisableReminder": "不再自动提醒",
   "updateAutoReminderTitle": "启动时自动提醒更新",
   "updateAutoReminderSubtitle": "发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查",
-  "updateLater": "稍后处理"
+  "settingsWebDavSection": "备份与同步",
+  "@settingsWebDavSection": {
+    "description": "Settings section title for WebDAV backup and restore."
+  },
+  "settingsWebDavSectionSummary": "手动备份完整配置到自备 WebDAV，换机可一键恢复",
+  "@settingsWebDavSectionSummary": {
+    "description": "Summary of the WebDAV backup section."
+  },
+  "settingsWebDavAddress": "服务器地址",
+  "@settingsWebDavAddress": {
+    "description": "Setting row label for the WebDAV server address."
+  },
+  "settingsWebDavAddressHint": "例如 https://dav.example.com:5006",
+  "@settingsWebDavAddressHint": {
+    "description": "Placeholder for the WebDAV server address."
+  },
+  "settingsWebDavUsername": "账号",
+  "@settingsWebDavUsername": {
+    "description": "Setting row label for the WebDAV account name."
+  },
+  "settingsWebDavPassword": "密码",
+  "@settingsWebDavPassword": {
+    "description": "Setting row label for the WebDAV password."
+  },
+  "settingsWebDavPasswordShow": "显示密码",
+  "@settingsWebDavPasswordShow": {
+    "description": "Tooltip to reveal the WebDAV password."
+  },
+  "settingsWebDavPasswordHide": "隐藏密码",
+  "@settingsWebDavPasswordHide": {
+    "description": "Tooltip to hide the WebDAV password."
+  },
+  "settingsWebDavDirectory": "备份目录",
+  "@settingsWebDavDirectory": {
+    "description": "Setting row label for the remote WebDAV backup directory."
+  },
+  "settingsWebDavDirectoryHint": "远端存放备份文件的目录，留空使用根目录",
+  "@settingsWebDavDirectoryHint": {
+    "description": "Hint that an empty directory falls back to the WebDAV root."
+  },
+  "settingsWebDavTestConnection": "测试连接",
+  "@settingsWebDavTestConnection": {
+    "description": "Button that probes the configured WebDAV server."
+  },
+  "settingsWebDavConnectionOk": "连接成功",
+  "@settingsWebDavConnectionOk": {
+    "description": "Notice when the WebDAV connection test succeeds."
+  },
+  "settingsWebDavCredentialError": "账号或密码错误",
+  "@settingsWebDavCredentialError": {
+    "description": "Notice when the WebDAV server rejects the credentials."
+  },
+  "settingsWebDavDirectoryMissing": "备份目录不存在，请先创建或修改目录",
+  "@settingsWebDavDirectoryMissing": {
+    "description": "Notice when the WebDAV directory does not exist."
+  },
+  "settingsWebDavHttpError": "服务器返回错误（HTTP {status}）",
+  "@settingsWebDavHttpError": {
+    "description": "Notice when the WebDAV server returns an unexpected status.",
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsWebDavUnreachable": "无法连接服务器，请检查地址与网络",
+  "@settingsWebDavUnreachable": {
+    "description": "Notice when the WebDAV server cannot be reached."
+  },
+  "settingsWebDavBackup": "立即备份",
+  "@settingsWebDavBackup": {
+    "description": "Button that uploads a full local backup to WebDAV."
+  },
+  "settingsWebDavBackupDone": "备份完成 · {time}",
+  "@settingsWebDavBackupDone": {
+    "description": "Notice when the WebDAV backup upload succeeds.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWebDavLocalConfigCorrupt": "本地配置文件损坏，本次操作已取消",
+  "@settingsWebDavLocalConfigCorrupt": {
+    "description": "Notice when a local configuration file cannot be parsed."
+  },
+  "settingsWebDavBackupFailed": "备份失败，请重试",
+  "@settingsWebDavBackupFailed": {
+    "description": "Notice for an unexpected WebDAV backup failure."
+  },
+  "settingsWebDavRestore": "从备份恢复",
+  "@settingsWebDavRestore": {
+    "description": "Button that downloads and applies the WebDAV backup."
+  },
+  "settingsWebDavRestored": "已恢复",
+  "@settingsWebDavRestored": {
+    "description": "Notice when the WebDAV backup has been applied."
+  },
+  "settingsWebDavNoBackup": "服务器上还没有备份文件",
+  "@settingsWebDavNoBackup": {
+    "description": "Notice when the WebDAV server has no backup file."
+  },
+  "settingsWebDavRestoreRejected": "备份文件校验未通过，本地数据未改动",
+  "@settingsWebDavRestoreRejected": {
+    "description": "Notice when the downloaded backup fails validation."
+  },
+  "settingsWebDavRestoreFailed": "恢复失败，请重试",
+  "@settingsWebDavRestoreFailed": {
+    "description": "Notice for an unexpected WebDAV restore failure."
+  },
+  "settingsWebDavNotConfigured": "请先填写 WebDAV 服务器地址",
+  "@settingsWebDavNotConfigured": {
+    "description": "Notice when an action runs without a WebDAV address."
+  },
+  "settingsWebDavSaveFailed": "配置保存失败，请重试",
+  "@settingsWebDavSaveFailed": {
+    "description": "Notice when the WebDAV configuration cannot be saved."
+  },
+  "serversSubtitle": "选择要观看的服务器",
+  "serversCount": "共 {count} 台",
+  "@serversCount": {
+    "description": "Number of saved servers in the hub header.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serversSectionAll": "全部服务器",
+  "serversSwitchLine": "换条线路",
+  "serversLineSubtitle": "同一台服务器的不同地址",
+  "serversLineCount": "{count} 条线路",
+  "@serversLineCount": {
+    "description": "Line count on the line picker section title.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serversLineActual": "当前",
+  "serversLineDetails": "线路详情",
+  "serversRecommend": "推荐",
+  "serversEditorSubtitle": "名称、账号、线路与进入保护",
+  "serversAddSubtitle": "登录后即可直接观看",
+  "serversLoginAction": "重新登录",
+  "serversCurrentLine": "当前线路",
+  "serversBackupLine": "备用线路",
+  "serversAccountStatus": "账号状态",
+  "serversLoggedIn": "已登录",
+  "serversProtection": "进入保护",
+  "serversProtectionSummary": "只在这台设备上生效，不影响服务器账号",
+  "serversBasicSummary": "名称和图标用于在列表中辨认这台服务器",
+  "serversLinesSummary": "按顺序尝试；固定线路失败时由你决定是否切换",
+  "serversAdvancedSummary": "User-Agent 等少用配置",
+  "serversLockedHint": "已锁定 · 输入进入密码后可用",
+  "serversLineFixedSection": "指定线路",
+  "serversLineAutoSection": "选线方式",
+  "serversRemoveTitle": "移除这台服务器？",
+  "serversPasteCardHint": "复制了服务器信息？一键识别地址、账号和多条线路",
+  "serversUnlockTitle": "输入进入密码",
+  "serversEnterOtherTitle": "切换到这台服务器？",
+  "serversSignOutTitle": "退出这个账号？",
+  "serversImpactTitle": "修改当前连接？",
+  "serversAccountSection": "账号",
+  "serversCheckingNow": "正在检查…",
+  "serversFixedShort": "固定",
+  "serversMoreOptions": "更多方式",
+  "serversHubSubtitle": "{count} 台服务器 · 点按进入",
+  "@serversHubSubtitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serversAddShort": "添加"
 }

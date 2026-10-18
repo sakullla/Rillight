@@ -1,4 +1,4 @@
-import 'login_widgets.dart';
+import 'tv_server_selection_page.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 
@@ -14,7 +14,6 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
-import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/tv_lan_pair.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/ui/app_icons.dart';
@@ -84,17 +83,6 @@ class _TvConnectPageState extends State<TvConnectPage> {
       ..username = _username.text
       ..password = _password.text
       ..userAgent = _userAgent.text;
-  }
-
-  void _select(SavedServer server) {
-    _draft!
-      ..selectedServerId = server.id
-      ..selectedLineId = server.activeLine?.id;
-    _address.text = server.baseUrl;
-    _username.text = server.username;
-    _password.clear();
-    _userAgent.text = server.normalizedUserAgent ?? '';
-    AuthScope.of(context).selectSavedServer(server.id);
   }
 
   Future<void> _submit() async {
@@ -290,18 +278,18 @@ class _TvConnectPageState extends State<TvConnectPage> {
                             if (auth.savedServers.isNotEmpty) ...[
                               TvSectionTitle(l10n.savedServers),
                               SizedBox(height: 4 * s),
-                              for (final server in auth.savedServers) ...[
-                                _TvServerTile(
-                                  key: ValueKey(server.id),
-                                  server: server,
-                                  selected:
-                                      _draft?.selectedServerId == server.id,
-                                  onPressed: auth.isBusy
-                                      ? null
-                                      : () => setState(() => _select(server)),
+                              TvNavTile(
+                                actionKey: const Key('tv-connect-servers'),
+                                icon: AppIcons.server,
+                                title: l10n.serversTitle,
+                                onPressed: () => showTvServerSelection(
+                                  context,
+                                  auth: auth,
+                                  onEntered: () async {
+                                    if (mounted) context.go('/');
+                                  },
                                 ),
-                                SizedBox(height: 6 * s),
-                              ],
+                              ),
                               SizedBox(height: 18 * s),
                             ],
                             TvSectionTitle(l10n.settingsAppearance),
@@ -848,53 +836,4 @@ String _lanClock(DateTime time) {
   final local = time.toLocal();
   String two(int value) => value.toString().padLeft(2, '0');
   return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
-}
-
-/// 已保存服务器行:服务标记 + 名称/账号与地址,当前选中带勾。
-class _TvServerTile extends StatelessWidget {
-  const _TvServerTile({
-    super.key,
-    required this.server,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final SavedServer server;
-  final bool selected;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = TvDesign.scaleOf(context);
-    final host = server.activeLine?.hostLabel ?? server.baseUrl;
-    return TvAction(
-      variant: TvActionVariant.tile,
-      selected: selected,
-      onPressed: onPressed,
-      leading: ServerTypeMark(type: server.serviceType, size: 24 * s),
-      trailing: Builder(
-        builder: (context) => Icon(
-          selected ? AppIcons.checkCircle : AppIcons.chevronRight,
-          fill: AppIcons.filled,
-          color: TvAction.secondaryColor(context),
-        ),
-      ),
-      child: Builder(
-        builder: (context) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(
-              server.username.isEmpty ? host : '${server.username} · $host',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppUiTheme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: TvAction.secondaryColor(context)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

@@ -7,7 +7,9 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:flutter/services.dart';
 
 import '../app/l10n/app_localizations.dart';
+import '../auth/server_ui.dart';
 import 'player_controller.dart';
+import 'playback_line_recovery_ui.dart';
 
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -40,7 +42,7 @@ class SourceSwitchButton extends StatelessWidget {
   }
 }
 
-/// Playback line entry. Hidden unless the server now playing has two lines.
+/// Playback mode remains available even when this server has only one line.
 class PlaybackLineButton extends StatelessWidget {
   const PlaybackLineButton({
     super.key,
@@ -56,7 +58,7 @@ class PlaybackLineButton extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        if (!controller.canChoosePlaybackLine) return const SizedBox.shrink();
+        if (controller.playbackLines.isEmpty) return const SizedBox.shrink();
         final l10n = AppLocalizations.of(context);
         return switch (presentation) {
           PlaybackLinePresentation.popup => _PlaybackLinePopup(
@@ -100,6 +102,11 @@ class _PlaybackLineEntry extends StatelessWidget {
         key: const Key('player-playback-lines'),
         leading: const Icon(AppIcons.swap, fill: AppIcons.filled),
         title: Text(label),
+        subtitle: Text(
+          controller.playbackLineSelection.isAutomatic
+              ? AppLocalizations.of(context).serversAutomatic
+              : AppLocalizations.of(context).playbackLineFixed,
+        ),
         trailing: const Icon(AppIcons.chevronRight, fill: AppIcons.filled),
         onTap: onPressed,
       );
@@ -210,34 +217,8 @@ class _PlaybackLinePopup extends StatelessWidget {
     );
   }
 
-  Future<void> _open(BuildContext context) async {
-    final owner = Object();
-    controller.setControlsPinned(true, owner: owner);
-    final l10n = AppLocalizations.of(context);
-    final lines = controller.playbackLines;
-    try {
-      final selected = await showAppMenu<String>(
-        context: context,
-        items: [
-          for (final line in lines)
-            AppMenuEntry(
-              value: line.id,
-              child: KeyedSubtree(
-                key: ValueKey('playback-line-${line.id}'),
-                child: _LineCaption(
-                  label: playbackLineLabel(line),
-                  current: controller.playbackLineIsCurrent(line),
-                  currentLabel: l10n.playbackLineInUse,
-                ),
-              ),
-            ),
-        ],
-      );
-      if (selected != null) await _pickLine(controller, selected);
-    } finally {
-      controller.setControlsPinned(false, owner: owner);
-    }
-  }
+  Future<void> _open(BuildContext context) =>
+      showPlaybackLineDialog(context, controller);
 }
 
 Future<void> showPlaybackLineSheet(
@@ -249,6 +230,7 @@ Future<void> showPlaybackLineSheet(
   return PhoneMotion.showBottomPanel<void>(
     context: context,
     showDragHandle: true,
+    isScrollControlled: true,
     useSafeArea: true,
 
     builder: (sheetContext) {
@@ -256,19 +238,24 @@ Future<void> showPlaybackLineSheet(
       return SafeArea(
         child: ListenableBuilder(
           listenable: controller,
-          builder: (context, _) => Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-                child: Text(
-                  l10n.playbackLine,
-                  style: AppUiTheme.of(context).textTheme.titleLarge,
+          builder: (context, _) => ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * .8,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                  child: Text(
+                    l10n.playbackLine,
+                    style: AppUiTheme.of(context).textTheme.titleLarge,
+                  ),
                 ),
-              ),
-              PlaybackLineMenu(controller: controller),
-            ],
+                Flexible(child: _PlaybackLineContent(controller: controller)),
+              ],
+            ),
           ),
         ),
       );
@@ -286,15 +273,63 @@ Future<void> showPlaybackLineDialog(
     context: context,
     builder: (dialogContext) {
       final l10n = AppLocalizations.of(dialogContext);
-      return AppDialog(
-        title: Text(l10n.playbackLine),
-        content: SizedBox(
-          width: 420,
-          child: PlaybackLineMenu(controller: controller, autofocus: true),
+      return AppModalFrame(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 560,
+            maxHeight: MediaQuery.sizeOf(dialogContext).height - 48,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  l10n.playbackLine,
+                  style: AppUiTheme.of(dialogContext).textTheme.titleLarge,
+                ),
+              ),
+              Flexible(
+                child: _PlaybackLineContent(
+                  controller: controller,
+                  autofocus: true,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: AppButton(
+                  key: const Key('playback-lines-close'),
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(l10n.serversDismiss),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     },
   ).whenComplete(() => controller.setControlsPinned(false, owner: owner));
+}
+
+class _PlaybackLineContent extends StatelessWidget {
+  const _PlaybackLineContent({
+    required this.controller,
+    this.autofocus = false,
+  });
+  final PlayerController controller;
+  final bool autofocus;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) => controller.switchConfirmation != null
+        ? playbackSwitchConfirmation(controller)
+        : SingleChildScrollView(
+            child: PlaybackLineMenu(
+              controller: controller,
+              autofocus: autofocus,
+            ),
+          ),
+  );
 }
 
 class PlaybackLineMenu extends StatelessWidget {
@@ -317,29 +352,80 @@ class PlaybackLineMenu extends StatelessWidget {
       builder: (context, _) {
         final lines = controller.playbackLines;
         final failure = controller.playbackLineFailure;
-        final currentIndex = lines.indexWhere(controller.playbackLineIsCurrent);
+        final selection = controller.playbackLineSelection;
+        final actual = lines
+            .where((line) => line.id == controller.activeLineId)
+            .firstOrNull;
+        if (controller.switchConfirmation != null) {
+          return playbackSwitchConfirmation(controller);
+        }
         return Column(
           key: const Key('playback-line-menu'),
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (actual != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  l10n.playbackLineActual(playbackLineLabel(actual)),
+                  key: const Key('playback-line-actual'),
+                ),
+              ),
             if (failure != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: Text(
-                  l10n.playbackLineFailed(failure),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: ServerFeedbackCard(
+                  failure,
                   key: const Key('playback-line-failure'),
                 ),
               ),
+            if (controller.isRecovering ||
+                controller.pendingLineId != null) ...[
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(l10n.playbackLinePending),
+              ),
+              AppButton(
+                key: const Key('playback-line-cancel'),
+                onPressed: controller.cancelLineRecovery,
+                child: Text(l10n.cancelAction),
+              ),
+            ],
+            AppListTile(
+              key: const Key('playback-line-auto'),
+              leading: Icon(
+                AppIcons.bolt,
+                size: 20,
+                color: selection.isAutomatic
+                    ? AppUiTheme.of(context).colorScheme.primary
+                    : AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              title: Text(l10n.serversAutomatic),
+              subtitle: Text(l10n.serversAutomaticHint),
+              trailing: selection.isAutomatic
+                  ? Icon(
+                      AppIcons.checkCircle,
+                      fill: AppIcons.filled,
+                      size: 22,
+                      color: AppUiTheme.of(context).colorScheme.primary,
+                    )
+                  : null,
+              selected: selection.isAutomatic,
+              autofocus: autofocus && selection.isAutomatic,
+              onTap: () =>
+                  unawaited(_pickLine(controller, const LineSelection.auto())),
+            ),
             for (var index = 0; index < lines.length; index++)
               _LineTile(
                 controller: controller,
                 lineId: lines[index].id,
                 label: playbackLineLabel(lines[index]),
+                selected: selection.fixedLineId == lines[index].id,
                 current: controller.playbackLineIsCurrent(lines[index]),
                 currentLabel: l10n.playbackLineInUse,
                 autofocus:
-                    autofocus &&
-                    (currentIndex < 0 ? index == 0 : index == currentIndex),
+                    autofocus && selection.fixedLineId == lines[index].id,
                 onSelected: onSelected,
               ),
           ],
@@ -355,6 +441,7 @@ class _LineTile extends StatelessWidget {
     required this.lineId,
     required this.label,
     required this.current,
+    required this.selected,
     required this.currentLabel,
     required this.autofocus,
     this.onSelected,
@@ -363,7 +450,7 @@ class _LineTile extends StatelessWidget {
   final PlayerController controller;
   final String lineId;
   final String label;
-  final bool current;
+  final bool current, selected;
   final String currentLabel;
   final bool autofocus;
   final VoidCallback? onSelected;
@@ -373,43 +460,46 @@ class _LineTile extends StatelessWidget {
     return AppListTile(
       key: ValueKey('playback-line-$lineId'),
       autofocus: autofocus,
-      selected: current,
-      title: Text(label),
-      trailing: current ? Text(currentLabel) : null,
+      selected: selected,
+      leading: Icon(
+        selected ? AppIcons.checkCircle : AppIcons.circle,
+        fill: selected ? AppIcons.filled : null,
+        size: 22,
+        color: selected
+            ? AppUiTheme.of(context).colorScheme.primary
+            : AppUiTheme.of(context).colorScheme.outline,
+      ),
+      title: Text(
+        label,
+        style: selected
+            ? TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppUiTheme.of(context).colorScheme.primary,
+              )
+            : null,
+      ),
+      // Same tag as the server list's line picker: one meaning, one look.
+      trailing: current
+          ? ServerStatusPill(label: currentLabel, tone: ServerTone.success)
+          : null,
       onTap: () {
-        onSelected?.call();
-        unawaited(_pickLine(controller, lineId));
+        unawaited(
+          _pickLine(controller, LineSelection.fixed(lineId)).then((_) {
+            if (controller.switchConfirmation == null) onSelected?.call();
+          }),
+        );
       },
     );
   }
 }
 
-class _LineCaption extends StatelessWidget {
-  const _LineCaption({
-    required this.label,
-    required this.current,
-    required this.currentLabel,
-  });
-
-  final String label;
-  final bool current;
-  final String currentLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: Text(label)),
-        if (current) Text(currentLabel),
-      ],
-    );
-  }
-}
-
-Future<void> _pickLine(PlayerController controller, String lineId) async {
+Future<void> _pickLine(
+  PlayerController controller,
+  LineSelection selection,
+) async {
   try {
-    await controller.switchLine(lineId);
+    await controller.selectPlaybackLine(selection);
   } catch (_) {
-    // The controller keeps the previous line and records the reason.
+    // The controller publishes the actual connection and an actionable failure.
   }
 }

@@ -90,10 +90,10 @@ class _AppShellState extends State<AppShell> {
     super.didChangeDependencies();
     final auth = AuthScope.of(context);
     if (_auth == auth) return;
-    _auth?.regionAccess.removeListener(_clearHistory);
+    _auth?.serverAccess.removeListener(_clearHistory);
     _auth?.sources.removeSourceRevocation(_sourceRevoked);
     _auth = auth;
-    auth.regionAccess.addListener(_clearHistory);
+    auth.serverAccess.addListener(_clearHistory);
     auth.sources.addSourceRevocation(_sourceRevoked);
   }
 
@@ -143,7 +143,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
-    _auth?.regionAccess.removeListener(_clearHistory);
+    _auth?.serverAccess.removeListener(_clearHistory);
     _auth?.sources.removeSourceRevocation(_sourceRevoked);
     HardwareKeyboard.instance.removeHandler(_searchKey);
     _searchQueryFocus.dispose();
@@ -395,7 +395,10 @@ class _TopBar extends StatelessWidget {
         (personName.isNotEmpty
             ? personName
             : AppRoutes.isServerResume(location)
-            ? l10n.resumeRow
+            ? (GoRouterState.of(context).uri.queryParameters['section'] ==
+                      'favorites'
+                  ? l10n.filterFavorite
+                  : l10n.resumeRow)
             : switch (location) {
                 AppRoutes.settings => l10n.settings,
                 AppRoutes.search => l10n.search,

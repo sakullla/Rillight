@@ -121,7 +121,7 @@ void main() {
   );
 
   test(
-    'legacy per-line User-Agent without activeLineId falls back to first',
+    'legacy multi-line configuration without active ID requires a choice',
     () async {
       final dir = await Directory.systemTemp.createTemp('rillight-servers');
       addTearDown(() => dir.delete(recursive: true));
@@ -146,8 +146,56 @@ void main() {
         }),
       );
 
-      final snapshot = await FileServerListStore(file).load();
-      expect(snapshot.servers.single.normalizedUserAgent, 'LanUA/1');
+      await expectLater(
+        FileServerListStore(file).load(),
+        throwsFormatException,
+      );
     },
   );
+
+  test(
+    'new selection is automatic and v4 fields round-trip without scope',
+    () async {
+      const server = SavedServer(
+        id: 'local',
+        name: 'Server',
+        username: 'user',
+        lines: [ServerLine(id: 'a', address: 'https://example.test/prefix')],
+        iconId: 'film',
+        protectionRef: 'protected',
+        credentialRef: 'credentials',
+      );
+      expect(server.lineSelection.isAutomatic, isTrue);
+      final json = server.toConfigurationJson();
+      expect(json.containsKey('region'), isFalse);
+      expect(json.containsKey('scopeKnown'), isFalse);
+      final read = SavedServer.fromJson(json);
+      expect(read.iconId, 'film');
+      expect(read.protectionRef, 'protected');
+      expect(read.effectiveCredentialRef, 'credentials');
+      expect(read.lineSelection, const LineSelection.auto());
+      expect(read.copyWith(name: 'renamed').protectionRef, 'protected');
+      expect(read.copyWith(clearProtection: true).protectionRef, isNull);
+    },
+  );
+
+  test('invalid selected or active line never silently falls back', () {
+    const server = SavedServer(
+      id: 's',
+      name: '',
+      username: '',
+      activeLineId: 'absent',
+      lines: [ServerLine(id: 'a', address: 'https://a.test')],
+    );
+    expect(server.activeLine, isNull);
+    expect(() => SavedServer.fromJson(server.toJson()), throwsFormatException);
+    expect(
+      () => SavedServer.fromJson({
+        ...server.toJson(),
+        'activeLineId': 'a',
+        'lineSelection': {'mode': 'fixed', 'lineId': 'absent'},
+      }),
+      throwsFormatException,
+    );
+  });
 }

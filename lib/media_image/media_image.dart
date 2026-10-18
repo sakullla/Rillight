@@ -20,7 +20,6 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/playback_runtime.dart';
@@ -32,14 +31,13 @@ String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
   origin.source.account.serviceType.name,
   origin.source.account.cloudAccountId,
   origin.source.account.homeUserId,
-  origin.source.account.region.name,
   origin.source.account.configuredServerId,
   origin.source.account.verifiedServerId,
   origin.source.account.userId,
   origin.libraryId,
-  origin.permit.regionGeneration,
+  origin.permit.accessGeneration,
   origin.permit.sessionRevision,
-  origin.permit.scopeRevision,
+  origin.permit.authorizationRevision,
   origin.client.baseUrl.toString(),
 ]);
 
@@ -53,12 +51,14 @@ bool _imageSourceIsValid(
   AuthController auth,
   String? accountScope,
 ) {
-  if (origin == null) return mediaImageAccountScope(auth) == accountScope;
+  if (origin == null) {
+    return accountScope != null && mediaImageAccountScope(auth) == accountScope;
+  }
   return origin.permit.isValid;
 }
 
 /// Cache policy is a consumer of the existing source permit, not an authority.
-/// Private bytes never enter the disk store (including probes and lazy writes).
+/// Persistent bytes remain account-isolated; every cache read needs a live permit.
 class MediaImageSourcePolicy extends ChangeNotifier {
   MediaImageSourcePolicy(PlaybackOrigin origin)
     : scope = _detailImageScope(origin),
@@ -68,7 +68,7 @@ class MediaImageSourcePolicy extends ChangeNotifier {
   final OperationPermit permit;
   bool _revoked = false;
   bool get isValid => !_revoked && permit.isValid;
-  bool get allowsDisk => permit.account.region != AccessRegion.private;
+  bool get allowsDisk => true;
 
   void revoke() {
     if (_revoked) return;
@@ -251,14 +251,15 @@ class _LoadedImage {
   final String cacheKey;
 }
 
-// The independent player attaches a client session without restoring the
-// account controller. Use the actual authenticated endpoint and user in both
-// processes; a missing session must never resolve to a shared anonymous key.
+// The independent player has explicit launch-bound image authority rather
+// than a local login. Both processes scope bytes to the actual endpoint/user;
+// an attached client alone never creates an anonymous or authorized scope.
 final _accountScopes = Expando<(String, String)>();
 
 String? mediaImageAccountScope(AuthController? auth) {
-  final client = auth?.client;
-  if (client == null ||
+  final client = auth?.imageClient;
+  if (auth?.hasImageAccess != true ||
+      client == null ||
       !client.hasSession ||
       client.userId?.isNotEmpty != true) {
     return null;
@@ -272,13 +273,13 @@ String? mediaImageAccountScope(AuthController? auth) {
     path: base.path,
   );
   final server = auth!.session?.server;
+  final playback = auth.playbackImageAccount;
   final identity = jsonEncode([
     client.serviceType.name,
-    server?.id,
-    server?.verifiedServerId,
-    server?.region.name,
-    server?.cloudAccountId,
-    server?.homeUserId,
+    server?.id ?? playback?.configuredServerId,
+    server?.verifiedServerId ?? playback?.verifiedServerId,
+    server?.cloudAccountId ?? playback?.cloudAccountId,
+    server?.homeUserId ?? playback?.homeUserId,
     endpoint.toString().replaceFirst(RegExp(r'/+$'), ''),
     userId,
   ]);
@@ -827,7 +828,7 @@ class _MediaImageState extends State<MediaImage> {
   Future<_LoadedImage?> _loadOnce(bool Function() current) async {
     final auth = AuthScope.of(context);
     final origin = DetailSourceScope.maybeOf(context);
-    final client = DetailSourceScope.clientOf(context);
+    final client = origin?.client ?? auth.imageClient;
     final serverId = _accountScope;
     bool sourceValid() => _imageSourceIsValid(origin, auth, serverId);
     if (serverId == null) return null;
@@ -1180,12 +1181,12 @@ Future<Uint8List?> loadChapterImage(
   }
   final auth = AuthScope.of(context);
   final origin = DetailSourceScope.maybeOf(context);
-  final client = DetailSourceScope.clientOf(context);
+  final client = origin?.client ?? auth.imageClient;
   final policy = DetailSourceScope.imagePolicyOf(context);
   final scope = origin == null ? mediaImageAccountScope(auth) : policy?.scope;
   bool valid() => origin != null
       ? policy?.isValid == true
-      : mediaImageAccountScope(auth) == scope;
+      : scope != null && mediaImageAccountScope(auth) == scope;
   if (scope == null || !valid()) return null;
   final bytes = await MediaImageCache.instance.load(
     policy: policy,

@@ -1,3 +1,5 @@
+import 'server_ui_harness.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -85,7 +87,8 @@ void main() {
     'wrong password, successful login, logout, and saved server fill',
     (tester) async {
       final auth = controller();
-      await tester.pumpWidget(RillightApp(auth: auth));
+      final app = RillightApp(auth: auth);
+      await tester.pumpWidget(app);
       await _settle(tester);
 
       expect(find.text(kProductName), findsWidgets);
@@ -105,7 +108,7 @@ void main() {
 
       expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
       expect(find.byType(AppErrorView), findsOneWidget);
-      expect(find.text('HTTP 401: invalid credentials'), findsOneWidget);
+      expect(find.text('用户名或密码错误'), findsOneWidget);
       expect(auth.isLoggedIn, isFalse);
 
       await tester.enterText(
@@ -123,7 +126,13 @@ void main() {
       await _settle(tester);
       expect(find.byKey(const Key('server-manage-providers')), findsNothing);
       expect(find.text('服务与范围管理'), findsNothing);
-      await tester.tap(find.text('退出登录'));
+      await openServerEditor(tester, auth.session!.server.id);
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
+      await _settle(tester);
+      expect(auth.isLoggedIn, isFalse);
+      // Saved servers remain available; a direct login link still supports prefill.
+      app.router.go('/connect');
       await _settle(tester);
 
       expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
@@ -176,7 +185,9 @@ void main() {
     });
     expect(auth.savedServers.single.lines, hasLength(2));
 
-    await tester.pumpWidget(RillightApp(auth: auth));
+    final app = RillightApp(auth: auth);
+    app.router.go('/connect');
+    await tester.pumpWidget(app);
     await _settle(tester);
 
     final lanLine = auth.savedServers.single.lines.firstWhere(
@@ -224,7 +235,8 @@ void main() {
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('HTTP 403: 该线路已被禁用'), findsOneWidget);
+    expect(find.text('HTTP 403: 服务器或访问防护拒绝了请求，请检查地址或线路后重试'), findsOneWidget);
+    expect(find.textContaining('该线路已被禁用'), findsNothing);
     expect(find.text('连接失败'), findsNothing);
     expect(auth.isLoggedIn, isFalse);
     expect(auth.client.baseUrl, isNull);
@@ -232,7 +244,8 @@ void main() {
 
   testWidgets('login saves the User-Agent at the server level', (tester) async {
     final auth = controller();
-    await tester.pumpWidget(RillightApp(auth: auth));
+    final app = RillightApp(auth: auth);
+    await tester.pumpWidget(app);
     await _settle(tester);
 
     await _enter(
@@ -259,7 +272,12 @@ void main() {
 
     await tester.tap(find.byKey(SessionActions.serverMenuKey));
     await _settle(tester);
-    await tester.tap(find.text('退出登录'));
+    await openServerEditor(tester, auth.session!.server.id);
+    await serverUiTap(tester, const Key('server-editor-logout'));
+    await serverUiTap(tester, const Key('server-logout-confirm'));
+    await _settle(tester);
+    expect(auth.isLoggedIn, isFalse);
+    app.router.go('/connect');
     await _settle(tester);
 
     // Selecting the saved server fills the server-level UA back into the form.

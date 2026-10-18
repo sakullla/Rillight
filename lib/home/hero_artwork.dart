@@ -263,7 +263,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
 
   Future<HeroArtworkData?> _load(String scope, int generation) async {
     final auth = AuthScope.of(context);
-    final client = auth.client;
+    final client = auth.imageClient;
     final refs = _orderedRefs;
     bool current() =>
         mounted &&

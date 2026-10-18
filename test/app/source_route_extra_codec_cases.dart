@@ -10,7 +10,6 @@ void main() {
   const codec = SourceRouteExtraCodec();
   const source = SourceReference(
     account: SourceAccount(
-      region: AccessRegion.private,
       configuredServerId: 'configured-b',
       verifiedServerId: 'verified-b',
       userId: 'user-b',
@@ -30,14 +29,14 @@ void main() {
           seasonId: 'season-b',
           source: source,
           libraryId: 'library-b',
-          regionGeneration: 17,
+          accessGeneration: 17,
         ),
       ) as PlayerHostOpenItemCommand;
       expect(restored.source, source);
       expect(restored.itemId, 'episode-b');
       expect(restored.seasonId, 'season-b');
       expect(restored.libraryId, 'library-b');
-      expect(restored.regionGeneration, 17);
+      expect(restored.accessGeneration, 17);
     },
   );
 
@@ -50,7 +49,7 @@ void main() {
           source: source,
           work: source.item,
           libraryId: 'library-b',
-          regionGeneration: 17,
+          accessGeneration: 17,
           autoResume: false,
           mediaSourceId: 'version-b',
           audioStreamIndex: 4,
@@ -64,7 +63,7 @@ void main() {
       expect(restored.source, source);
       expect(restored.work, source.item);
       expect(restored.libraryId, 'library-b');
-      expect(restored.regionGeneration, 17);
+      expect(restored.accessGeneration, 17);
       expect(restored.autoResume, isFalse);
       expect(restored.mediaSourceId, 'version-b');
       expect(restored.audioStreamIndex, 4);
@@ -82,7 +81,7 @@ void main() {
     ) as PlayerOpenRequest;
     expect(legacy.source, isNull);
     expect(legacy.libraryId, isNull);
-    expect(legacy.regionGeneration, isNull);
+    expect(legacy.accessGeneration, isNull);
     expect(roundTrip({'filter': true}), {'filter': true});
     expect(roundTrip(Object()), isNull);
     expect(

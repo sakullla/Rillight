@@ -89,6 +89,7 @@ Map<String, Object?> hillsServer({
 
 Future<List<int>> buildHillsBackup(
   List<Map<String, Object?>> servers, {
+  int version = 2,
   List<int> key = const [],
 }) async {
   final effectiveKey = key.isEmpty ? hillsTestKey : key;
@@ -102,7 +103,7 @@ Future<List<int>> buildHillsBackup(
   );
   return utf8.encode(
     jsonEncode(<String, Object?>{
-      'version': 2,
+      'version': version,
       'data': base64.encode(payload),
       'settings': <String, Object?>{'theme': 'dark'},
       'mpvConf': 'vo=gpu',
@@ -352,6 +353,48 @@ void main() {
       expect(drafts[2].serviceType, MediaServerType.jellyfin);
     });
 
+    test('parses version 3 containers with superset record fields', () async {
+      // v3 keeps the v2 key and container; its records only add fields.
+      final server =
+          hillsServer(
+              displayName: 'V3 Synthetic',
+              serverUrl: 'http://192.0.2.16:8096',
+              username: 'v3-user',
+              password: 'v3-pass',
+              authenticateJson: jsonEncode(<String, Object?>{
+                'AccessToken': 'v3-token',
+                'User': {'Id': 'v3-user-id', 'Name': 'v3-user'},
+              }),
+              routing: [
+                {
+                  'id': 'r1',
+                  'url': 'https://v3-line.test.example',
+                  'name': 'v3-line',
+                },
+              ],
+            )
+            ..['deviceIdHash'] = 'synthetic-device-hash'
+            ..['disableExoDiskCache'] = true
+            ..['disableExoPreload'] = false
+            ..['serverVersion'] = '4.9.0.62';
+      final bytes = await buildHillsBackup([server], version: 3);
+      final result = await parseBackupForImport(bytes, keys: hillsKeys());
+      expect(result.format, BackupImportFormat.hillsBackupJson);
+      expect(result.status, BackupImportContainerStatus.ready);
+      expect(result.count(BackupRecordStatus.ready), 1);
+      final draft = result.drafts.single;
+      expect(draft.name, 'V3 Synthetic');
+      expect(draft.username, 'v3-user');
+      expect(draft.lines.map((line) => line.address), [
+        'http://192.0.2.16:8096',
+        'https://v3-line.test.example',
+      ]);
+      expect(draft.lines[1].name, 'v3-line');
+      expect(draft.credentials?.accessToken, 'v3-token');
+      expect(draft.credentials?.userId, 'v3-user-id');
+      expect(draft.credentials?.password, 'v3-pass');
+    });
+
     test(
       'keeps same-address accounts and duplicate records independent',
       () async {
@@ -454,7 +497,7 @@ void main() {
 
     test('rejects unsupported versions and damaged containers', () async {
       final unsupported = utf8.encode(
-        jsonEncode(<String, Object?>{'version': 3, 'data': 'AAAA'}),
+        jsonEncode(<String, Object?>{'version': 4, 'data': 'AAAA'}),
       );
       expect(
         (await parseBackupForImport(unsupported, keys: hillsKeys())).status,

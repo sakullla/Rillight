@@ -17,7 +17,7 @@ class PlayerOpenRequest {
     this.startPaused = false,
     this.subtitleOff = false,
     this.maxStreamingBitrate,
-    this.regionGeneration,
+    this.accessGeneration,
   });
 
   final String itemId;
@@ -36,7 +36,24 @@ class PlayerOpenRequest {
   final bool startPaused;
   final bool subtitleOff;
   final int? maxStreamingBitrate;
-  final int? regionGeneration;
+  final int? accessGeneration;
+
+  PlayerOpenRequest withAccessGeneration(int generation) => PlayerOpenRequest(
+    itemId: itemId,
+    autoResume: autoResume,
+    mediaSourceId: mediaSourceId,
+    audioStreamIndex: audioStreamIndex,
+    subtitleStreamIndex: subtitleStreamIndex,
+    startPosition: startPosition,
+    secondarySubtitleStreamIndex: secondarySubtitleStreamIndex,
+    source: source,
+    work: work,
+    libraryId: libraryId,
+    startPaused: startPaused,
+    subtitleOff: subtitleOff,
+    maxStreamingBitrate: maxStreamingBitrate,
+    accessGeneration: generation,
+  );
 }
 
 /// 宿主需要主窗口向用户展示的提示。

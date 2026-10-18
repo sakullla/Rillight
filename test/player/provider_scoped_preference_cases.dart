@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:convert';
 
@@ -146,7 +146,7 @@ scopedFixture(FakePlex fake) async {
   final servers = MemoryServerListStore();
   final credentials = MemoryCredentialStore();
   final registry = SourceSessionRegistry(
-    access: TestRegionAccessController(),
+    access: TestServerAccessController(),
     store: servers,
     credentials: credentials,
     createClient: () => _RecordingPlexClient(reports),
@@ -167,7 +167,6 @@ scopedFixture(FakePlex fake) async {
   await registry.load();
   final transaction = await registry.beginAuthorization(
     serviceType: MediaServerType.plex,
-    region: AccessRegion.ordinary,
   );
   final session = await registry.commitAuthorization(
     transaction,
@@ -180,8 +179,6 @@ scopedFixture(FakePlex fake) async {
       cloudAccountId: cloud.id,
       cloudCredentialRef: cloud.credentialRef,
       resourceCredentialRef: resource.resourceCredentialRef,
-      scopeKnown: true,
-      libraryIds: const ['section:1'],
       lines: [ServerLine(id: 'local', address: fake.url.toString())],
     ),
     value: StoredCredentials(
@@ -193,11 +190,6 @@ scopedFixture(FakePlex fake) async {
       cloudCredentialRef: cloud.credentialRef,
       resourceCredentialRef: resource.resourceCredentialRef,
     ),
-  );
-  await registry.configureScope(
-    transaction.id,
-    participates: true,
-    libraryIds: {'section:1'},
   );
   final auth = AuthController(
     client: _RecordingPlexClient(reports),

@@ -1,3 +1,6 @@
+import 'package:rillight/player/playback_line_recovery_ui.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
@@ -90,6 +93,229 @@ class _FailOneOpenBackend extends FakeVideoBackend {
 
 void main() {
   setUp(isolateImageCache);
+  Widget recoveryHarness(Widget child) => CupertinoApp(
+    locale: const Locale('zh'),
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
+    home: CupertinoPageScaffold(child: Center(child: child)),
+  );
+
+  testWidgets(
+    'line confirmation requires explicit missing track choices and never offers invalid resume',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const plan = PlaybackSwitchPlan(
+        sourceId: 'target',
+        positionTicks: 900000000,
+        paused: true,
+        maxStreamingBitrate: 8000000,
+        targetRuntimeTicks: 800000000,
+        timelineConfirmed: false,
+        audioIndex: null,
+        subtitleIndex: null,
+        audioNeedsChoice: true,
+        subtitleNeedsChoice: true,
+        audioChoices: [
+          MediaStreamInfo(index: 7, type: 'Audio', displayTitle: '中文音轨'),
+        ],
+        subtitleChoices: [
+          MediaStreamInfo(index: 9, type: 'Subtitle', displayTitle: '中文字幕'),
+        ],
+      );
+      final choices = <SwitchResumeChoice>[];
+      int? selectedAudio;
+      var turnedOff = false;
+      await tester.pumpWidget(
+        recoveryHarness(
+          PlaybackSwitchConfirmation(
+            plan: plan,
+            onConfirm:
+                (
+                  choice, {
+                  audioIndex,
+                  subtitleIndex,
+                  acceptDefaultAudio = false,
+                  turnSubtitlesOff = false,
+                }) async {
+                  choices.add(choice);
+                  selectedAudio = audioIndex;
+                  turnedOff = turnSubtitlesOff;
+                },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('playback-confirm-resume')), findsNothing);
+      expect(find.textContaining('原音轨不可用'), findsOneWidget);
+      expect(find.textContaining('原字幕不可用'), findsOneWidget);
+      final begin = find.byKey(const Key('playback-confirm-beginning'));
+      expect(tester.widget<AppButton>(begin).onPressed, isNull);
+      expect(choices, isEmpty);
+      await tester.tap(find.byKey(const Key('playback-confirm-audio-7')));
+      await tester.pump();
+      expect(tester.widget<AppButton>(begin).onPressed, isNull);
+      await tester.tap(find.byKey(const Key('playback-confirm-subtitles-off')));
+      await tester.pump();
+      await tester.ensureVisible(begin);
+      await tester.tap(begin);
+      await tester.pump();
+      expect(choices, [SwitchResumeChoice.beginning]);
+      expect(selectedAudio, 7);
+      expect(turnedOff, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  test(
+    'shared line status preserves unavailable item and missing stream errors',
+    () {
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'unavailable',
+        backend: FakeVideoBackend(),
+        window: PlayerWindow(),
+        playbackLineSnapshot: const [
+          ServerLine(id: 'primary', address: 'https://synthetic.invalid'),
+        ],
+        settingsStore: MemoryPlayerSettingsStore(),
+      );
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      // Desktop, phone and TV all use this decision before rendering their
+      // original actionable content error. Having a line alone is not a fault.
+      for (final error in [
+        PlayerErrorKind.notPlayable,
+        PlayerErrorKind.noStream,
+      ]) {
+        controller.error = error;
+        expect(playbackNeedsLineStatus(controller), isFalse);
+      }
+      controller.error = PlayerErrorKind.load;
+      expect(playbackNeedsLineStatus(controller), isTrue);
+    },
+  );
+
+  testWidgets('line retry waits for the original deadline across rebuilds', (
+    tester,
+  ) async {
+    var retries = 0;
+    final retryAfter = DateTime.now().add(const Duration(seconds: 1));
+    Widget panel() => recoveryHarness(
+      PlaybackLineRecoveryPanel(
+        recovering: false,
+        tryingAlternative: false,
+        retryAfter: retryAfter,
+        onCancel: () {},
+        onChooseLines: () {},
+        onRetry: () => retries++,
+      ),
+    );
+    await tester.pumpWidget(panel());
+    final button = find.byKey(const Key('playback-recovery-retry'));
+    expect(tester.widget<AppButton>(button).onPressed, isNull);
+    expect(find.textContaining('秒后可重试'), findsOneWidget);
+    await tester.pumpWidget(panel());
+    expect(tester.widget<AppButton>(button).onPressed, isNull);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 1100)),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.widget<AppButton>(button).onPressed, isNotNull);
+    await tester.tap(button);
+    expect(retries, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'line confirmation can cancel uncertain timeline without changing tracks or position',
+    (tester) async {
+      const plan = PlaybackSwitchPlan(
+        sourceId: 'target',
+        positionTicks: 100000000,
+        paused: false,
+        maxStreamingBitrate: 8000000,
+        targetRuntimeTicks: 800000000,
+        timelineConfirmed: false,
+        audioIndex: 1,
+        subtitleIndex: null,
+        audioNeedsChoice: false,
+        subtitleNeedsChoice: false,
+        audioChoices: [],
+        subtitleChoices: [],
+      );
+      final choices = <SwitchResumeChoice>[];
+      await tester.pumpWidget(
+        recoveryHarness(
+          PlaybackSwitchConfirmation(
+            plan: plan,
+            onConfirm:
+                (
+                  choice, {
+                  audioIndex,
+                  subtitleIndex,
+                  acceptDefaultAudio = false,
+                  turnSubtitlesOff = false,
+                }) async {
+                  choices.add(choice);
+                },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.textContaining('时长或片段可能不同'), findsOneWidget);
+      expect(find.byKey(const Key('playback-confirm-resume')), findsOneWidget);
+      expect(choices, isEmpty);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(choices, [SwitchResumeChoice.cancel]);
+    },
+  );
+
+  testWidgets(
+    'line recovery provides visible cancel and chooser on small phone and TV canvas',
+    (tester) async {
+      for (final size in [
+        const Size(360, 800),
+        const Size(800, 360),
+        const Size(960, 540),
+      ]) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        var cancels = 0, selections = 0;
+        await tester.pumpWidget(
+          recoveryHarness(
+            PlaybackLineRecoveryPanel(
+              recovering: true,
+              tryingAlternative: true,
+              lineName: '备用线路 · 一个用于检查换行的较长名称',
+              onCancel: () => cancels++,
+              onChooseLines: () => selections++,
+              onRetry: () {},
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(find.text('正在尝试备用线路…'), findsOneWidget);
+        final choose = find.byKey(const Key('playback-recovery-lines'));
+        expect(choose.hitTestable(), findsOneWidget);
+        await tester.tap(choose);
+        await tester.tap(find.byKey(const Key('playback-recovery-cancel')));
+        expect(selections, 1);
+        expect(cancels, 1);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    },
+  );
+
   late RillightApp app;
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -240,7 +466,6 @@ void main() {
     final account = await tester.runAsync(
       () => app.auth.sources.acquireAccount(
         app.auth.session!.server.id,
-        region: AccessRegion.ordinary,
         libraryId: libraryId,
       ),
     );
@@ -251,7 +476,7 @@ void main() {
         itemId: itemId,
         source: SourceReference(account: account, itemId: itemId),
         libraryId: libraryId,
-        regionGeneration: permit.regionGeneration,
+        accessGeneration: permit.accessGeneration,
       ),
     );
     await tester.pumpWidget(app);
@@ -289,6 +514,55 @@ void main() {
     );
     app.auth.dispose();
   }
+
+  testWidgets(
+    'desktop runtime failures show classified reasons and retry actions',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+      final c = controllerOf(tester);
+      for (final entry in {
+        PlaybackRecoveryFailureKind.certificate: '证书验证失败，请检查服务器证书',
+        PlaybackRecoveryFailureKind.forbidden: '没有播放权限，请检查账号权限',
+        PlaybackRecoveryFailureKind.rateLimited: '服务器请求过多，请稍后重试',
+      }.entries) {
+        final opens = backend.openCount;
+        backend.emitEvent(
+          VideoEventKind.error,
+          PlaybackRecoveryFailure(
+            entry.key,
+            retryAfter: entry.key == PlaybackRecoveryFailureKind.rateLimited
+                ? const Duration(seconds: 30)
+                : null,
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text(entry.value).hitTestable(), findsOneWidget);
+        expect(find.text('播放中断，请检查网络'), findsNothing);
+        expect(c.isRecovering, isFalse);
+        expect(backend.openCount, opens);
+        final retry = tester.widget<AppButton>(
+          find.byKey(const Key('playback-recovery-retry')),
+        );
+        expect(
+          retry.onPressed == null,
+          entry.key == PlaybackRecoveryFailureKind.rateLimited,
+        );
+        expect(
+          find.byKey(const Key('playback-recovery-lines')).hitTestable(),
+          findsOneWidget,
+        );
+        if (entry.key != PlaybackRecoveryFailureKind.rateLimited) {
+          await tester.tap(find.byKey(const Key('playback-recovery-retry')));
+          await settle(tester);
+          expect(c.error, isNull);
+        }
+      }
+      await disposeApp(tester);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('settings own keyboard input and Escape returns to the player', (
     tester,

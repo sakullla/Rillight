@@ -1,14 +1,10 @@
+import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/media_server/models.dart';
 
-SourceAccount account(
-  String server, {
-  AccessRegion region = AccessRegion.ordinary,
-  String user = 'u',
-}) => SourceAccount(
-  region: region,
+SourceAccount account(String server, {String user = 'u'}) => SourceAccount(
   configuredServerId: server,
   verifiedServerId: 'verified-$server',
   userId: user,
@@ -35,7 +31,7 @@ WorkSource work(
 );
 
 void main() {
-  test('reference equality includes region, configured/verified server, account, item and version', () {
+  test('reference equality includes provider, configured/verified server, account, item and version', () {
     final ordinary = ref('a');
     final references = [
       ordinary,
@@ -47,12 +43,16 @@ void main() {
         itemId: 'same',
       ),
       SourceReference(
-        account: account('a', region: AccessRegion.private),
+        account: SourceAccount(
+          configuredServerId: 'a',
+          verifiedServerId: 'verified-a',
+          userId: 'u',
+          serviceType: MediaServerType.jellyfin,
+        ),
         itemId: 'same',
       ),
       const SourceReference(
         account: SourceAccount(
-          region: AccessRegion.ordinary,
           configuredServerId: 'a',
           verifiedServerId: 'different',
           userId: 'u',
@@ -113,7 +113,7 @@ void main() {
     );
   });
 
-  test('known provider/year/type/region conflicts beat common identity', () {
+  test('known provider/year/type conflicts beat common identity', () {
     final a = work('a', ids: {'Tmdb': '42', 'Imdb': 'tt1'});
     expect(
       compareWorks(a, work('b', ids: {'Tmdb': '42', 'Imdb': 'tt2'})).reason,
@@ -133,12 +133,12 @@ void main() {
         work(
           'b',
           reference: SourceReference(
-            account: account('b', region: AccessRegion.private),
+            account: account('b', user: 'another-account'),
             itemId: 'same',
           ),
         ),
       ).reason,
-      MatchReason.regionConflict,
+      MatchReason.commonProvider,
     );
     expect(compareWorks(a, work('b', year: null)).confirmed, isTrue);
   });

@@ -6,13 +6,20 @@ Map<String, dynamic> encodeSource(SourceReference source) => {
   'serviceType': source.account.serviceType.name,
   'cloudAccountId': source.account.cloudAccountId,
   'homeUserId': source.account.homeUserId,
-  'region': source.account.region.name,
   'server': source.account.configuredServerId,
   'verifiedServer': source.account.verifiedServerId,
   'user': source.account.userId,
   'item': source.itemId,
   'version': source.mediaSourceId,
 };
+
+/// Process and route leases cannot be upgraded from obsolete region authority.
+SourceReference decodeAuthorizedSource(Map<String, dynamic> json) {
+  if (json.containsKey('region')) {
+    throw const FormatException('Obsolete source authorization');
+  }
+  return decodeSource(json);
+}
 
 SourceReference decodeSource(Map<String, dynamic> json) => SourceReference(
   account: SourceAccount(
@@ -21,7 +28,6 @@ SourceReference decodeSource(Map<String, dynamic> json) => SourceReference(
     ),
     cloudAccountId: json['cloudAccountId'] as String?,
     homeUserId: json['homeUserId'] as String?,
-    region: AccessRegion.values.byName(json['region'] as String),
     configuredServerId: json['server'] as String,
     verifiedServerId: json['verifiedServer'] as String,
     userId: json['user'] as String,
@@ -169,13 +175,9 @@ class PreferenceCandidate {
 
 enum PreferenceFailure {
   notConfigured,
-  regionLocked,
-  wrongRegion,
+  serverLocked,
   serverRemoved,
   accountUnavailable,
-  notParticipating,
-  unknownScope,
-  libraryExcluded,
   targetMissing,
   lineRemoved,
   versionUncertain,

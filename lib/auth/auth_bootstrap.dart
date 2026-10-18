@@ -1,8 +1,13 @@
 import 'dart:io';
 
+import 'startup_recovery.dart';
+export 'startup_recovery.dart';
+
 import 'backup_import/environment_keys.dart';
 import 'cloud_credentials.dart';
 import 'provider_identity.dart';
+import 'server_access_credentials.dart';
+import 'server_configuration_migration.dart';
 import '../media_server/provider_registry.dart';
 import '../plex/plex_authentication.dart';
 
@@ -12,9 +17,10 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/windows_credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/auth/pin_store.dart';
+
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 
@@ -46,7 +52,18 @@ Future<AuthController> createProductionAuth() async {
       : windowsKeychainOrFallback(fallback);
   final servers = FileServerListStore(File('${dir.path}/servers.json'));
   final pinStore = FilePinStore(File('${dir.path}/private_pin.json'));
-  final access = RegionAccessController(verifier: await pinStore.load());
+  final accessStore = CredentialServerAccessStore(credentials);
+  try {
+    await ServerConfigurationMigration(
+      configuration: servers.file,
+      credentials: credentials,
+      accessStore: accessStore,
+      readLegacyVerifier: () async => (await pinStore.load())?.toJson(),
+    ).migrate();
+  } catch (_) {
+    throw ConfigurationUpgradeFailure(dir.path);
+  }
+  final access = ServerAccessController(store: accessStore);
   final cloud = CloudCredentialStore(credentials);
   final plex = PlexAuthentication(
     device: client.device,
@@ -73,7 +90,7 @@ Future<AuthController> createProductionAuth() async {
     plexAuthentication: plex,
     providerClientFactory: (type) =>
         MediaServerProviders.create(type, client.device),
-    persistPin: pinStore.save,
+    serverAccess: access,
   );
   controller.backupImportKeys = defaultBackupImportKeys;
   await controller.restore();

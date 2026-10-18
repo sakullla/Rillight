@@ -1,3 +1,5 @@
+import '../auth/server_entry_coordinator.dart';
+
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/provider_registry.dart';
 import 'package:rillight/player/playback_persistence.dart';
@@ -9,13 +11,14 @@ import 'dart:io';
 import 'package:rillight/app/ui/ui.dart';
 
 import 'playback_runtime.dart';
+import 'playback_recovery_coordinator.dart';
 import '../aggregation/query/same_source_query.dart';
 import '../aggregation/query/aggregation_query.dart';
 import '../library/episode_mapping_dialog.dart';
 import 'playback_resolver.dart';
 import '../aggregation/history/history_writer.dart';
 import 'player_settings.dart';
-import '../auth/region_access.dart';
+import '../auth/server_access.dart';
 
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
@@ -23,7 +26,6 @@ import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/app/window_geometry.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -59,11 +61,16 @@ class PlayerWindowLaunch {
     required this.device,
     this.userAgent,
     this.protocol,
-    this.regionGeneration,
+    this.accessGeneration,
     this.preparedStartup = false,
+    this.entryPending = false,
     this.lines = const [],
+    this.lineSelection,
     this.verifiedServerId,
     this.startupHandoff,
+    this.recoveryDeadlineUtc,
+    this.recoveryAttemptDeadlineUtc,
+    this.recoveryAttemptedLineIds = const [],
   });
 
   final PlayerOpenRequest request;
@@ -74,10 +81,15 @@ class PlayerWindowLaunch {
   final ClientDeviceInfo device;
   final String? userAgent;
   final PlayerProcessProtocol? protocol;
-  final int? regionGeneration;
+  final int? accessGeneration;
   final bool preparedStartup;
+  final bool entryPending;
   final List<ServerLine> lines;
+  final LineSelection? lineSelection;
   final String? verifiedServerId;
+  final DateTime? recoveryDeadlineUtc;
+  final DateTime? recoveryAttemptDeadlineUtc;
+  final List<String> recoveryAttemptedLineIds;
 
   /// Negotiated metadata the parent already holds (item, user, versions).
   /// Embedded in the launch document so the child skips its serial discovery
@@ -107,6 +119,7 @@ class PlayerWindowLaunch {
       userAgent: client.customUserAgent,
       preparedStartup: preparedStartup,
       lines: matched?.lines ?? const [],
+      lineSelection: matched?.lineSelection,
       verifiedServerId: matched?.verifiedServerId,
     );
   }
@@ -121,6 +134,9 @@ class PlayerWindowLaunch {
   }
 
   factory PlayerWindowLaunch.fromJson(Map<String, dynamic> json) {
+    if (json.containsKey('regionGeneration')) {
+      throw const FormatException('Obsolete player authorization');
+    }
     if (json['schema'] != null && json['schema'] != 2) {
       throw const FormatException('Unknown player launch schema');
     }
@@ -134,16 +150,20 @@ class PlayerWindowLaunch {
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
         source: json['source'] is Map
-            ? decodeSource(Map<String, dynamic>.from(json['source'] as Map))
+            ? decodeAuthorizedSource(
+                Map<String, dynamic>.from(json['source'] as Map),
+              )
             : null,
         work: json['work'] is Map
-            ? decodeSource(Map<String, dynamic>.from(json['work'] as Map))
+            ? decodeAuthorizedSource(
+                Map<String, dynamic>.from(json['work'] as Map),
+              )
             : null,
         libraryId: json['libraryId'] as String?,
         startPaused: json['startPaused'] == true,
         subtitleOff: json['subtitleOff'] == true,
         maxStreamingBitrate: json['maxStreamingBitrate'] as int?,
-        regionGeneration: json['regionGeneration'] as int?,
+        accessGeneration: json['accessGeneration'] as int?,
         autoResume: json['autoResume'] != false,
         mediaSourceId: json['mediaSourceId'] as String?,
         audioStreamIndex: json['audioStreamIndex'] is int
@@ -162,13 +182,27 @@ class PlayerWindowLaunch {
             ? json['secondarySubtitleStreamIndex'] as int
             : int.tryParse('${json['secondarySubtitleStreamIndex'] ?? ''}'),
       ),
-      regionGeneration: json['regionGeneration'] as int?,
+      accessGeneration: json['accessGeneration'] as int?,
       baseUrl: json['baseUrl'] as String? ?? '',
       accessToken: json['accessToken'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
       userAgent: json['userAgent'] as String?,
       preparedStartup: json['preparedStartup'] == true,
+      entryPending: json['entryPending'] == true,
       verifiedServerId: json['verifiedServerId'] as String?,
+      recoveryDeadlineUtc: json['recoveryDeadlineUtc'] == null
+          ? null
+          : DateTime.parse(json['recoveryDeadlineUtc'] as String).toUtc(),
+      recoveryAttemptDeadlineUtc: json['recoveryAttemptDeadlineUtc'] == null
+          ? null
+          : DateTime.parse(json['recoveryAttemptDeadlineUtc'] as String)
+                .toUtc(),
+      recoveryAttemptedLineIds:
+          (json['recoveryAttemptedLineIds'] as List? ?? const [])
+              .cast<String>(),
+      lineSelection: json['lineSelection'] == null
+          ? null
+          : LineSelection.fromJson(json['lineSelection']),
       lines: [
         for (final item in json['lines'] as List? ?? const [])
           if (item is Map) ServerLine.fromJson(Map<String, dynamic>.from(item)),
@@ -197,11 +231,19 @@ class PlayerWindowLaunch {
   Map<String, dynamic> toJson() {
     return {
       'businessId': businessId,
+      if (recoveryDeadlineUtc != null)
+        'recoveryDeadlineUtc': recoveryDeadlineUtc!.toIso8601String(),
+      if (recoveryAttemptDeadlineUtc != null)
+        'recoveryAttemptDeadlineUtc': recoveryAttemptDeadlineUtc!
+            .toIso8601String(),
+      if (recoveryAttemptedLineIds.isNotEmpty)
+        'recoveryAttemptedLineIds': recoveryAttemptedLineIds,
       if (request.source != null) 'source': encodeSource(request.source!),
       if (request.work != null) 'work': encodeSource(request.work!),
       if (request.libraryId != null) 'libraryId': request.libraryId,
-      if (regionGeneration != null) 'regionGeneration': regionGeneration,
+      if (accessGeneration != null) 'accessGeneration': accessGeneration,
       if (preparedStartup) 'preparedStartup': true,
+      if (entryPending) 'entryPending': true,
       ...?protocol?.fields,
       'itemId': request.itemId,
       'autoResume': request.autoResume,
@@ -225,6 +267,7 @@ class PlayerWindowLaunch {
       'userId': userId,
       if (startupHandoff != null) 'startupHandoff': startupHandoff,
       if (verifiedServerId != null) 'verifiedServerId': verifiedServerId,
+      if (lineSelection != null) 'lineSelection': lineSelection!.toJson(),
       if (lines.isNotEmpty) 'lines': [for (final line in lines) line.toJson()],
       if (userAgent != null) 'userAgent': userAgent,
       'clientName': device.clientName,
@@ -256,23 +299,112 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   DesktopPlayerWindowHost({
     required this.auth,
     this.runtime,
+    this.requestSourcePassword,
     PlayerProcessControl? processControl,
     this._snapshotStoreForPid,
     this._consumeOpenItem,
     this.closeTimeout = const Duration(seconds: 1),
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
+    this.entryOpenTimeout = const Duration(seconds: 150),
+    this.lineSelectionTimeout = const Duration(seconds: 45),
   }) : _control = processControl ?? createPlayerProcessControl() {
     auth.addListener(_onAuth);
-    auth.regionAccess.addRevocationHook(_revokePrivate);
-    auth.regionAccess.addCleanupHook(_closePrivate);
-    auth.regionAccess.addTerminationHook(_terminatePrivate);
+    auth.serverAccess.addRevocationHook(_revokePrivate);
+    auth.serverAccess.addCleanupHook(_closePrivate);
+    auth.serverAccess.addTerminationHook(_terminatePrivate);
     runtime?.registry.addMembershipCleanup(_membershipRevoked);
     runtime?.registry.addSourceRevocation(_sourceRevoked);
+    runtime?.registerLinePlayer(
+      this,
+      () => _pid == 0 || _disposed || _privateRevoked
+          ? null
+          : _origin?.source.account.configuredServerId,
+      _selectLiveLine,
+    );
+  }
+
+  int _lineSelectionSequence = 0;
+  Future<void> _lineSelectionWrites = Future<void>.value();
+
+  Future<void> _writeLineSelection(
+    PlayerLineProcessControl control,
+    int pid,
+    int sequence,
+    Map<String, dynamic> command,
+  ) {
+    final write = _lineSelectionWrites.then((_) async {
+      // A mailbox has one slot. Serialize writes and recheck ownership after
+      // queued I/O so an old cancel cannot replace a newer selection.
+      if (sequence != _lineSelectionSequence || _pid != pid) return;
+      await control.requestLineSelection(pid, command);
+    });
+    _lineSelectionWrites = write.catchError((Object _) {});
+    return write;
+  }
+
+  Future<void> _selectLiveLine(
+    LineSelection selection,
+    void Function() guard,
+  ) async {
+    final control = _control;
+    if (control is! PlayerLineProcessControl) {
+      throw StateError('Live player line selection unavailable');
+    }
+    final ipc = control as PlayerLineProcessControl;
+    final pid = _pid;
+    final actual = _origin!;
+    final sequence = ++_lineSelectionSequence;
+    void current() {
+      guard();
+      actual.permit.requireValid();
+      if (_disposed ||
+          _privateRevoked ||
+          _pid != pid ||
+          sequence != _lineSelectionSequence) {
+        throw StateError('Line selection cancelled');
+      }
+    }
+
+    current();
+    final deadline = DateTime.now().toUtc().add(lineSelectionTimeout);
+    await _writeLineSelection(ipc, pid, sequence, {
+      'deadlineUtc': deadline.toIso8601String(),
+      'sequence': sequence,
+      'selection': selection.toJson(),
+      'generation': actual.permit.accessGeneration,
+    });
+    try {
+      while (DateTime.now().isBefore(deadline)) {
+        current();
+        final result = await ipc.lineSelectionResult(pid);
+        if (result?['sequence'] == sequence) {
+          if (result?['status'] == 'needsSelection') {
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            continue;
+          }
+          if (result?['accepted'] != true) {
+            throw StateError('Playback line was not saved');
+          }
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+      }
+      throw TimeoutException('Playback line selection timed out');
+    } catch (_) {
+      await _writeLineSelection(ipc, pid, sequence, {
+        'sequence': sequence,
+        'cancel': true,
+      });
+      rethrow;
+    }
   }
 
   final AuthController auth;
+  final Duration lineSelectionTimeout;
   final PlaybackRuntime? runtime;
+  final Future<String?> Function(SavedServer server)? requestSourcePassword;
+  ServerEntryTicket? _switchEntry;
   PlaybackOrigin? _origin;
   WatchSession? _watchSession;
   bool _privateRevoked = false;
@@ -310,6 +442,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   /// 探测播放进程是否仍存活的轮询间隔。
   final Duration watchInterval;
+  final Duration entryOpenTimeout;
+  ServerEntryTicket? _pendingEntry;
+  Timer? _entryOpenTimer;
 
   final PlayerProcessControl _control;
   final PlaybackSnapshotStoreLocator? _snapshotStoreForPid;
@@ -321,10 +456,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   var _disposed = false;
   var _epoch = 0;
   var _requestRevision = 0;
+  PlaybackRecoveryBudget? _openingRecoveryBudget;
   int _activeRevision = 0;
   bool _watchBusy = false;
   bool _heartbeatBusy = false;
   bool _urgentLockBusy = false;
+  bool _lineCancellationBusy = false;
   String? _authIdentity;
   PlayerStartupPreparation? _startupPreparation;
   bool _opening = false;
@@ -360,6 +497,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> open(PlayerOpenRequest request) {
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _entryOpenTimer?.cancel();
+    _switchEntry?.cancel();
+    _switchEntry = null;
     _pendingSwitch = null;
     _restoreSwitch = null;
     switchFailure = null;
@@ -369,7 +511,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   Future<void> _openWithOrigin(
     PlayerOpenRequest request, {
     PlaybackOrigin? prepared,
+    ServerEntryTicket? entry,
   }) {
+    _openingRecoveryBudget?.cancel();
+    _openingRecoveryBudget = null;
     final revision = ++_requestRevision;
     _opening = true;
     if (!_disposed) notifyListeners();
@@ -378,138 +523,218 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed || revision != _requestRevision) return;
       late PlayerWindowLaunch launch;
       PlaybackOrigin? resolvedOrigin;
-      Map<String, dynamic>? handoff;
-      if (runtime != null && request.source != null) {
-        final origin = prepared ?? await runtime!.resolve(request);
-        origin.permit.requireValid();
-        if (_disposed || revision != _requestRevision) return;
-        resolvedOrigin = origin;
-        // The child needs the user record for stream preferences; overlap it
-        // with version negotiation instead of the child re-fetching serially.
-        final userFuture = origin.permit
-            .dispatch((_) => origin.client.getUser())
-            .then<MediaUser?>((value) => value, onError: (Object _) => null);
-        final item = prepared == null && origin.resolvedItem != null
-            ? origin.resolvedItem!
-            : await origin.permit.dispatch(
-                (_) => origin.client.getItem(request.itemId),
-              );
-        final sourceClient = origin.client;
-        var versions = sourceClient is PlaybackMetadataProvider
-            ? await origin.permit.dispatch(
-                (_) => (sourceClient as PlaybackMetadataProvider)
-                    .getPlaybackSources(
-                      itemId: request.itemId,
-                      position:
-                          request.startPosition ??
-                          (request.autoResume
-                              ? item.resumePosition
-                              : Duration.zero),
-                    ),
-              )
-            : playbackSourcesFromItem(item);
-        // Emby/Jellyfin detail metadata already contains the versions. Only
-        // legacy responses without that metadata need discovery negotiation.
-        // The child owns the final negotiated session and selected tracks.
-        if (versions.isEmpty && sourceClient is! PlaybackMetadataProvider) {
-          final info = await origin.permit.dispatch(
-            (_) => sourceClient.getPlaybackInfo(itemId: request.itemId),
-          );
-          versions = info.mediaSources;
-          await info.resources?.release();
-        }
-        // Hand the negotiated metadata to the child: it skips its own serial
-        // item/user/source discovery and only runs PlaybackInfo for tracks.
-        MediaUser? handoffUser;
-        try {
-          handoffUser = await userFuture;
-        } catch (_) {}
-        if (_disposed || revision != _requestRevision) return;
-        handoff = await PlayerStartupPreparation.handoff(
-          userId: origin.source.account.userId,
-          itemId: request.itemId,
-          item: item,
-          user: handoffUser,
-          versions: versions,
-        ).payload;
-        final pref = runtime!.preference(origin, item, versions);
-        final usePreference =
-            request.mediaSourceId == null && pref.failure == null;
-        if (request.mediaSourceId == null &&
-            pref.failure != null &&
-            pref.failure != PreferenceFailure.notConfigured) {
-          throw StateError(
-            'Source preference requires selection: ${pref.failure}',
-          );
-        }
-        final settings = usePreference ? pref.preference?.settings : null;
-        final version =
-            request.mediaSourceId ??
-            (usePreference ? pref.selected?.source.mediaSourceId : null);
-        final sources = versions.where((s) => s.id == version);
-        final media = sources.length == 1 ? sources.single : null;
-        final lines = runtime!.registry
-            .project(origin.source.account.region)
-            .firstWhere((s) => s.id == origin.source.account.configuredServerId)
-            .lines;
-        if (usePreference &&
-            pref.preference?.lineId != null &&
-            !lines.any(
-              (l) =>
-                  l.id == pref.preference!.lineId &&
-                  Uri.parse(l.address) == origin.client.baseUrl,
-            )) {
-          throw StateError('Saved line requires explicit switch');
-        }
-        launch = PlayerWindowLaunch(
-          request: PlayerOpenRequest(
+      PlaybackRecoveryBudget? recovery;
+      final attemptedLines = <String>[];
+      if (runtime != null) {
+        Future<PlayerWindowLaunch> prepareLaunch(
+          PlaybackOrigin origin,
+          PlaybackRecoveryBudget? window,
+        ) async {
+          void current() {
+            window?.check();
+            origin.permit.requireValid();
+            if (_disposed || revision != _requestRevision) {
+              throw const PlaybackRecoveryCancelled();
+            }
+          }
+
+          current();
+          // The child needs the user record for stream preferences; overlap it
+          // with version negotiation instead of the child re-fetching serially.
+          final userFuture = origin.permit
+              .dispatch((_) => origin.client.getUser())
+              .then<MediaUser?>((value) => value, onError: (Object _) => null);
+          final item = prepared == null && origin.resolvedItem != null
+              ? origin.resolvedItem!
+              : await origin.permit.dispatch(
+                  (_) => origin.client.getItem(request.itemId),
+                );
+          final sourceClient = origin.client;
+          var versions = sourceClient is PlaybackMetadataProvider
+              ? await origin.permit.dispatch(
+                  (_) => (sourceClient as PlaybackMetadataProvider)
+                      .getPlaybackSources(
+                        itemId: request.itemId,
+                        position:
+                            request.startPosition ??
+                            (request.autoResume
+                                ? item.resumePosition
+                                : Duration.zero),
+                      ),
+                )
+              : playbackSourcesFromItem(item);
+          // Emby/Jellyfin detail metadata already contains the versions. Only
+          // legacy responses without that metadata need discovery negotiation.
+          // The child owns the final negotiated session and selected tracks.
+          if (versions.isEmpty && sourceClient is! PlaybackMetadataProvider) {
+            final info = await origin.permit.dispatch(
+              (_) => sourceClient.getPlaybackInfo(itemId: request.itemId),
+            );
+            versions = info.mediaSources;
+            await info.resources?.release();
+          }
+          // Hand the negotiated metadata to the child: it skips its own serial
+          // item/user/source discovery and only runs PlaybackInfo for tracks.
+          MediaUser? handoffUser;
+          try {
+            handoffUser = await userFuture;
+          } catch (_) {}
+          current();
+          final handoff = await PlayerStartupPreparation.handoff(
+            userId: origin.source.account.userId,
             itemId: request.itemId,
-            autoResume: request.autoResume,
-            source: origin.source,
-            work: origin.work,
-            libraryId: origin.libraryId,
-            mediaSourceId: version,
-            audioStreamIndex:
-                request.audioStreamIndex ??
-                (media == null
-                    ? null
-                    : matchPreferredStreamIndex(
-                        streams: media.audioStreams,
-                        preferredIndex: settings?.mediaSourceId == media.id
-                            ? settings?.audioStreamIndex
-                            : null,
-                        exactIndex: settings?.mediaSourceId == media.id,
-                        language: settings?.audioLanguage,
-                        title: settings?.audioTitle,
-                      )),
-            subtitleStreamIndex:
-                request.subtitleStreamIndex ??
-                (media == null
-                    ? null
-                    : matchPreferredStreamIndex(
-                        streams: media.subtitleStreams,
-                        language: settings?.subtitleLanguage,
-                        title: settings?.subtitleTitle,
-                      )),
-            startPosition: request.startPosition,
-            startPaused: request.startPaused,
-            secondarySubtitleStreamIndex: request.secondarySubtitleStreamIndex,
-            subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
-            maxStreamingBitrate:
-                request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
-            regionGeneration: origin.permit.regionGeneration,
-          ),
-          baseUrl: origin.client.baseUrl!.toString(),
-          accessToken: origin.client.accessToken!,
-          userId: origin.source.account.userId,
-          device: origin.client.device,
-          serviceType: origin.client.serviceType,
-          userAgent: origin.client.customUserAgent,
-          regionGeneration: origin.permit.regionGeneration,
-          lines: lines,
-          verifiedServerId: origin.source.account.verifiedServerId,
-          startupHandoff: handoff,
-        );
+            item: item,
+            user: handoffUser,
+            versions: versions,
+          ).payload;
+          if (entry == null) {
+            await runtime!.importLegacyPreferences(
+              origin,
+              item,
+              versions,
+              await (await openPlayerSettingsStore()).read(),
+            );
+          }
+          current();
+          final pref = runtime!.preference(origin, item, versions);
+          final usePreference =
+              request.mediaSourceId == null && pref.failure == null;
+          if (request.mediaSourceId == null &&
+              pref.failure != null &&
+              pref.failure != PreferenceFailure.notConfigured) {
+            throw StateError(
+              'Source preference requires selection: ${pref.failure}',
+            );
+          }
+          final settings = usePreference ? pref.preference?.settings : null;
+          final version =
+              request.mediaSourceId ??
+              (usePreference ? pref.selected?.source.mediaSourceId : null);
+          final sources = versions.where((s) => s.id == version);
+          final media = sources.length == 1 ? sources.single : null;
+          final saved = runtime!.registry.server(
+            origin.source.account.configuredServerId,
+          );
+          final lines = saved.lines;
+          return PlayerWindowLaunch(
+            request: PlayerOpenRequest(
+              itemId: request.itemId,
+              autoResume: request.autoResume,
+              source: origin.source,
+              work: origin.work,
+              libraryId: origin.libraryId,
+              mediaSourceId: version,
+              audioStreamIndex:
+                  request.audioStreamIndex ??
+                  (media == null
+                      ? null
+                      : matchPreferredStreamIndex(
+                          streams: media.audioStreams,
+                          preferredIndex: settings?.mediaSourceId == media.id
+                              ? settings?.audioStreamIndex
+                              : null,
+                          exactIndex: settings?.mediaSourceId == media.id,
+                          language: settings?.audioLanguage,
+                          title: settings?.audioTitle,
+                        )),
+              subtitleStreamIndex:
+                  request.subtitleStreamIndex ??
+                  (media == null
+                      ? null
+                      : matchPreferredStreamIndex(
+                          streams: media.subtitleStreams,
+                          language: settings?.subtitleLanguage,
+                          title: settings?.subtitleTitle,
+                        )),
+              startPosition: request.startPosition,
+              startPaused: request.startPaused,
+              secondarySubtitleStreamIndex:
+                  request.secondarySubtitleStreamIndex,
+              subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
+              maxStreamingBitrate:
+                  request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
+              accessGeneration: origin.permit.accessGeneration,
+            ),
+            baseUrl: origin.client.baseUrl!.toString(),
+            accessToken: origin.client.accessToken!,
+            userId: origin.source.account.userId,
+            device: origin.client.device,
+            serviceType: origin.client.serviceType,
+            userAgent: origin.client.customUserAgent,
+            accessGeneration: origin.permit.accessGeneration,
+            lines: lines,
+            lineSelection: runtime!.registry
+                .server(origin.source.account.configuredServerId)
+                .lineSelection,
+            verifiedServerId: origin.source.account.verifiedServerId,
+            startupHandoff: handoff,
+            entryPending: entry != null,
+            recoveryDeadlineUtc: recovery == null
+                ? null
+                : DateTime.now().toUtc().add(recovery.remaining),
+            recoveryAttemptDeadlineUtc: window == null
+                ? null
+                : DateTime.now().toUtc().add(window.remaining),
+            recoveryAttemptedLineIds: List.unmodifiable(attemptedLines),
+          );
+        }
+
+        final serverId =
+            request.source?.account.configuredServerId ??
+            auth.session?.server.id;
+        final saved = serverId == null
+            ? null
+            : runtime!.registry.server(serverId);
+        if (prepared == null &&
+            entry == null &&
+            saved?.lineSelection.isAutomatic == true) {
+          recovery = PlaybackRecoveryBudget();
+          _openingRecoveryBudget = recovery;
+          final original = saved!.activeLine;
+          if (original == null) {
+            throw StateError('Playback active line unavailable');
+          }
+          PlaybackRecoveryCandidate candidate(ServerLine line, bool first) =>
+              PlaybackRecoveryCandidate(line.id, (window) async {
+                final result = await window.run(() async {
+                  final origin = first
+                      ? await runtime!.resolve(request)
+                      : await runtime!.resolveInitialLine(
+                          request,
+                          line.id,
+                          window.remaining,
+                        );
+                  window.check();
+                  final preparedLaunch = await prepareLaunch(origin, window);
+                  window.check();
+                  return (origin, preparedLaunch);
+                });
+                window.check();
+                if (_disposed || revision != _requestRevision) {
+                  throw const PlaybackRecoveryCancelled();
+                }
+                resolvedOrigin = result.$1;
+                launch = result.$2;
+                return true;
+              });
+          final result = await PlaybackRecoveryCoordinator().run(
+            original: candidate(original, true),
+            candidates: [
+              for (final line in saved.lines)
+                if (line.id != original.id) candidate(line, false),
+            ],
+            lastSuccessfulLineId: saved.lastSuccessfulLineId,
+            budget: recovery,
+            onAttempt: (line, _) => attemptedLines.add(line),
+          );
+          if (result.status != PlaybackRecoveryStatus.succeeded) {
+            throw result.error ??
+                StateError('Playback metadata recovery exhausted');
+          }
+        } else {
+          resolvedOrigin = prepared ?? await runtime!.resolve(request);
+          launch = await prepareLaunch(resolvedOrigin, null);
+        }
       } else {
         launch = PlayerWindowLaunch.fromAuth(
           auth: auth,
@@ -529,7 +754,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           ? PlayerStartupPreparation(auth.client, request.itemId)
           : null;
       try {
-        await stopping;
+        if (recovery == null) {
+          await stopping;
+        } else {
+          await recovery.run(() => stopping);
+        }
         if (_disposed || revision != _requestRevision) {
           preparation?.cancel();
           return;
@@ -543,11 +772,38 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         _lastSwitchCommand = -1;
         _lastObservationSequence = null;
         _privateRevoked = false;
-        final pid = await _control.spawn(
+        recovery?.check();
+        if (launch.recoveryAttemptDeadlineUtc != null &&
+            !launch.recoveryAttemptDeadlineUtc!.isAfter(
+              DateTime.now().toUtc(),
+            )) {
+          throw TimeoutException('Playback candidate budget exhausted');
+        }
+        var abandonedSpawn = false;
+        final spawning = _control.spawn(
           executable: Platform.resolvedExecutable,
           arguments: launch.toArguments(),
           startup: preparation?.payload,
         );
+        unawaited(
+          spawning.then((latePid) async {
+            if (!abandonedSpawn) return;
+            await _control.kill(latePid);
+            await _control.release(latePid);
+          }, onError: (Object _) {}),
+        );
+        final pid = recovery == null
+            ? await spawning
+            : await recovery.run(
+                () => spawning,
+                limit: launch.recoveryAttemptDeadlineUtc?.difference(
+                  DateTime.now().toUtc(),
+                ),
+                onCancel: () {
+                  abandonedSpawn = true;
+                  _control.cancelPendingSpawns();
+                },
+              );
         if (_disposed ||
             revision != _requestRevision ||
             (_origin != null
@@ -566,9 +822,19 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         _authIdentity = _currentAuthIdentity;
         _epoch++;
         _current = launch.request;
+        _pendingEntry = entry;
+        _entryOpenTimer?.cancel();
+        if (entry != null) {
+          _entryOpenTimer = Timer(entryOpenTimeout, () {
+            if (identical(_pendingEntry, entry) && _pid == pid) {
+              unawaited(_rejectPendingEntry('Target playback open timed out'));
+            }
+          });
+        }
         notifyListeners();
         _startWatch(pid);
       } catch (error) {
+        entry?.cancel();
         preparation?.cancel();
         if (error is PlayerProcessStartupException) {
           await _reconcileSnapshot(error.pid);
@@ -583,6 +849,26 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         if (!_disposed) notifyListeners();
       }
     });
+  }
+
+  Future<void> _rejectPendingEntry(String message) async {
+    final entry = _pendingEntry;
+    if (entry == null) return;
+    _pendingEntry = null;
+    _entryOpenTimer?.cancel();
+    entry.cancel();
+    await _runInFlight(_stopProcess);
+    if (!_disposed && _restoreSwitch?.origin.permit.isValid == true) {
+      try {
+        await restoreOriginalSource();
+      } catch (_) {
+        /* Keep retryable A. */
+      }
+    }
+    if (!_disposed) {
+      switchFailure = message;
+      notifyListeners();
+    }
   }
 
   @override
@@ -612,6 +898,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> close() {
+    _openingRecoveryBudget?.cancel();
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _switchEntry?.cancel();
+    _switchEntry = null;
+    _entryOpenTimer?.cancel();
     final revision = ++_requestRevision;
     _control.cancelPendingSpawns(includePrepared: true);
     return _runInFlight(() async {
@@ -626,6 +918,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> forceClose() async {
+    _openingRecoveryBudget?.cancel();
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _switchEntry?.cancel();
+    _switchEntry = null;
+    _entryOpenTimer?.cancel();
     _startupPreparation?.cancel();
     _startupPreparation = null;
     _requestRevision++;
@@ -667,6 +965,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed) return;
       // This mailbox bypasses a potentially stalled catalogue/preflight watch.
       if (!_urgentLockBusy) unawaited(_consumeUrgentLock(pid));
+      if (!_lineCancellationBusy) unawaited(_consumeLineCancellation(pid));
       // Server verification may outlast the child's heartbeat deadline. Keep
       // liveness independent of the serialized observation/command queue.
       if (!_heartbeatBusy) {
@@ -703,8 +1002,13 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             if (watch != null) runtime?.history.endSession(watch);
             _watchSession = null;
             _clearWindow();
-            unawaited(prepare());
+            if (_pendingEntry == null) unawaited(prepare());
           });
+          if (_pendingEntry != null) {
+            await _rejectPendingEntry(
+              'Target player exited before successful open',
+            );
+          }
         } catch (_) {
           // A close may remove the mailbox while a watcher read is in flight.
         } finally {
@@ -776,8 +1080,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       // 库 id 和普通区代数可以和正在播放的来源不一致。私有区代数仍必须相同，
       // 失效的播放许可也不能把详情交回主窗口。
       final privateGenerationRejected =
-          account?.region == AccessRegion.private &&
-          command.regionGeneration != actual.permit.regionGeneration;
+          account != null &&
+          auth.serverAccess.isProtected(account.configuredServerId) &&
+          command.accessGeneration != actual.permit.accessGeneration;
       if (!actual.permit.isValid ||
           account != actual.source.account ||
           privateGenerationRejected ||
@@ -812,7 +1117,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_privateRevoked ||
           snapshot.source == null ||
           snapshot.source!.account != _origin?.source.account ||
-          snapshot.regionGeneration != _origin?.permit.regionGeneration) {
+          snapshot.accessGeneration != _origin?.permit.accessGeneration) {
         if (snapshot.pendingCleanups.isEmpty) await store.delete();
         return;
       }
@@ -894,18 +1199,23 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (sequence is! int ||
           sequence <= _lastIpcEvent ||
           event['pid'] != pid ||
-          event['generation'] != origin.permit.regionGeneration ||
+          event['generation'] != origin.permit.accessGeneration ||
           event['source'] is! Map ||
-          decodeSource(Map<String, dynamic>.from(event['source'] as Map))
-                  .account !=
+          decodeAuthorizedSource(
+                Map<String, dynamic>.from(event['source'] as Map),
+              ).account !=
               origin.source.account ||
           event['item'] !=
-              decodeSource(Map<String, dynamic>.from(event['source'] as Map))
-                  .itemId ||
+              decodeAuthorizedSource(
+                Map<String, dynamic>.from(event['source'] as Map),
+              ).itemId ||
           _privateRevoked) {
         throw StateError('Stale or foreign playback event');
       }
       origin.permit.requireValid();
+      if (_pendingEntry != null) {
+        throw StateError('Target has not opened successfully');
+      }
       final version = event['version'] as String;
       if (_watchSession?.source.mediaSourceId != version ||
           _watchSession?.source.itemId != event['item']) {
@@ -954,7 +1264,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           Map<String, dynamic>.from(event['settings'] as Map),
         );
         final lines = runtime!.registry
-            .project(origin.source.account.region)
+            .project()
             .firstWhere((s) => s.id == origin.source.account.configuredServerId)
             .lines;
         final currentLines = lines.where(
@@ -1002,15 +1312,15 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (outcome == null ||
         !origin.permit.isValid ||
         outcome['pid'] != pid ||
-        outcome['generation'] != origin.permit.regionGeneration ||
+        outcome['generation'] != origin.permit.accessGeneration ||
         outcome['sequence'] != _lastObservationSequence ||
         outcome['item'] != session.source.itemId ||
         outcome['version'] != session.source.mediaSourceId) {
       return;
     }
-    final records = runtime!.history
-        .records(session.source.account.region)
-        .where((r) => r.sessionId == session.id && r.source == session.source);
+    final records = runtime!.history.records().where(
+      (r) => r.sessionId == session.id && r.source == session.source,
+    );
     if (records.length != 1) return;
     await runtime!.history.synchronize(records.single, (_, _) async {
       // The helper already dispatched the report. Never send it twice.
@@ -1040,11 +1350,14 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             sequence <= _lastSwitchCommand ||
             _privateRevoked ||
             command['action'] != 'lock' ||
-            actual.source.account.region != AccessRegion.private ||
-            command['generation'] != actual.permit.regionGeneration ||
+            !auth.serverAccess.isProtected(
+              actual.source.account.configuredServerId,
+            ) ||
+            command['generation'] != actual.permit.accessGeneration ||
             command['source'] is! Map ||
-            decodeSource(Map<String, dynamic>.from(command['source'] as Map))
-                    .account !=
+            decodeAuthorizedSource(
+                  Map<String, dynamic>.from(command['source'] as Map),
+                ).account !=
                 actual.source.account) {
           throw StateError('Stale or unauthorized private lock');
         }
@@ -1058,11 +1371,55 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         'sequence': sequence,
         'accepted': accepted,
       });
-      if (accepted) await auth.regionAccess.lock();
+      if (accepted) {
+        await auth.serverAccess.lock(actual!.source.account.configuredServerId);
+      }
     } catch (_) {
       // Revocation may remove the endpoint while this read/reply is in flight.
     } finally {
       _urgentLockBusy = false;
+    }
+  }
+
+  // A cancelled/failed child open must invalidate a save even while the
+  // ordinary switch watcher is awaiting that save or its server verification.
+  Future<void> _consumeLineCancellation(int pid) async {
+    final control = _control;
+    if (_lineCancellationBusy || control is! PlayerLineProcessControl) return;
+    final ipc = control as PlayerLineProcessControl;
+    _lineCancellationBusy = true;
+    try {
+      final command = await ipc.consumeLineCancellation(pid);
+      if (command == null) return;
+      final actual = _origin;
+      final sequence = command['sequence'];
+      var accepted = false;
+      if (actual != null &&
+          runtime != null &&
+          pid == _pid &&
+          command['pid'] == pid &&
+          sequence is int &&
+          sequence > _lastSwitchCommand &&
+          !_privateRevoked &&
+          command['action'] == 'cancelLine' &&
+          command['generation'] == actual.permit.accessGeneration &&
+          command['source'] is Map &&
+          decodeAuthorizedSource(
+                Map<String, dynamic>.from(command['source'] as Map),
+              ).account ==
+              actual.source.account &&
+          actual.permit.isValid) {
+        _lastSwitchCommand = sequence;
+        accepted = true;
+      }
+      await ipc.replyLineCancellation(pid, {
+        'sequence': sequence,
+        'accepted': accepted,
+      });
+    } catch (_) {
+      // Endpoint retirement or malformed commands cannot authorize a commit.
+    } finally {
+      _lineCancellationBusy = false;
     }
   }
 
@@ -1085,10 +1442,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           sequence <= _lastSwitchCommand ||
           pid != _pid ||
           command['pid'] != pid ||
-          command['generation'] != actual.permit.regionGeneration ||
+          command['generation'] != actual.permit.accessGeneration ||
           command['source'] is! Map ||
-          decodeSource(Map<String, dynamic>.from(command['source'] as Map))
-                  .account !=
+          decodeAuthorizedSource(
+                Map<String, dynamic>.from(command['source'] as Map),
+              ).account !=
               actual.source.account ||
           _privateRevoked) {
         throw StateError('Stale playback switch command');
@@ -1096,17 +1454,97 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       actual.permit.requireValid();
       _lastSwitchCommand = sequence;
       switch (command['action']) {
+        case 'cancelLine':
+          break;
+        case 'commitLine':
+          final line = command['line'] as String;
+          final selection = LineSelection.fromJson(command['selection']);
+          final deadline = DateTime.tryParse(
+            command['deadlineUtc'] as String? ?? '',
+          );
+          void current() {
+            actual.permit.requireValid();
+            if (deadline == null ||
+                !deadline.isAfter(DateTime.now().toUtc()) ||
+                _disposed ||
+                _privateRevoked ||
+                _pid != pid ||
+                _lastSwitchCommand != sequence ||
+                !identical(_origin, actual)) {
+              throw StateError('Line commit expired');
+            }
+          }
+          current();
+          Duration remaining() => deadline!.difference(DateTime.now().toUtc());
+          final target = await runtime!
+              .resolveLine(
+                actual,
+                line,
+                command['version'] as String?,
+                timeout: remaining(),
+              )
+              .timeout(remaining());
+          current();
+          await _observationTail.timeout(remaining());
+          current();
+          await runtime!.commitLine(target, line, selection, current);
+          current();
+          _origin = target;
+          _authIdentity = _currentAuthIdentity;
+          receipt['selection'] = selection.toJson();
+
+        case 'opened':
+          final entry = _pendingEntry;
+          if (entry == null ||
+              command['item'] != _current?.itemId ||
+              command['version'] != _current?.mediaSourceId) {
+            throw StateError('No matching target open transaction');
+          }
+          final target = await runtime!.resolveItem(
+            actual,
+            command['item'] as String,
+            mediaSourceId: command['version'] as String,
+          );
+          final info = await target.permit.dispatch(
+            (c) => c.inspectPlaybackInfo(
+              itemId: target.source.itemId,
+              mediaSourceId: command['version'] as String,
+            ),
+          );
+          if (!info.mediaSources.any((v) => v.id == command['version'])) {
+            throw StateError('Unknown opened target version');
+          }
+          await entry.prepareCommit();
+          if (!identical(_pendingEntry, entry) || _pid != pid || _disposed) {
+            throw StateError('Target open superseded');
+          }
+          if (!entry.commit()) throw StateError('Source entry commit failed');
+          _pendingEntry = null;
+          _entryOpenTimer?.cancel();
+          _restoreSwitch = null;
+          _saveSwitchPreference = true;
+          switchFailure = null;
+        case 'openFailed':
+          if (_pendingEntry == null || command['item'] != _current?.itemId) {
+            throw StateError('No matching target open transaction');
+          }
+          commit = () => _rejectPendingEntry('Target playback failed to open');
+
         case 'lock':
-          if (actual.source.account.region != AccessRegion.private) {
+          if (!auth.serverAccess.isProtected(
+            actual.source.account.configuredServerId,
+          )) {
             throw StateError('Private playback required');
           }
-          commit = auth.regionAccess.lock;
+          commit = () async {
+            await auth.serverAccess.lock(
+              actual.source.account.configuredServerId,
+            );
+          };
         case 'catalogue':
-          final server = runtime!.registry
-              .project(actual.source.account.region)
-              .firstWhere(
-                (s) => s.id == actual.source.account.configuredServerId,
-              );
+          final server = runtime!.registry.project().firstWhere(
+            (s) => s.id == actual.source.account.configuredServerId,
+          );
           receipt['serverName'] = server.displayName;
           receipt['lines'] = [
             for (final line in server.lines)
@@ -1122,7 +1560,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           try {
             await query.start(
               origin: QueryItem(actual.work, actual.libraryId, dto),
-              scope: QueryScope(region: actual.source.account.region),
+              scope: QueryScope(),
             );
             actual.permit.requireValid();
             final current = await runtime!.resolveItem(
@@ -1133,7 +1571,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               (c) => c.getItem(current.source.itemId),
             );
             final mappedTarget = command['mapTarget'] is Map
-                ? decodeSource(
+                ? decodeAuthorizedSource(
                     Map<String, dynamic>.from(command['mapTarget'] as Map),
                   )
                 : null;
@@ -1195,7 +1633,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                     source: targetRef,
                     work: candidate.source.reference.item,
                     libraryId: candidate.source.libraryId,
-                    regionGeneration: actual.permit.regionGeneration,
+                    accessGeneration: actual.permit.accessGeneration,
                   ),
                 );
                 final info = await target.permit.dispatch(
@@ -1250,22 +1688,37 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           );
           final line = command['line'] as String?;
           final oldVersion = command['version'] as String;
+          _switchEntry?.cancel();
+          _switchEntry = null;
+          if (line == null) {
+            final reference = decodeAuthorizedSource(
+              Map<String, dynamic>.from(command['target'] as Map),
+            );
+            _switchEntry = await runtime!.prepareSourceEntry(
+              reference.account.configuredServerId,
+              requestPassword: requestSourcePassword,
+            );
+            if (_switchEntry == null) {
+              throw StateError('Source entry cancelled');
+            }
+          }
           final target = line != null
               ? await runtime!.resolveLine(old, line, oldVersion)
               : await runtime!.resolve(
                   PlayerOpenRequest(
-                    itemId: decodeSource(
+                    itemId: decodeAuthorizedSource(
                       Map<String, dynamic>.from(command['target'] as Map),
                     ).itemId,
-                    source: decodeSource(
+                    source: decodeAuthorizedSource(
                       Map<String, dynamic>.from(command['target'] as Map),
                     ),
-                    work: decodeSource(
+                    work: decodeAuthorizedSource(
                       Map<String, dynamic>.from(command['work'] as Map),
                     ),
                     libraryId: command['library'] as String,
-                    regionGeneration: actual.permit.regionGeneration,
+                    accessGeneration: _switchEntry!.generation,
                   ),
+                  entry: _switchEntry,
                 );
           if (line == null) {
             await runtime!.requireEquivalent(
@@ -1275,10 +1728,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             );
           }
           final oldInfo = await old.permit.dispatch(
-            (_) => old.client.getPlaybackInfo(itemId: itemId),
+            (_) => old.client.inspectPlaybackInfo(itemId: itemId),
           );
           final newInfo = await target.permit.dispatch(
-            (_) => target.client.getPlaybackInfo(
+            (_) => target.client.inspectPlaybackInfo(
               itemId: target.source.itemId,
               maxStreamingBitrate: command['bitrate'] as int,
             ),
@@ -1325,6 +1778,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           );
           receipt['plan'] = plan.toJson();
         case 'cancel':
+          _switchEntry?.cancel();
+          _switchEntry = null;
           _pendingSwitch = null;
         case 'confirm':
           final pending = _pendingSwitch;
@@ -1344,6 +1799,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             turnSubtitlesOff: command['turnSubtitlesOff'] == true,
           );
           if (choice == SwitchResumeChoice.cancel) {
+            _switchEntry?.cancel();
+            _switchEntry = null;
             _pendingSwitch = null;
             break;
           }
@@ -1370,7 +1827,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           );
           _restoreSwitch = (origin: pending.original, request: pending.restore);
           _pendingSwitch = null;
-          commit = () => _openWithOrigin(request, prepared: target);
+          final entry = _switchEntry;
+          _switchEntry = null;
+          commit = () =>
+              _openWithOrigin(request, prepared: target, entry: entry);
         case 'restore':
           final restore = _restoreSwitch;
           if (restore == null) {
@@ -1384,6 +1844,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       }
       receipt['accepted'] = true;
     } catch (error) {
+      if (command['action'] == 'inspect') {
+        _switchEntry?.cancel();
+        _switchEntry = null;
+      }
       receipt['accepted'] = false;
       receipt['error'] = '$error';
     }
@@ -1410,6 +1874,16 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                 !identical(_restoreSwitch, transaction)) {
               return;
             }
+            final targetEntry = _origin?.permit.entry;
+            if (targetEntry != null &&
+                !targetEntry.isCommitted &&
+                transaction?.origin.permit.isValid == true) {
+              try {
+                await restoreOriginalSource();
+              } catch (_) {
+                /* A remains retryable. */
+              }
+            }
             switchFailure = '$error';
             notifyListeners();
           }
@@ -1435,12 +1909,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   void _revokePrivate() {
-    if (_restoreSwitch?.origin.source.account.region == AccessRegion.private) {
+    if (_restoreSwitch?.origin.permit.isValid == false) {
       _restoreSwitch = null;
       switchFailure = null;
       notifyListeners();
     }
-    if (_origin?.source.account.region != AccessRegion.private) return;
+    if (_origin?.permit.isValid != false) return;
     _revokeWindow();
   }
 
@@ -1448,14 +1922,19 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (_restoreSwitch?.origin.source.account.configuredServerId != serverId) {
       return;
     }
-    final private =
-        _restoreSwitch!.origin.source.account.region == AccessRegion.private;
+    final private = auth.serverAccess.isProtected(
+      _restoreSwitch!.origin.source.account.configuredServerId,
+    );
     _restoreSwitch = null;
     if (private) switchFailure = null;
     notifyListeners();
   }
 
   void _sourceRevoked(String serverId) {
+    if (_origin?.permit.isValid == true &&
+        (_restoreSwitch == null || _restoreSwitch!.origin.permit.isValid)) {
+      return;
+    }
     _invalidateOriginal(serverId);
     if (_origin?.source.account.configuredServerId != serverId) return;
     _revokeWindow();
@@ -1482,16 +1961,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       unawaited(
         (control as PlayerHistoryProcessControl).revoke(
           _pid,
-          auth.regionAccess.generation,
+          auth.serverAccess.generation(
+            _origin?.source.account.configuredServerId ?? '',
+          ),
           reportStopped:
-              _origin?.source.account.region == AccessRegion.private &&
-              auth.regionAccess.state == PrivateAccessState.locking,
+              _origin != null &&
+              !auth.serverAccess.allows(
+                _origin!.source.account.configuredServerId,
+              ),
         ),
       );
     }
   }
 
-  Future<void> _closePrivate(RestrictedStopPermit permit) async {
+  Future<void> _closePrivate(ServerStopPermit permit) async {
     if (_privateRevoked) await close().timeout(closeTimeout + reportTimeout);
   }
 
@@ -1520,13 +2003,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   void dispose() {
+    _openingRecoveryBudget?.cancel();
+    runtime?.unregisterLinePlayer(this);
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _entryOpenTimer?.cancel();
+    _switchEntry?.cancel();
+    _switchEntry = null;
     _disposed = true;
     _requestRevision++;
     _control.cancelPendingSpawns(includePrepared: true);
     auth.removeListener(_onAuth);
-    auth.regionAccess.removeRevocationHook(_revokePrivate);
-    auth.regionAccess.removeCleanupHook(_closePrivate);
-    auth.regionAccess.removeTerminationHook(_terminatePrivate);
+    auth.serverAccess.removeRevocationHook(_revokePrivate);
+    auth.serverAccess.removeCleanupHook(_closePrivate);
+    auth.serverAccess.removeTerminationHook(_terminatePrivate);
     runtime?.registry.removeMembershipCleanup(_membershipRevoked);
     runtime?.registry.removeSourceRevocation(_sourceRevoked);
     unawaited(
@@ -1614,10 +2104,13 @@ class PlayerWindowApp extends StatefulWidget {
 
 class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   late PlayerWindowLaunch _launch;
+  bool _entryResultSent = false;
   late AuthController _auth;
   var _playerKey = GlobalKey<PlayerPageState>();
   Future<void>? _closing;
   Timer? _commands;
+  int _lineCommandSequence = 0;
+  int _cancelledLineCommand = 0;
   bool _readingCommand = false;
   int _ipcSequence = 0;
   int _launchRevision = 0;
@@ -1657,6 +2150,63 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       unawaited(() async {
         try {
           final endpoint = _launch.protocol;
+          final lineCommand = await endpoint?.read('line-selection');
+          final lineSequence = lineCommand?['sequence'];
+          if (lineSequence is int &&
+              lineCommand?['cancel'] == true &&
+              lineSequence == _lineCommandSequence &&
+              lineSequence != _cancelledLineCommand) {
+            _cancelledLineCommand = lineSequence;
+            _playerKey.currentState?.controller
+                ?.cancelPendingPlaybackLineRequest();
+          } else if (lineSequence is int &&
+              lineSequence > _lineCommandSequence &&
+              lineCommand?['cancel'] != true) {
+            _lineCommandSequence = lineSequence;
+            unawaited(() async {
+              var accepted = false;
+              try {
+                if (lineCommand?['generation'] != _launch.accessGeneration) {
+                  throw StateError('Line request permission expired');
+                }
+                final controller = _playerKey.currentState?.controller;
+                if (controller == null) throw StateError('Player unavailable');
+                final deadline = DateTime.tryParse(
+                  lineCommand?['deadlineUtc'] as String? ?? '',
+                );
+                if (deadline == null) {
+                  throw StateError('Line request deadline missing');
+                }
+                await controller.selectPlaybackLineWithConfirmation(
+                  LineSelection.fromJson(lineCommand!['selection']),
+                  deadlineUtc: deadline,
+                  onNeedsSelection: () async {
+                    await endpoint?.write('line-selection-result', {
+                      'sequence': lineSequence,
+                      'status': 'needsSelection',
+                      'accepted': false,
+                    });
+                  },
+                  guard: () {
+                    if (_closing != null ||
+                        _lineCommandSequence != lineSequence ||
+                        _cancelledLineCommand == lineSequence) {
+                      throw StateError('Line request cancelled');
+                    }
+                  },
+                );
+                accepted = true;
+              } catch (_) {
+                /* Child keeps the actionable failure/selection UI. */
+              }
+              if (_lineCommandSequence != lineSequence) return;
+              await endpoint?.write('line-selection-result', {
+                'sequence': lineSequence,
+                'accepted': accepted,
+                'status': accepted ? 'committed' : 'failed',
+              });
+            }());
+          }
           final revoked = await endpoint?.read('revoke');
           if (revoked != null) {
             await _playerKey.currentState?.controller?.revokeFromHost(
@@ -1707,10 +2257,14 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       userId: launch.userId,
       userAgent: launch.userAgent,
     );
-    return AuthController(
+    return AuthController.forPlayback(
       client: client,
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+      account: launch.request.source?.account,
+      isAuthorized: () =>
+          mounted &&
+          _closing == null &&
+          identical(_launch, launch) &&
+          _playerKey.currentState?.controller?.permissionRevoked != true,
     );
   }
 
@@ -1773,17 +2327,36 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     }
     final sequence = ++_ipcSequence;
     final urgentLock = command['action'] == 'lock';
-    await endpoint.write(urgentLock ? 'lock-request' : 'switch-request', {
+    final cancelLine = command['action'] == 'cancelLine';
+    final requestMailbox = urgentLock
+        ? 'lock-request'
+        : cancelLine
+        ? 'line-cancel'
+        : 'switch-request';
+    final replyMailbox = urgentLock
+        ? 'lock-reply'
+        : cancelLine
+        ? 'line-cancel-result'
+        : 'switch-reply';
+    await endpoint.write(requestMailbox, {
       ...command,
       'source': encodeSource(source),
-      'generation': _launch.regionGeneration,
+      'generation': _launch.accessGeneration,
       'sequence': sequence,
     });
-    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    final ordinaryDeadline = DateTime.now().toUtc().add(
+      const Duration(seconds: 30),
+    );
+    final requestedDeadline = DateTime.tryParse(
+      command['deadlineUtc'] as String? ?? '',
+    );
+    final deadline =
+        requestedDeadline != null &&
+            requestedDeadline.isBefore(ordinaryDeadline)
+        ? requestedDeadline
+        : ordinaryDeadline;
     while (DateTime.now().isBefore(deadline) && _closing == null) {
-      final reply = await endpoint.read(
-        urgentLock ? 'lock-reply' : 'switch-reply',
-      );
+      final reply = await endpoint.read(replyMailbox);
       if (reply?['sequence'] == sequence) {
         if (reply?['accepted'] != true) throw StateError('${reply?['error']}');
         return reply!;
@@ -1835,7 +2408,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           mediaSourceId: report.mediaSourceId,
         ),
       ),
-      'generation': _launch.regionGeneration,
+      'generation': _launch.accessGeneration,
       'sequence': sequence,
       'observationSequence': observationSequence,
       'item': report.itemId,
@@ -1879,7 +2452,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     if (endpoint == null || _closing != null) return;
     await endpoint.write('watch-sync', {
       'sequence': sequence,
-      'generation': _launch.regionGeneration,
+      'generation': _launch.accessGeneration,
       'item': report.itemId,
       'version': report.mediaSourceId,
       'succeeded': succeeded,
@@ -1936,6 +2509,17 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           progressInterval:
               widget._bindings?.progressInterval ?? const Duration(seconds: 10),
           observationSink: _launch.request.source == null ? null : _observe,
+          sourceOpenResult: !_launch.entryPending
+              ? null
+              : (item, version, succeeded) async {
+                  if (_entryResultSent) return;
+                  _entryResultSent = true;
+                  await _dispatchSwitch({
+                    'action': succeeded ? 'opened' : 'openFailed',
+                    'item': item,
+                    'version': version,
+                  });
+                },
           reportOutcomeSink: _launch.request.source == null
               ? null
               : _reportOutcome,
@@ -1943,6 +2527,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
               ? null
               : _dispatchSwitch,
           startupData: _startup,
+          playbackLineSelectionSnapshot: _launch.lineSelection,
+          recoveryDeadlineUtc: _launch.recoveryDeadlineUtc,
+          recoveryAttemptDeadlineUtc: _launch.recoveryAttemptDeadlineUtc,
+          recoveryAttemptedLineIds: _launch.recoveryAttemptedLineIds,
           snapshotStore:
               widget._bindings?.snapshotStore ??
               (_launch.protocol == null
@@ -1993,7 +2581,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                           ),
                     work: request.work,
                     libraryId: request.libraryId,
-                    regionGeneration: _launch.regionGeneration,
+                    accessGeneration: _launch.accessGeneration,
                   ),
                   baseUrl: _auth.client.baseUrl?.toString() ?? _launch.baseUrl,
                   accessToken: _auth.client.accessToken ?? _launch.accessToken,
@@ -2002,7 +2590,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                   serviceType: _launch.serviceType,
                   userAgent: _auth.client.customUserAgent ?? _launch.userAgent,
                   protocol: _launch.protocol,
-                  regionGeneration: _launch.regionGeneration,
+                  accessGeneration: _launch.accessGeneration,
                   lines: _launch.lines,
                   verifiedServerId: _launch.verifiedServerId,
                 ),

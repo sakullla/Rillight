@@ -8,11 +8,11 @@ class PlayerHostOpenItemCommand {
     this.seasonId,
     this.source,
     this.libraryId,
-    this.regionGeneration,
+    this.accessGeneration,
   });
   final SourceReference? source;
   final String? libraryId;
-  final int? regionGeneration;
+  final int? accessGeneration;
   final String itemId;
   final String? seasonId;
 }
@@ -33,8 +33,8 @@ class PlayerHostOpenItem {
       'itemId': id,
       if (command?.source != null) 'source': encodeSource(command!.source!),
       if (command?.libraryId != null) 'libraryId': command!.libraryId,
-      if (command?.regionGeneration != null)
-        'regionGeneration': command!.regionGeneration,
+      if (command?.accessGeneration != null)
+        'accessGeneration': command!.accessGeneration,
       if (seasonId != null && seasonId.trim().isNotEmpty)
         'seasonId': seasonId.trim(),
     });
@@ -46,6 +46,11 @@ class PlayerHostOpenItem {
   }) async {
     final message = await protocol.read('open-item');
     if (message == null || message['pid'] != expectedPid) return null;
+    if (message.containsKey('regionGeneration') ||
+        (message['source'] is Map &&
+            (message['source'] as Map).containsKey('region'))) {
+      return null;
+    }
     final id = message['itemId'];
     final season = message['seasonId'];
     if (id is! String ||
@@ -56,16 +61,18 @@ class PlayerHostOpenItem {
     try {
       final source = message['source'] == null
           ? null
-          : decodeSource(Map<String, dynamic>.from(message['source'] as Map));
+          : decodeAuthorizedSource(
+              Map<String, dynamic>.from(message['source'] as Map),
+            );
       if (source != null &&
           (source.itemId != id.trim() ||
               message['libraryId'] is! String ||
-              message['regionGeneration'] is! int)) {
+              message['accessGeneration'] is! int)) {
         return null;
       }
       if (source == null &&
           (message.containsKey('libraryId') ||
-              message.containsKey('regionGeneration'))) {
+              message.containsKey('accessGeneration'))) {
         return null;
       }
       return PlayerHostOpenItemCommand(
@@ -73,7 +80,7 @@ class PlayerHostOpenItem {
         seasonId: season as String?,
         source: source,
         libraryId: message['libraryId'] as String?,
-        regionGeneration: message['regionGeneration'] as int?,
+        accessGeneration: message['accessGeneration'] as int?,
       );
     } catch (_) {
       return null;

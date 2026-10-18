@@ -1,3 +1,4 @@
+import 'server_entry_coordinator.dart';
 import '../media_server/server_address.dart';
 
 import 'package:rillight/media_server/capabilities.dart';
@@ -9,7 +10,7 @@ import 'dart:convert';
 import 'credential_store.dart';
 import '../media_server/authentication.dart';
 import 'cloud_credentials.dart';
-import 'region_access.dart';
+import 'server_access.dart';
 import 'server_list_store.dart';
 import '../media_server/errors.dart';
 import '../media_server/playback.dart';
@@ -18,7 +19,6 @@ import 'server_import_models.dart';
 /// Account identity only. Media item/version identity belongs to aggregation.
 class SourceAccount {
   const SourceAccount({
-    required this.region,
     required this.configuredServerId,
     required this.verifiedServerId,
     required this.userId,
@@ -29,7 +29,6 @@ class SourceAccount {
   final MediaServerType serviceType;
   final String? cloudAccountId;
   final String? homeUserId;
-  final AccessRegion region;
   final String configuredServerId;
   final String verifiedServerId;
   final String userId;
@@ -39,14 +38,12 @@ class SourceAccount {
       serviceType == other.serviceType &&
       cloudAccountId == other.cloudAccountId &&
       homeUserId == other.homeUserId &&
-      region == other.region &&
       configuredServerId == other.configuredServerId &&
       verifiedServerId == other.verifiedServerId &&
       userId == other.userId;
   @override
   int get hashCode => Object.hash(
     serviceType,
-    region,
     configuredServerId,
     verifiedServerId,
     userId,
@@ -61,6 +58,7 @@ class CredentialCommit {
   final SourceSessionRegistry owner;
   final String id;
   final int scope;
+  void Function()? _settledSelectionGuard;
 }
 
 /// An authorization transaction is captured before password/Quick Connect/PIN
@@ -70,24 +68,34 @@ class SourceAuthorization {
     this._owner,
     this.id,
     this.serviceType,
-    this.region,
     this._scope,
     this._generation,
     this._attempt,
     this._cloudRevision,
+    this._configuration,
   );
   final SourceSessionRegistry _owner;
   final String id;
   final MediaServerType serviceType;
-  final AccessRegion region;
   final int _scope;
   final int _generation;
   final int _attempt;
   final int _cloudRevision;
+  final SavedServer? _configuration;
   bool _finished = false;
   bool get isValid => _owner._acceptsAuthorization(this);
   void requireValid() {
     if (!isValid) throw StateError('Authorization revoked');
+  }
+
+  void requireServerIdentity(String identity) {
+    requireValid();
+    final expected = _configuration?.expectedServerId;
+    if (expected != null && expected != identity) {
+      throw const MediaServerException(
+        MediaServerFailureKind.incompatibleServer,
+      );
+    }
   }
 
   Future<AuthorizationStatus> poll(AuthorizationAttempt attempt) async {
@@ -113,7 +121,15 @@ class SourceAuthorization {
 }
 
 class SourceSession {
-  SourceSession._(this.account, this.client, this.revision);
+  SourceSession._(
+    this.account,
+    this.client,
+    this.revision, {
+    this.verified = false,
+    this._activationAvailable = false,
+  });
+  bool _activationAvailable;
+  final bool verified;
   final SourceAccount account;
   final MediaServerClient client;
   final int revision;
@@ -124,20 +140,19 @@ class OperationPermit {
     this._owner,
     this.account,
     this.sessionRevision,
-    this.scopeRevision,
-    this.regionGeneration,
-    this.libraryId, {
-    this.sessionOnly = false,
-  });
+    this.authorizationRevision,
+    this.accessGeneration,
+    this.libraryId,
+    this.entry,
+  );
   final SourceSessionRegistry _owner;
   final SourceAccount account;
   final int sessionRevision;
-  final int scopeRevision;
-  final int regionGeneration;
+  final int authorizationRevision;
+  final int accessGeneration;
   final String? libraryId;
+  final ServerEntryTicket? entry;
 
-  /// 聚合视界打开条目时只要求该服务器会话有效，不要求库范围已勾选。
-  final bool sessionOnly;
   bool get isValid => _owner.accepts(this);
   void requireValid() {
     if (!isValid) throw StateError('Source permission revoked');
@@ -181,7 +196,7 @@ class FrozenSourceStop {
     permit.requireValid();
     if (_used ||
         permit.account != account ||
-        permit.regionGeneration != _generation ||
+        permit.accessGeneration != _generation ||
         report.itemId != _report.itemId ||
         report.mediaSourceId != _report.mediaSourceId ||
         report.playSessionId != _report.playSessionId) {
@@ -191,11 +206,12 @@ class FrozenSourceStop {
   }
 
   bool _used = false;
-  Future<void> reportStopped(RestrictedStopPermit permit) async {
+  Future<void> reportStopped(ServerStopPermit permit) async {
     if (_used ||
         !permit.isValid ||
         !permit.belongsTo(_owner.access) ||
-        permit.generation != _generation + 1) {
+        permit.previousGeneration != _generation ||
+        permit.serverId != account.configuredServerId) {
       throw StateError('Stop transaction revoked');
     }
     _used = true;
@@ -222,7 +238,8 @@ enum ManualCheckStatus {
 }
 
 class ManualCheckResult {
-  const ManualCheckResult(this.status, this.checkedAt);
+  const ManualCheckResult(this.status, this.checkedAt, {this.failureKind});
+  final MediaServerFailureKind? failureKind;
   final ManualCheckStatus status;
   final DateTime checkedAt;
 }
@@ -259,7 +276,7 @@ class SourceSessionRegistry {
     access.addCleanupHook(_clearPrivate);
     access.addTerminationHook(_terminateStops);
   }
-  final RegionAccessController access;
+  final ServerAccessController access;
   final ServerListStore store;
   final CredentialStore credentials;
   final SourceClientFactory createClient;
@@ -280,12 +297,25 @@ class SourceSessionRegistry {
       value.cloudCredentialRef == server.cloudCredentialRef &&
       value.resourceCredentialRef == server.resourceCredentialRef;
 
+  /// Local authorization projection, independent of the selected browsing
+  /// session. This does not contact the server or grant content access.
+  Future<bool> hasStoredAuthorization(String id) async {
+    final server = _servers.where((s) => s.id == id).firstOrNull;
+    if (server == null) return false;
+    final value = await credentials.read(id);
+    return value != null &&
+        value.accessToken.isNotEmpty &&
+        value.userId.isNotEmpty &&
+        _credentialsMatch(server, value);
+  }
+
   List<SavedServer> _servers = [];
   String? _lastServerId;
   final Map<String, SourceSession> _sessions = {};
-  final Map<String, int> _scopes = {};
+  final Map<String, int> _authorizations = {};
   final Set<String> _transitioning = {};
   final Set<String> _credentialChanges = {};
+  final Set<String> _candidateCommits = {};
   final Set<String> _cloudDisconnects = {};
   int _cloudRevision = 0;
   final Set<MembershipCleanup> _migrationHooks = {};
@@ -307,7 +337,7 @@ class SourceSessionRegistry {
   }) {
     permit.requireValid();
     if (!identical(permit._owner, this) ||
-        permit.account.region != AccessRegion.private) {
+        !access.isProtected(permit.account.configuredServerId)) {
       throw StateError('Private source permit required');
     }
     final registered = _sessions[permit.account.configuredServerId]!.client;
@@ -333,17 +363,22 @@ class SourceSessionRegistry {
       permit.account,
       client,
       report,
-      access.generation,
+      access.generation(permit.account.configuredServerId),
     );
     _frozenStops.add(stop);
     return stop;
   }
 
   void _terminateStops() {
-    for (final stop in _frozenStops) {
+    for (final stop in _frozenStops.toList()) {
+      if (!_disposed &&
+          access.generation(stop.account.configuredServerId) ==
+              stop._generation) {
+        continue;
+      }
       stop._clear();
+      _frozenStops.remove(stop);
     }
-    _frozenStops.clear();
   }
 
   /// Compensate one persisted playback without reacquiring cloud authority or
@@ -353,27 +388,24 @@ class SourceSessionRegistry {
     required PlaybackReport report,
     required Uri baseUrl,
     required String libraryId,
-    int? regionGeneration,
+    int? accessGeneration,
     bool cleanupOnly = false,
   }) async {
+    requireContentAccess(account.configuredServerId);
     final server = _allowed(account.configuredServerId);
-    final scope = _scopes[server.id] ?? 0;
-    final generation = access.generation;
+    final scope = _authorizations[server.id] ?? 0;
+    final generation = access.generation(server.id);
     void requireOwner() {
       try {
         _requireCurrent(server, scope, generation);
         final current = _allowed(server.id);
-        if (current.region != account.region ||
-            current.serviceType != account.serviceType ||
+        if (current.serviceType != account.serviceType ||
             current.verifiedServerId != account.verifiedServerId ||
             current.cloudAccountId != account.cloudAccountId ||
             current.homeUserId != account.homeUserId ||
-            !current.participates ||
-            !current.scopeKnown ||
-            !current.libraryIds.contains(libraryId) ||
             !current.lines.any((line) => Uri.parse(line.address) == baseUrl) ||
-            (account.region == AccessRegion.private &&
-                (regionGeneration != generation ||
+            (access.isProtected(account.configuredServerId) &&
+                (accessGeneration != generation ||
                     _sessions[server.id]?.account != account))) {
           throw PlaybackCleanupRevoked();
         }
@@ -415,6 +447,21 @@ class SourceSessionRegistry {
   }
 
   int _revision = 0;
+  int _configurationRevision = 0;
+  int get configurationRevision => _configurationRevision;
+  SavedServer server(String id) => _allowed(id);
+  MediaServerClient createCandidate(MediaServerType type) => _clientFor(type);
+  String? connectedLineId(String id) {
+    final current = _sessions[id]?.client.baseUrl?.toString();
+    return _servers
+        .where((s) => s.id == id)
+        .firstOrNull
+        ?.lines
+        .where((l) => l.address == current)
+        .firstOrNull
+        ?.id;
+  }
+
   final Map<String, int> _authAttempts = {};
   final Map<String, SourceAuthorization> _pendingAuthorizations = {};
   final Map<String, Future<SourceSession>> _sessionAcquisitions = {};
@@ -422,13 +469,10 @@ class SourceSessionRegistry {
 
   void _requireCurrent(SavedServer server, int scope, int generation) {
     if (_cloudDisconnects.contains(server.cloudCredentialRef) ||
-        _pendingAuthorizations.containsKey(server.id) ||
         _credentialChanges.contains(server.id) ||
-        (_scopes[server.id] ?? 0) != scope ||
-        _allowed(server.id).region != server.region ||
+        (_authorizations[server.id] ?? 0) != scope ||
         _allowed(server.id).serviceType != server.serviceType ||
-        (server.region == AccessRegion.private &&
-            generation != access.generation)) {
+        generation != access.generation(server.id)) {
       throw StateError('Access revoked');
     }
   }
@@ -436,12 +480,15 @@ class SourceSessionRegistry {
   Future<void>? _writes;
   int _writeTicket = 0;
   bool _loaded = false;
-  late final ServerListStore ordinaryStore = _OrdinaryServerStore(this);
+  late final ServerListStore configurationStore = _RegistryServerStore(this);
   Future<void> load() async {
     final snapshot = await store.load();
     _servers = snapshot.servers
         .map((s) => SavedServer.fromJson(s.toJson()))
         .toList();
+    for (final server in _servers) {
+      await access.register(server);
+    }
     _lastServerId = snapshot.lastServerId;
     _loaded = true;
   }
@@ -449,10 +496,8 @@ class SourceSessionRegistry {
   /// Offline, additive import. Each record shares the configuration/credential
   /// writer and is published only after both stores have committed.
   Future<ServerImportResult> importServers(
-    Iterable<ServerImportDraft> drafts, {
-    AccessRegion region = AccessRegion.ordinary,
-  }) async {
-    final generation = access.generation;
+    Iterable<ServerImportDraft> drafts,
+  ) async {
     // Snapshot caller-owned lists before the first asynchronous operation.
     final input = [
       for (final draft in drafts)
@@ -490,8 +535,7 @@ class SourceSessionRegistry {
         );
         continue;
       }
-      if ((draft.isPrivate && region != AccessRegion.private) ||
-          !access.allows(region)) {
+      if (draft.isPrivate) {
         results.add(
           result(
             ServerImportStatus.skipped,
@@ -540,12 +584,9 @@ class SourceSessionRegistry {
         continue;
       }
       final id = 'config-${generateDeviceId()}';
-      final scope = _scopes[id] ?? 0;
+      final scope = _authorizations[id] ?? 0;
       void guard() {
-        if (!access.allows(region) ||
-            (region == AccessRegion.private &&
-                access.generation != generation) ||
-            (_scopes[id] ?? 0) != scope ||
+        if ((_authorizations[id] ?? 0) != scope ||
             _transitioning.contains(id)) {
           throw const _ImportRevoked();
         }
@@ -556,7 +597,7 @@ class SourceSessionRegistry {
           guard();
           final addresses = lines.map((line) => line.address).toSet();
           for (final existing in _servers.where(
-            (s) => s.region == region && s.serviceType == draft.serviceType,
+            (s) => s.serviceType == draft.serviceType,
           )) {
             if (!existing.lines.any((line) {
               try {
@@ -591,7 +632,6 @@ class SourceSessionRegistry {
             lines: List.unmodifiable(lines),
             activeLineId: lines.first.id,
             userAgent: draft.userAgent,
-            region: region,
             identityPending: true,
           );
           final previous = ServerListSnapshot(
@@ -611,6 +651,11 @@ class SourceSessionRegistry {
             );
             guard();
             _servers = next;
+            for (final server in next) {
+              await access.register(server);
+            }
+            _configurationRevision++;
+            _notifySourceChange(id);
             results.add(result(ServerImportStatus.added, id: id));
           } catch (error) {
             var rollbackFailed = false;
@@ -660,26 +705,20 @@ class SourceSessionRegistry {
     return ServerImportResult(results);
   }
 
-  List<SavedServer> project(AccessRegion region) {
-    if (!access.allows(region)) return const [];
-    return List.unmodifiable(
-      _servers.where(
-        (s) => s.region == region && !_transitioning.contains(s.id),
-      ),
-    );
+  List<SavedServer> project() =>
+      List.unmodifiable(_servers.where((s) => !_transitioning.contains(s.id)));
+
+  void requireContentAccess(String id) {
+    _allowed(id);
+    if (!access.allows(id)) throw StateError('Server entry required');
   }
 
-  /// Legacy single-service login must not overwrite a hidden private identity.
-  Future<void> requireOrdinaryServer(String id) async {
+  Future<void> requireConfiguredServer(String id) async {
     if (!_loaded) await load();
-    final current = _servers.where((s) => s.id == id).firstOrNull;
-    if (current?.region == AccessRegion.private ||
-        _transitioning.contains(id)) {
-      throw StateError('Source unavailable in ordinary context');
-    }
+    if (_transitioning.contains(id)) throw StateError('Source changing');
   }
 
-  Future<void> requireOrdinaryIdentity(
+  Future<void> requireConfiguredIdentity(
     MediaServerType type,
     String remoteId,
   ) async {
@@ -687,19 +726,16 @@ class SourceSessionRegistry {
     if (_servers.any(
       (s) =>
           s.serviceType == type &&
-          (s.verifiedServerId ?? s.id) == remoteId &&
-          (s.region != AccessRegion.ordinary || _transitioning.contains(s.id)),
+          s.expectedServerId == remoteId &&
+          _transitioning.contains(s.id),
     )) {
-      throw StateError('Source unavailable in ordinary context');
+      throw StateError('Source changing');
     }
   }
 
   SavedServer _allowed(String id) {
     final server = _servers.where((s) => s.id == id).firstOrNull;
-    if (_disposed ||
-        server == null ||
-        !access.allows(server.region) ||
-        _transitioning.contains(id)) {
+    if (_disposed || server == null || _transitioning.contains(id)) {
       throw StateError('Source unavailable');
     }
     return server;
@@ -707,38 +743,33 @@ class SourceSessionRegistry {
 
   Future<SourceAuthorization> beginAuthorization({
     required MediaServerType serviceType,
-    required AccessRegion region,
     String? configuredServerId,
   }) async {
     if (!_loaded) await load();
-    if (!access.allows(region)) throw StateError('Region locked');
     final id = configuredServerId ?? 'source-${generateDeviceId()}';
     final existing = _servers.where((s) => s.id == id).firstOrNull;
     if (configuredServerId != null &&
-        (existing == null ||
-            existing.region != region ||
-            existing.serviceType != serviceType)) {
+        (existing == null || existing.serviceType != serviceType)) {
       throw StateError('Source identity mismatch');
     }
     if (_cloudDisconnects.contains(existing?.cloudCredentialRef) ||
         _transitioning.contains(id) ||
-        _credentialChanges.contains(id)) {
+        (_credentialChanges.contains(id) || _candidateCommits.contains(id))) {
       throw StateError('Source changing');
     }
-    // A Home switch/relogin revokes the old user immediately, before PIN IO.
-    _sessions.remove(id)?.client.clearSession();
-    _invalidate(id);
+    // Preparing another account must not revoke the still usable session.
+    _authorizations.putIfAbsent(id, () => 0);
     final attempt = (_authAttempts[id] ?? 0) + 1;
     _authAttempts[id] = attempt;
     final authorization = SourceAuthorization._(
       this,
       id,
       serviceType,
-      region,
-      _scopes[id]!,
-      access.generation,
+      _authorizations[id]!,
+      access.generation(id),
       attempt,
       _cloudRevision,
+      existing,
     );
     _pendingAuthorizations[id] = authorization;
     return authorization;
@@ -749,12 +780,20 @@ class SourceSessionRegistry {
       !authorization._finished &&
       (authorization.serviceType != MediaServerType.plex ||
           authorization._cloudRevision == _cloudRevision) &&
-      access.allows(authorization.region) &&
-      (authorization.region != AccessRegion.private ||
-          authorization._generation == access.generation) &&
-      _scopes[authorization.id] == authorization._scope &&
+      (authorization._configuration == null ||
+          authorization._generation == access.generation(authorization.id)) &&
+      _authorizations[authorization.id] == authorization._scope &&
       _authAttempts[authorization.id] == authorization._attempt &&
       !_transitioning.contains(authorization.id);
+
+  String _connectionConfiguration(SavedServer server) => jsonEncode({
+    'lines': [
+      for (final line in server.lines) [line.id, line.address],
+    ],
+    'active': server.activeLineId,
+    'selection': server.lineSelection.toJson(),
+    'userAgent': server.normalizedUserAgent,
+  });
 
   /// Verify resource/server/effective-user correspondence before committing.
   /// Discovery alone never imports or selects a library.
@@ -762,9 +801,22 @@ class SourceSessionRegistry {
     SourceAuthorization authorization, {
     required SavedServer server,
     required StoredCredentials value,
+    SessionIdentityVerifier? candidateVerifier,
+    Future<void> Function()? persistCandidate,
+    Future<void> Function()? rollbackCandidate,
+    bool remember = false,
   }) async {
+    SavedServer? committedConfiguration;
     void guard() {
       authorization.requireValid();
+      final baseline = committedConfiguration ?? authorization._configuration;
+      final current = _servers.where((s) => s.id == server.id).firstOrNull;
+      if (baseline != null &&
+          (current == null ||
+              _connectionConfiguration(current) !=
+                  _connectionConfiguration(baseline))) {
+        throw StateError('Source configuration changed; retry authorization');
+      }
       if (_cloudDisconnects.contains(server.cloudCredentialRef)) {
         throw StateError('Cloud authorization revoked');
       }
@@ -772,7 +824,6 @@ class SourceSessionRegistry {
 
     guard();
     if (server.id != authorization.id ||
-        server.region != authorization.region ||
         server.serviceType != authorization.serviceType ||
         !_credentialsMatch(server, value) ||
         value.accessToken.isEmpty ||
@@ -780,6 +831,7 @@ class SourceSessionRegistry {
         server.verifiedServerId == null) {
       throw StateError('Authorization identity mismatch');
     }
+    authorization.requireServerIdentity(server.verifiedServerId!);
     final client = _clientFor(server.serviceType);
     try {
       client.setUserAgent(server.userAgent);
@@ -794,12 +846,53 @@ class SourceSessionRegistry {
         userId: value.userId,
         userAgent: server.userAgent,
       );
-      await sessionIdentityVerifier?.call(server, value, client);
+      await (candidateVerifier ?? sessionIdentityVerifier)?.call(
+        server,
+        value,
+        client,
+      );
       guard();
       final user = await client.getUser();
       guard();
       if (user.id != value.userId) {
         throw StateError('Account identity mismatch');
+      }
+      final addresses = <String>{};
+      for (final line in server.lines) {
+        final uri = normalizeServerAddress(line.address);
+        if (!addresses.add(uri.toString())) throw StateError('Duplicate line');
+        if (line.id == server.activeLine?.id) continue;
+        final probe = _clientFor(server.serviceType);
+        try {
+          probe.setUserAgent(server.userAgent);
+          final info = await probe.getPublicInfo(uri);
+          guard();
+          if (info.id != server.verifiedServerId) {
+            throw const MediaServerException(
+              MediaServerFailureKind.incompatibleServer,
+            );
+          }
+          probe.attachSession(
+            baseUrl: uri,
+            accessToken: value.accessToken,
+            userId: value.userId,
+            userAgent: server.userAgent,
+          );
+          await (candidateVerifier ?? sessionIdentityVerifier)?.call(
+            server,
+            value,
+            probe,
+          );
+          guard();
+          if ((await probe.getUser()).id != value.userId) {
+            throw const MediaServerException(
+              MediaServerFailureKind.invalidCredentials,
+            );
+          }
+          guard();
+        } finally {
+          probe.clearSession();
+        }
       }
       await _enqueue(() async {
         guard();
@@ -810,62 +903,83 @@ class SourceSessionRegistry {
         if (old != null &&
             (old.serviceType != server.serviceType ||
                 (old.expectedServerId != null &&
-                    old.expectedServerId != server.verifiedServerId) ||
-                old.region != server.region)) {
+                    old.expectedServerId != server.verifiedServerId))) {
           throw StateError('Source identity changed');
         }
-        final preserveScope =
-            old != null &&
-            previous != null &&
-            previous.userId == value.userId &&
-            previous.homeUserId == value.homeUserId &&
-            previous.cloudAccountId == value.cloudAccountId;
+        final baseline = authorization._configuration;
         final saved = server.copyWith(
-          libraryIds: preserveScope ? old.libraryIds : const [],
-          scopeKnown: preserveScope ? old.scopeKnown : false,
-          participates: old?.participates ?? server.participates,
+          nickname: old != null && old.nickname != baseline?.nickname
+              ? old.nickname ?? ''
+              : server.nickname,
+          iconId: old != null && old.iconId != baseline?.iconId
+              ? old.iconId
+              : server.iconId,
+          protectionRef: old?.protectionRef,
+          clearProtection: old != null && old.protectionRef == null,
+          lines: [
+            for (final line in server.lines)
+              line.copyWith(
+                nickname:
+                    old?.lines
+                        .where((l) => l.id == line.id)
+                        .firstOrNull
+                        ?.nickname ??
+                    line.nickname,
+              ),
+          ],
         );
         var savedConfig = false;
-        _credentialChanges.add(server.id);
+        _candidateCommits.add(server.id);
         try {
+          await persistCandidate?.call();
+          guard();
           await credentials.write(server.id, value);
           guard();
           final next = [
-            for (final s in _servers)
-              if (s.id != server.id) s,
-            saved,
+            for (final s in _servers) s.id == server.id ? saved : s,
+            if (old == null) saved,
           ];
-          await store.save(
-            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
-          );
           savedConfig = true;
+          await store.save(
+            ServerListSnapshot(
+              servers: next,
+              lastServerId: remember ? server.id : _lastServerId,
+            ),
+          );
           guard();
           _servers = next;
+          for (final server in next) {
+            await access.register(server);
+          }
+          committedConfiguration = saved;
+          if (remember) _lastServerId = server.id;
+          _configurationRevision++;
         } catch (_) {
-          if (savedConfig) {
-            await store.save(
-              ServerListSnapshot(
-                servers: previousServers,
-                lastServerId: _lastServerId,
+          // Attempt every compensation even when one backing store fails.
+          await Future.wait<void>([
+            if (savedConfig)
+              store.save(
+                ServerListSnapshot(
+                  servers: previousServers,
+                  lastServerId: _lastServerId,
+                ),
               ),
-            );
-          }
-          if (previous == null) {
-            await credentials.delete(server.id);
-          } else {
-            await credentials.write(server.id, previous);
-          }
+            if (rollbackCandidate != null) rollbackCandidate(),
+            previous == null
+                ? credentials.delete(server.id)
+                : credentials.write(server.id, previous),
+          ]);
           rethrow;
         } finally {
-          _credentialChanges.remove(server.id);
+          _candidateCommits.remove(server.id);
         }
       });
       guard();
       authorization.cancel();
+      _invalidate(server.id);
       final session = SourceSession._(
         SourceAccount(
           serviceType: server.serviceType,
-          region: server.region,
           configuredServerId: server.id,
           verifiedServerId: server.verifiedServerId!,
           userId: value.userId,
@@ -874,6 +988,8 @@ class SourceSessionRegistry {
         ),
         client,
         ++_revision,
+        verified: true,
+        activationAvailable: true,
       );
       _sessions.remove(server.id)?.client.clearSession();
       _sessions[server.id] = session;
@@ -895,7 +1011,10 @@ class SourceSessionRegistry {
 
   /// Source logout never deletes a cloud grant shared with another source.
   Future<void> logoutSource(String id, {bool remove = false}) async {
-    final server = _allowed(id);
+    if (remove && !_servers.any((s) => s.id == id)) return;
+    final server = remove
+        ? _servers.firstWhere((s) => s.id == id)
+        : _allowed(id);
     _pendingAuthorizations.remove(id)?.cancel();
     _invalidate(id);
     _authAttempts[id] = (_authAttempts[id] ?? 0) + 1;
@@ -916,6 +1035,10 @@ class SourceSessionRegistry {
             ),
           );
           _servers = next;
+          for (final server in next) {
+            await access.register(server);
+          }
+          _configurationRevision++;
           if (_lastServerId == id) _lastServerId = null;
         }
       });
@@ -937,9 +1060,6 @@ class SourceSessionRegistry {
     final bindings = _servers
         .where((s) => s.cloudCredentialRef == credentialRef)
         .toList();
-    if (bindings.any((s) => !access.allows(s.region))) {
-      throw StateError('Region locked');
-    }
     return List.unmodifiable(bindings.map((s) => s.id));
   }
 
@@ -967,28 +1087,51 @@ class SourceSessionRegistry {
     }
   }
 
-  Future<CredentialCommit> beginOrdinaryCredentials(String id) async {
-    await requireOrdinaryServer(id);
-    return CredentialCommit._(this, id, _scopes[id] ?? 0);
+  Future<CredentialCommit> beginCredentials(String id) async {
+    await requireConfiguredServer(id);
+    // A management login publishes its new authorization after its durable
+    // write completes. Capture authority after that publication, so a logout
+    // queued behind the write can delete the newly saved credential.
+    final pendingWrite = _writes;
+    if (pendingWrite != null) {
+      try {
+        await pendingWrite;
+      } catch (_) {
+        // A failed write does not prevent explicit credential cleanup.
+      }
+      await requireConfiguredServer(id);
+    }
+    return CredentialCommit._(this, id, _authorizations[id] ?? 0);
   }
 
   void _guardCredentials(CredentialCommit commit) {
     if (!identical(commit.owner, this) ||
-        (_scopes[commit.id] ?? 0) != commit.scope ||
+        (_authorizations[commit.id] ?? 0) != commit.scope ||
         _transitioning.contains(commit.id) ||
         _servers.any(
           (s) =>
               s.id == commit.id &&
-              (s.region != AccessRegion.ordinary ||
-                  _cloudDisconnects.contains(s.cloudCredentialRef)),
+              _cloudDisconnects.contains(s.cloudCredentialRef),
         )) {
       throw StateError('Credential operation revoked');
     }
   }
 
+  /// Only a completed write or completed rollback can replace the selected
+  /// lease retired by that write. Later authorization or entry changes still
+  /// revoke this proof; callers cannot renew it by taking a fresh snapshot.
+  void Function() settledCredentialsGuard(CredentialCommit commit) {
+    final guard = commit._settledSelectionGuard;
+    if (!identical(commit.owner, this) || guard == null) {
+      throw StateError('Credential write did not settle');
+    }
+    guard();
+    return guard;
+  }
+
   /// Shares the configuration writer. Migration revokes synchronously; if it
   /// starts during secure-store IO, restore the old value before it can commit.
-  Future<void> commitOrdinaryCredentials(
+  Future<void> commitCredentials(
     CredentialCommit commit,
     StoredCredentials? value, {
     String? verifiedServerId,
@@ -1007,7 +1150,20 @@ class SourceSessionRegistry {
     _sessions.remove(commit.id)?.client.clearSession();
     _invalidate(commit.id);
     _credentialChanges.add(commit.id);
-    final writing = CredentialCommit._(this, commit.id, _scopes[commit.id]!);
+    final writing = CredentialCommit._(
+      this,
+      commit.id,
+      _authorizations[commit.id]!,
+    );
+    final generation = access.generation(commit.id);
+    void settledGuard() {
+      _guardCredentials(writing);
+      requireContentAccess(commit.id);
+      if (access.generation(commit.id) != generation) {
+        throw StateError('Credential entry revoked');
+      }
+    }
+
     try {
       if (value == null) {
         await credentials.delete(commit.id);
@@ -1022,12 +1178,6 @@ class SourceSessionRegistry {
             .map(
               (s) => s.id == commit.id
                   ? s.copyWith(
-                      libraryIds: previous?.userId != value.userId
-                          ? const []
-                          : s.libraryIds,
-                      scopeKnown: previous?.userId != value.userId
-                          ? false
-                          : s.scopeKnown,
                       verifiedServerId: verifiedServerId,
                       identityPending: verifiedServerId == null
                           ? s.identityPending
@@ -1044,7 +1194,11 @@ class SourceSessionRegistry {
         savedConfig = true;
         _guardCredentials(writing);
         _servers = next;
+        for (final server in next) {
+          await access.register(server);
+        }
       }
+      if (value != null) commit._settledSelectionGuard = settledGuard;
     } catch (error) {
       if (savedConfig) {
         await store.save(
@@ -1062,6 +1216,9 @@ class SourceSessionRegistry {
         } else {
           await credentials.write(commit.id, previous);
         }
+      }
+      if (value != null && previous != null) {
+        commit._settledSelectionGuard = settledGuard;
       }
       rethrow;
     } finally {
@@ -1092,15 +1249,34 @@ class SourceSessionRegistry {
     List<SavedServer> Function() change, {
     String? lastServerId,
     bool replaceLast = false,
+    void Function()? guard,
   }) => _enqueue(() async {
+    guard?.call();
     final next = change();
-    await store.save(
-      ServerListSnapshot(
-        servers: next,
-        lastServerId: replaceLast ? lastServerId : _lastServerId,
-      ),
+    final previous = ServerListSnapshot(
+      servers: _servers,
+      lastServerId: _lastServerId,
     );
+    try {
+      await store.save(
+        ServerListSnapshot(
+          servers: next,
+          lastServerId: replaceLast ? lastServerId : _lastServerId,
+        ),
+      );
+      guard?.call();
+    } catch (_) {
+      await store.save(previous);
+      rethrow;
+    }
     _servers = next;
+    for (final server in next) {
+      await access.register(server);
+    }
+    _configurationRevision++;
+    for (final server in next) {
+      if (!_transitioning.contains(server.id)) _notifySourceChange(server.id);
+    }
     if (replaceLast) _lastServerId = lastServerId;
   });
 
@@ -1112,7 +1288,6 @@ class SourceSessionRegistry {
     final current = duringTransition
         ? _servers.firstWhere((s) => s.id == id)
         : _allowed(id);
-    if (!access.allows(current.region)) throw StateError('Source revoked');
     final next = change(current);
     return _servers.map((s) => s.id == id ? next : s).toList();
   });
@@ -1124,15 +1299,11 @@ class SourceSessionRegistry {
   void Function() selectedSessionGuard(String id) {
     final server = _allowed(id);
     final revision = _selectedRevisions[id] ?? 0;
-    final generation = access.generation;
     return () {
       final current = _allowed(id);
       if ((_selectedRevisions[id] ?? 0) != revision ||
           current.serviceType != server.serviceType ||
-          current.region != server.region ||
-          _cloudDisconnects.contains(current.cloudCredentialRef) ||
-          (server.region == AccessRegion.private &&
-              generation != access.generation)) {
+          _cloudDisconnects.contains(current.cloudCredentialRef)) {
         throw StateError('Selected source revoked');
       }
     };
@@ -1142,7 +1313,7 @@ class SourceSessionRegistry {
     if (revokeSelected) {
       _selectedRevisions[id] = (_selectedRevisions[id] ?? 0) + 1;
     }
-    _scopes[id] = (_scopes[id] ?? 0) + 1;
+    _authorizations[id] = (_authorizations[id] ?? 0) + 1;
     _notifySourceChange(id);
   }
 
@@ -1154,42 +1325,6 @@ class SourceSessionRegistry {
         /* one consumer cannot delay revocation */
       }
     }
-  }
-
-  Future<void> configureScope(
-    String id, {
-    required bool participates,
-    required Set<String> libraryIds,
-  }) async {
-    _allowed(id);
-    final selected = libraryIds.toList()..sort();
-    _invalidate(id, revokeSelected: false);
-    _transitioning.add(id);
-    try {
-      await _update(
-        id,
-        (server) => server.copyWith(
-          participates: participates,
-          libraryIds: selected,
-          scopeKnown: true,
-        ),
-        duringTransition: true,
-      );
-    } finally {
-      _transitioning.remove(id);
-      // Consumers must also see the committed scope, not only its revocation.
-      _notifySourceChange(id);
-    }
-  }
-
-  /// Reconcile discovery by intersection: never select new/unknown libraries.
-  Future<void> reconcileLibraries(String id, Set<String> available) async {
-    final server = _allowed(id);
-    await configureScope(
-      id,
-      participates: server.participates,
-      libraryIds: server.libraryIds.where(available.contains).toSet(),
-    );
   }
 
   Future<void> rename(String id, String nickname) {
@@ -1209,147 +1344,395 @@ class SourceSessionRegistry {
     );
   }
 
-  Future<void> reorder(AccessRegion region, List<String> ids) async {
-    final current = project(region);
-    if (ids.toSet().length != current.length ||
-        !current.every((s) => ids.contains(s.id))) {
-      throw ArgumentError('Order must contain exactly the visible region');
-    }
-    final order = List<String>.of(ids);
-    await _commit(() {
-      final ordered = {for (final s in project(region)) s.id: s};
-      if (ordered.length != order.length || !order.every(ordered.containsKey)) {
-        throw StateError('Region changed');
-      }
-      var index = 0;
-      return _servers
-          .map((s) => s.region == region ? ordered[order[index++]]! : s)
-          .toList();
-    });
-  }
-
-  /// Region-aware management of addresses. A line is never admitted as another
-  /// server, and Plex must also prove that this exact resource connection is
-  /// present in the effective user's live discovery response.
-  Future<void> setLineAddress(
-    String id,
-    String address, {
-    String? lineId,
-  }) async {
-    final server = _allowed(id);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
-    final uri = normalizeServerAddress(address);
-    final target = lineId == null
-        ? null
-        : server.lines.where((line) => line.id == lineId).firstOrNull;
-    if (lineId != null && target == null) throw StateError('Unknown line');
-    if (server.lines.any(
-      (line) => line.address == uri.toString() && line.id != lineId,
-    )) {
-      throw StateError('Duplicate line');
-    }
-    if (target?.address == uri.toString()) return;
+  /// Anonymous identity first, account material only after identity matches.
+  Future<MediaServerClient> _prepareLine(
+    SavedServer server,
+    ServerLine line,
+    void Function() guard,
+  ) async {
     final probe = _clientFor(server.serviceType);
     try {
       probe.setUserAgent(server.userAgent);
-      final info = await probe.getPublicInfo(uri);
-      _requireCurrent(server, scope, generation);
-      if (info.id != (server.verifiedServerId ?? server.id)) {
+      final info = await probe.getPublicInfo(
+        normalizeServerAddress(line.address),
+      );
+      guard();
+      if (server.expectedServerId == null ||
+          info.id != server.expectedServerId) {
         throw const MediaServerException(
-          MediaServerFailureKind.forbidden,
+          MediaServerFailureKind.incompatibleServer,
           detail: '线路返回的服务器身份与当前服务器不一致',
         );
       }
-      if (server.serviceType == MediaServerType.plex) {
-        final value = await credentials.read(id);
-        _requireCurrent(server, scope, generation);
-        if (value == null || !_credentialsMatch(server, value)) {
+      final value = await credentials.read(server.id);
+      guard();
+      if (value != null) {
+        if (!_credentialsMatch(server, value)) {
           throw const MediaServerException(
             MediaServerFailureKind.sessionExpired,
           );
         }
         probe.attachSession(
-          baseUrl: uri,
+          baseUrl: normalizeServerAddress(line.address),
           accessToken: value.accessToken,
           userId: value.userId,
           userAgent: server.userAgent,
         );
         await sessionIdentityVerifier?.call(server, value, probe);
-        await probe.getUser();
-        _requireCurrent(server, scope, generation);
+        guard();
+        final user = await probe.getUser();
+        guard();
+        if (user.id != value.userId) {
+          throw const MediaServerException(
+            MediaServerFailureKind.invalidCredentials,
+          );
+        }
+      } else if (server.serviceType == MediaServerType.plex) {
+        throw const MediaServerException(MediaServerFailureKind.sessionExpired);
       }
-    } finally {
+      return probe;
+    } catch (_) {
       probe.clearSession();
+      rethrow;
     }
-    final active = target?.id == server.activeLine?.id;
-    if (active) {
-      _sessions.remove(id)?.client.clearSession();
-      _invalidate(id);
-    }
-    final nextScope = _scopes[id] ?? 0;
-    await _update(id, (current) {
-      _requireCurrent(server, nextScope, generation);
-      if (target != null &&
-          !current.lines.any(
-            (line) => line.id == target.id && line.address == target.address,
-          )) {
-        throw StateError('Line changed');
-      }
-      return current.copyWith(
-        lines: [
-          for (final line in current.lines)
-            line.id == lineId
-                ? line.copyWith(
-                    address: uri.toString(),
-                    checkStatus: 'unknown',
-                    checkedAt: null,
-                  )
-                : line,
-          if (lineId == null)
-            ServerLine(id: generateLineId(), address: uri.toString()),
-        ],
-      );
-    });
-    _notifySourceChange(id);
   }
 
-  Future<void> removeLine(String id, String lineId) async {
-    final server = _allowed(id);
-    final target = server.lines.where((line) => line.id == lineId).firstOrNull;
-    if (target == null) throw StateError('Unknown line');
-    if (server.lines.length <= 1) throw StateError('Cannot remove last line');
-    final active = server.activeLine?.id == lineId;
-    if (active) {
-      final remaining = server.lines.firstWhere((line) => line.id != lineId);
-      final result = await check(id, lineId: remaining.id);
-      if (result.status != ManualCheckStatus.available &&
-          result.status != ManualCheckStatus.needsLogin) {
-        throw const MediaServerException(
-          MediaServerFailureKind.forbidden,
-          detail: '无法核验剩余线路',
-        );
+  /// Shared transaction. Failed prepare/save preserves the original client.
+  Future<void> _editLines(
+    String id,
+    SavedServer Function(SavedServer) edit, {
+    void Function()? guard,
+  }) async {
+    final original = _allowed(id);
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(id);
+    void current() {
+      guard?.call();
+      _requireCurrent(original, scope, generation);
+      final latest = _allowed(id);
+      if (jsonEncode(latest.lines.map((l) => l.toJson()).toList()) !=
+              jsonEncode(original.lines.map((l) => l.toJson()).toList()) ||
+          latest.activeLineId != original.activeLineId ||
+          latest.lineSelection != original.lineSelection ||
+          latest.userAgent != original.userAgent) {
+        throw StateError('Lines changed; retry the edit');
       }
     }
-    if (active) {
-      _sessions.remove(id)?.client.clearSession();
-      _invalidate(id);
+
+    final candidate = edit(original);
+    if (candidate.lines.isEmpty) throw StateError('Cannot remove last line');
+    final addresses = candidate.lines.map(
+      (l) => normalizeServerAddress(l.address).toString(),
+    );
+    if (addresses.toSet().length != candidate.lines.length) {
+      throw StateError('Duplicate line');
     }
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
-    await _update(id, (current) {
-      _requireCurrent(server, scope, generation);
-      final remaining = current.lines
-          .where((line) => line.id != lineId)
-          .toList();
-      if (remaining.isEmpty) throw StateError('Cannot remove last line');
-      return current.copyWith(
-        lines: remaining,
-        activeLineId: active ? remaining.first.id : current.activeLineId,
-      );
-    });
-    _notifySourceChange(id);
+    final active = candidate.activeLine;
+    if (active == null ||
+        !candidate.lines.any((l) => l.id == candidate.activeLineId) ||
+        (candidate.lineSelection.fixedLineId != null &&
+            !candidate.lines.any(
+              (l) => l.id == candidate.lineSelection.fixedLineId,
+            ))) {
+      throw StateError('Unknown selected line');
+    }
+    final connectionChanged =
+        candidate.baseUrl != original.baseUrl ||
+        candidate.normalizedUserAgent != original.normalizedUserAgent;
+    final prepared = <MediaServerClient>[];
+    MediaServerClient? replacement;
+    try {
+      for (final line in candidate.lines) {
+        if (original.lines.any(
+              (old) => old.id == line.id && old.address == line.address,
+            ) &&
+            !(connectionChanged && line.id == active.id)) {
+          continue;
+        }
+        final probe = await _prepareLine(candidate, line, current);
+        prepared.add(probe);
+        if (line.id == active.id) replacement = probe;
+      }
+      current();
+      await _enqueue(() async {
+        current();
+        final previous = ServerListSnapshot(
+          servers: _servers,
+          lastServerId: _lastServerId,
+        );
+        final latest = _allowed(id).copyWith(
+          lines: candidate.lines,
+          activeLineId: candidate.activeLineId,
+          lineSelection: candidate.lineSelection,
+          lastSuccessfulLineId: candidate.lastSuccessfulLineId,
+          nickname: candidate.nickname != original.nickname
+              ? candidate.nickname
+              : _allowed(id).nickname,
+          iconId: candidate.iconId != original.iconId
+              ? candidate.iconId
+              : _allowed(id).iconId,
+          userAgent: candidate.userAgent,
+          protectionRef: candidate.protectionRef != original.protectionRef
+              ? candidate.protectionRef
+              : _allowed(id).protectionRef,
+        );
+        final next = _servers.map((s) => s.id == id ? latest : s).toList();
+        try {
+          await store.save(
+            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+          );
+          current();
+        } catch (_) {
+          await store.save(previous);
+          rethrow;
+        }
+        _servers = next;
+        for (final server in next) {
+          await access.register(server);
+        }
+        _configurationRevision++;
+      });
+      if (connectionChanged) {
+        _sessions.remove(id)?.client.clearSession();
+        _invalidate(id);
+        final value = replacement;
+        if (value != null && value.hasSession) {
+          _sessions[id] = SourceSession._(
+            SourceAccount(
+              configuredServerId: id,
+              verifiedServerId: candidate.expectedServerId!,
+              userId: value.userId!,
+              serviceType: candidate.serviceType,
+              cloudAccountId: candidate.cloudAccountId,
+              homeUserId: candidate.homeUserId,
+            ),
+            value,
+            ++_revision,
+            verified: true,
+            activationAvailable: true,
+          );
+          prepared.remove(value);
+          value.onSessionExpired = () {
+            if (identical(_sessions[id]?.client, value)) {
+              _sessions.remove(id);
+              _invalidate(id);
+            }
+            value.clearSession();
+          };
+        }
+      }
+      _notifySourceChange(id);
+    } finally {
+      for (final probe in prepared) {
+        probe.clearSession();
+      }
+    }
   }
+
+  /// One concentrated editor save, including verified line edits. The caller's
+  /// draft is untouched on failure; only this operation publishes changes.
+  Future<void> saveConfiguration(
+    String id, {
+    required String nickname,
+    String? iconId,
+    required String userAgent,
+    required List<ServerLine> lines,
+    LineSelection? lineSelection,
+    String? protectionRef,
+  }) => _editLines(id, (server) {
+    if (userAgent.contains(RegExp(r'[\r\n]'))) {
+      throw ArgumentError('Invalid user agent');
+    }
+    final normalized = [
+      for (final line in lines)
+        line.copyWith(address: normalizeServerAddress(line.address).toString()),
+    ];
+    if (normalized.map((l) => l.id).toSet().length != normalized.length) {
+      throw StateError('Duplicate line');
+    }
+    final activeId = normalized.any((l) => l.id == server.activeLineId)
+        ? server.activeLineId
+        : normalized.firstOrNull?.id;
+    final selection =
+        lineSelection ??
+        (server.lineSelection.isAutomatic
+            ? const LineSelection.auto()
+            : LineSelection.fixed(activeId ?? ''));
+    return server.copyWith(
+      nickname: nickname.trim(),
+      iconId: iconId,
+      userAgent: userAgent.trim(),
+      lines: normalized,
+      activeLineId: selection.fixedLineId ?? activeId,
+      lineSelection: selection,
+      lastSuccessfulLineId:
+          normalized.any((l) => l.id == server.lastSuccessfulLineId)
+          ? server.lastSuccessfulLineId
+          : activeId,
+      protectionRef: protectionRef,
+    );
+  });
+
+  Future<void> persistProtectionReference(String id, String? reference) =>
+      _update(
+        id,
+        (server) => server.copyWith(
+          protectionRef: reference,
+          clearProtection: reference == null,
+        ),
+      );
+
+  Future<void> setLineAddress(String id, String address, {String? lineId}) =>
+      _editLines(id, (server) {
+        final uri = normalizeServerAddress(address).toString();
+        if (lineId != null && !server.lines.any((l) => l.id == lineId)) {
+          throw StateError('Unknown line');
+        }
+        return server.copyWith(
+          lines: [
+            for (final line in server.lines)
+              line.id == lineId
+                  ? line.copyWith(
+                      address: uri,
+                      checkStatus: 'unknown',
+                      checkedAt: null,
+                    )
+                  : line,
+            if (lineId == null) ServerLine(id: generateLineId(), address: uri),
+          ],
+        );
+      });
+
+  Future<void> removeLine(String id, String lineId) => _editLines(id, (server) {
+    if (!server.lines.any((l) => l.id == lineId)) {
+      throw StateError('Unknown line');
+    }
+    final remaining = server.lines.where((l) => l.id != lineId).toList();
+    if (remaining.isEmpty) throw StateError('Cannot remove last line');
+    final activeId = server.activeLineId == lineId
+        ? remaining.first.id
+        : server.activeLineId;
+    return server.copyWith(
+      lines: remaining,
+      activeLineId: activeId,
+      lineSelection: server.lineSelection.fixedLineId == lineId
+          ? LineSelection.fixed(activeId!)
+          : server.lineSelection,
+      lastSuccessfulLineId: server.lastSuccessfulLineId == lineId
+          ? activeId
+          : server.lastSuccessfulLineId,
+    );
+  });
+
+  Future<void> selectLine(
+    String id,
+    LineSelection selection, {
+    void Function()? guard,
+  }) => _editLines(
+    id,
+    (server) => server.copyWith(
+      activeLineId: selection.fixedLineId ?? server.activeLineId,
+      lineSelection: selection,
+      lastSuccessfulLineId: selection.fixedLineId ?? server.activeLineId,
+    ),
+    guard: guard,
+  );
+
+  /// Publishes an already verified playback connection without revoking the
+  /// account lease. The caller owns native open and compensates a failed save.
+  Future<void> commitPlaybackLine({
+    required OperationPermit permit,
+    required MediaServerClient client,
+    required String lineId,
+    required LineSelection selection,
+    required void Function() guard,
+  }) async {
+    final id = permit.account.configuredServerId;
+    final original = _allowed(id);
+    void current() {
+      guard();
+      permit.requireValid();
+      final server = _allowed(id);
+      if (server.lines.length != original.lines.length ||
+          jsonEncode(server.lines.map((l) => l.toJson()).toList()) !=
+              jsonEncode(original.lines.map((l) => l.toJson()).toList()) ||
+          server.lineSelection != original.lineSelection ||
+          server.activeLineId != original.activeLineId ||
+          client.userId != permit.account.userId ||
+          client.serviceType != permit.account.serviceType ||
+          !server.lines.any(
+            (l) => l.id == lineId && Uri.parse(l.address) == client.baseUrl,
+          ) ||
+          (selection.fixedLineId != null && selection.fixedLineId != lineId)) {
+        throw StateError('Playback line transaction expired');
+      }
+    }
+
+    current();
+    await _enqueue(() async {
+      current();
+      final previous = ServerListSnapshot(
+        servers: _servers,
+        lastServerId: _lastServerId,
+      );
+      final next = _servers
+          .map(
+            (s) => s.id == id
+                ? s.copyWith(
+                    activeLineId: lineId,
+                    lineSelection: selection,
+                    lastSuccessfulLineId: lineId,
+                  )
+                : s,
+          )
+          .toList();
+      try {
+        await store.save(
+          ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+        );
+        current();
+      } catch (_) {
+        await store.save(previous);
+        rethrow;
+      }
+      // The commit point has no further asynchronous work. Access protection
+      // did not change, so there is no need to re-register or revoke its lease.
+      _servers = next;
+      _configurationRevision++;
+      final session = _sessions[id]!;
+      session.client.attachSession(
+        baseUrl: client.baseUrl!,
+        accessToken: client.accessToken!,
+        userId: client.userId!,
+        userAgent: client.customUserAgent,
+      );
+      _notifySourceChange(id);
+    });
+  }
+
+  Future<void> rememberSelection(String id, {void Function()? guard}) async {
+    guard?.call();
+    if (_lastServerId == id) return;
+    await _commit(
+      () {
+        _allowed(id);
+        return List.of(_servers);
+      },
+      replaceLast: true,
+      lastServerId: id,
+      guard: guard,
+    );
+  }
+
+  Future<void> reorderServers(List<String> ids) => _commit(() {
+    final byId = {for (final s in _servers) s.id: s};
+    if (ids.length != byId.length ||
+        ids.toSet().length != byId.length ||
+        !ids.every(byId.containsKey)) {
+      throw ArgumentError('Invalid server order');
+    }
+    return ids.map((id) => byId[id]!).toList();
+  });
 
   Future<void> reorderLines(String id, List<String> ids) async {
     final server = _allowed(id);
@@ -1373,72 +1756,10 @@ class SourceSessionRegistry {
       _migrationHooks.add(hook);
   void removeMembershipCleanup(MembershipCleanup hook) =>
       _migrationHooks.remove(hook);
-  Future<void> move(
-    String id,
-    AccessRegion target, {
-    Duration budget = const Duration(seconds: 3),
-  }) async {
-    final server = _allowed(id);
-    if (target == server.region) return;
-    if (!access.hasPin || !access.allows(AccessRegion.private)) {
-      throw StateError('Private unlock required');
-    }
-    _transitioning.add(id);
-    _invalidate(id);
-    for (final stop
-        in _frozenStops
-            .where((s) => s.account.configuredServerId == id)
-            .toList()) {
-      stop._clear();
-      _frozenStops.remove(stop);
-    }
-    final session = _sessions.remove(id);
-    try {
-      await Future.wait(
-        _migrationHooks.map((hook) => hook(session?.account, id)),
-      ).timeout(budget);
-      if (!access.allows(AccessRegion.private)) {
-        throw StateError('Access revoked during migration');
-      }
-      session?.client.clearSession();
-      await _update(id, (current) {
-        if (!access.allows(AccessRegion.private)) {
-          throw StateError('Migration revoked');
-        }
-        return current.copyWith(region: target);
-      }, duringTransition: true);
-    } finally {
-      session?.client.clearSession();
-      _transitioning.remove(id);
-      _notifySourceChange(id);
-    }
-  }
-
-  bool _participatingLibrary(
-    String id,
-    AccessRegion region,
-    String libraryId,
-  ) =>
-      libraryId.isNotEmpty &&
-      project(region).any(
-        (server) =>
-            server.id == id &&
-            server.participates &&
-            server.scopeKnown &&
-            server.libraryIds.contains(libraryId),
-      );
-
-  /// Read-only resolution through the same region/library authority as permit.
-  /// Unknown, hidden, nonparticipating and unauthenticated sources all return
-  /// null; this never probes a server or reveals a private membership.
-  SourceAccount? sessionAccount(
-    String id, {
-    required AccessRegion region,
-    required String libraryId,
-  }) {
-    if (!_participatingLibrary(id, region, libraryId)) return null;
+  SourceAccount? sessionAccount(String id, {required String libraryId}) {
+    if (!access.allows(id)) return null;
     final account = _sessions[id]?.account;
-    if (account == null || account.region != region) return null;
+    if (account == null) return null;
     try {
       permit(account, libraryId: libraryId).requireValid();
       return account;
@@ -1447,33 +1768,13 @@ class SourceSessionRegistry {
     }
   }
 
-  /// Query consumers reuse valid sessions. Concurrent first acquisitions share
-  /// authentication rather than replacing one another's session revision.
-  /// Explicit authenticate remains available for deliberate credential refresh.
   Future<SourceAccount> acquireAccount(
     String id, {
-    required AccessRegion region,
     required String libraryId,
   }) async {
-    if (!_participatingLibrary(id, region, libraryId)) {
-      throw StateError('Source outside allowed scope');
-    }
-    final existing = sessionAccount(id, region: region, libraryId: libraryId);
-    if (existing != null) return existing;
-    final acquisition = _sessionAcquisitions[id] ??= authenticate(id);
-    try {
-      final session = await acquisition;
-      if (session.account.region != region ||
-          !_participatingLibrary(id, region, libraryId)) {
-        throw StateError('Source outside allowed scope');
-      }
-      permit(session.account, libraryId: libraryId).requireValid();
-      return session.account;
-    } finally {
-      if (identical(_sessionAcquisitions[id], acquisition)) {
-        _sessionAcquisitions.remove(id);
-      }
-    }
+    final session = await ensureSession(id);
+    permit(session.account, libraryId: libraryId).requireValid();
+    return session.account;
   }
 
   /// Deliberate management login; never changes the legacy active account.
@@ -1482,7 +1783,6 @@ class SourceSessionRegistry {
     final client = _clientFor(server.serviceType);
     final authorization = await beginAuthorization(
       serviceType: server.serviceType,
-      region: server.region,
       configuredServerId: id,
     );
     try {
@@ -1528,10 +1828,10 @@ class SourceSessionRegistry {
 
   /// Management discovery is not a media permit and never selects libraries.
   Future<Map<String, String>> discoverLibraries(String id) async {
-    final session = await authenticate(id);
+    final session = await ensureSession(id);
     final server = _allowed(id);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(server.id);
     final views = await session.client.getViews();
     _requireCurrent(server, scope, generation);
     if (!identical(_sessions[id], session)) {
@@ -1540,19 +1840,45 @@ class SourceSessionRegistry {
     return {for (final view in views) view.id: view.name};
   }
 
-  /// 已保存的访问令牌直接挂上，并带上该服务器的 User-Agent。
-  /// 内存里已有同一令牌的会话则复用，不再请求公开信息或重新登录。
+  /// Reuse a verified in-memory session; a cold acquisition checks anonymous
+  /// server identity before attaching the saved token and verifying its user.
   Future<SourceSession> ensureSession(String id) async {
+    requireContentAccess(id);
+    final generation = access.generation(id);
+    final session = await prepareEntrySession(id);
+    requireContentAccess(id);
+    if (generation != access.generation(id)) throw StateError('Access revoked');
+    return _contentSession(session);
+  }
+
+  SourceSession _contentSession(SourceSession session) {
+    final accessPermit = permit(session.account);
+    return SourceSession._(
+      session.account,
+      session.client.withRequestGuard(accessPermit.requireValid),
+      session.revision,
+      verified: session.verified,
+    );
+  }
+
+  /// Identity/account preflight only. No content requests or media permit are
+  /// granted by this method; entry publishes access after successful commit.
+  Future<SourceSession> prepareEntrySession(String id) async {
     final server = _allowed(id);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
+    if (_candidateCommits.contains(id)) {
+      final existing = _sessions[id];
+      if (existing != null) return existing;
+      throw StateError('Source authorization is committing');
+    }
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(server.id);
     _requireCurrent(server, scope, generation);
     final reused = await _reuse(server, scope, generation);
     if (reused != null) return reused;
     final pending = _sessionAcquisitions[id];
     if (pending != null) return pending;
     final created = server.identityPending
-        ? authenticate(id)
+        ? prepareAuthentication(id)
         : _attachStoredSession(server, scope, generation);
     _sessionAcquisitions[id] = created;
     try {
@@ -1571,7 +1897,6 @@ class SourceSessionRegistry {
   ) async {
     final session = _sessions[server.id];
     if (session == null ||
-        session.account.region != server.region ||
         session.account.serviceType != server.serviceType ||
         !session.client.hasSession) {
       return null;
@@ -1612,6 +1937,13 @@ class SourceSessionRegistry {
       if (stored == null || !_credentialsMatch(server, stored)) {
         throw StateError('Login required');
       }
+      final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+      _requireCurrent(server, scope, generation);
+      if (info.id != server.expectedServerId) {
+        throw const MediaServerException(
+          MediaServerFailureKind.incompatibleServer,
+        );
+      }
       client.attachSession(
         baseUrl: Uri.parse(server.baseUrl),
         accessToken: stored.accessToken,
@@ -1620,22 +1952,17 @@ class SourceSessionRegistry {
       );
       await sessionIdentityVerifier?.call(server, stored, client);
       _requireCurrent(server, scope, generation);
-      if (server.serviceType == MediaServerType.plex) {
-        final user = await client.getUser();
-        _requireCurrent(server, scope, generation);
-        if (user.id != stored.userId) {
-          throw StateError('Account identity mismatch');
-        }
+      final user = await client.getUser();
+      _requireCurrent(server, scope, generation);
+      if (user.id != stored.userId) {
+        throw StateError('Account identity mismatch');
       }
-      if ((_scopes[server.id] ?? 0) != scope ||
-          _allowed(server.id).region != server.region ||
-          (server.region == AccessRegion.private &&
-              generation != access.generation)) {
+      if ((_authorizations[server.id] ?? 0) != scope ||
+          generation != access.generation(server.id)) {
         throw StateError('Access revoked');
       }
       final session = SourceSession._(
         SourceAccount(
-          region: server.region,
           serviceType: server.serviceType,
           cloudAccountId: stored.cloudAccountId,
           homeUserId: stored.homeUserId,
@@ -1645,6 +1972,7 @@ class SourceSessionRegistry {
         ),
         client,
         ++_revision,
+        verified: true,
       );
       _sessions.remove(server.id)?.client.clearSession();
       _sessions[server.id] = session;
@@ -1663,6 +1991,27 @@ class SourceSessionRegistry {
     }
   }
 
+  /// Reuse a just-committed proof without a second network phase after durable
+  /// selection. The proof is consumed once; ordinary restore/switch always
+  /// verifies afresh. The clone keeps provider proof and transport isolated.
+  MediaServerClient? verifiedClient(String id, StoredCredentials value) {
+    final server = _allowed(id);
+    final session = _sessions[id];
+    if (session == null ||
+        !session.verified ||
+        !session._activationAvailable ||
+        session.account.verifiedServerId != server.expectedServerId ||
+        session.client.customUserAgent != server.normalizedUserAgent ||
+        session.client.baseUrl?.toString() != server.baseUrl ||
+        session.client.accessToken != value.accessToken ||
+        session.account.userId != value.userId ||
+        !_credentialsMatch(server, value)) {
+      return null;
+    }
+    session._activationAvailable = false;
+    return session.client.withRequestGuard(selectedSessionGuard(id));
+  }
+
   /// Verify a selected-source client without registering a second authority.
   /// Call before publishing its AuthSession; registry revisions still own it.
   Future<void> verifyAttachedSession(
@@ -1671,8 +2020,8 @@ class SourceSessionRegistry {
     MediaServerClient client,
   ) async {
     final server = _allowed(id);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(server.id);
     _requireCurrent(server, scope, generation);
     final stored = await credentials.read(id);
     _requireCurrent(server, scope, generation);
@@ -1693,14 +2042,26 @@ class SourceSessionRegistry {
   }
 
   Future<SourceSession> authenticate(String id, {String? lineId}) async {
+    requireContentAccess(id);
+    final generation = access.generation(id);
+    final result = await prepareAuthentication(id, lineId: lineId);
+    requireContentAccess(id);
+    if (generation != access.generation(id)) throw StateError('Access revoked');
+    return _contentSession(result);
+  }
+
+  Future<SourceSession> prepareAuthentication(
+    String id, {
+    String? lineId,
+  }) async {
     final server = _allowed(id);
     final line = lineId == null
         ? server.activeLine
         : server.lines.where((line) => line.id == lineId).firstOrNull;
     if (line == null) throw StateError('Unknown authentication line');
     final baseUrl = Uri.parse(line.address);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(server.id);
     _requireCurrent(server, scope, generation);
     final attempt = (_authAttempts[id] ?? 0) + 1;
     _authAttempts[id] = attempt;
@@ -1779,10 +2140,8 @@ class SourceSessionRegistry {
           userAgent: server.userAgent,
         );
       }
-      if ((_scopes[id] ?? 0) != scope ||
-          _allowed(id).region != server.region ||
-          (server.region == AccessRegion.private &&
-              generation != access.generation)) {
+      if ((_authorizations[id] ?? 0) != scope ||
+          generation != access.generation(server.id)) {
         throw StateError('Access revoked');
       }
       if (_authAttempts[id] != attempt) {
@@ -1823,6 +2182,9 @@ class SourceSessionRegistry {
           );
           guard();
           _servers = next;
+          for (final server in next) {
+            await access.register(server);
+          }
         } catch (_) {
           if (!identical(verified, stored)) await credentials.write(id, stored);
           if (configurationAttempted) await store.save(previous);
@@ -1835,7 +2197,6 @@ class SourceSessionRegistry {
       }
       final session = SourceSession._(
         SourceAccount(
-          region: server.region,
           serviceType: server.serviceType,
           cloudAccountId: stored.cloudAccountId,
           homeUserId: stored.homeUserId,
@@ -1845,6 +2206,7 @@ class SourceSessionRegistry {
         ),
         client,
         ++_revision,
+        verified: true,
       );
       _sessions.remove(id)?.client.clearSession();
       _sessions[id] = session;
@@ -1869,30 +2231,28 @@ class SourceSessionRegistry {
   OperationPermit permit(
     SourceAccount account, {
     String? libraryId,
-    bool sessionOnly = false,
+    ServerEntryTicket? entry,
   }) {
     final server = _allowed(account.configuredServerId);
     final session = _sessions[server.id];
-    final blockedByScope =
-        !sessionOnly &&
-        (!server.participates ||
-            !server.scopeKnown ||
-            server.libraryIds.isEmpty ||
-            (libraryId != null && !server.libraryIds.contains(libraryId)));
+    if (entry == null) {
+      requireContentAccess(server.id);
+    } else if (!entry.authorizes(access, server.id)) {
+      throw StateError('Entry preparation revoked');
+    }
     if (_cloudDisconnects.contains(server.cloudCredentialRef) ||
         _credentialChanges.contains(server.id) ||
-        session?.account != account ||
-        blockedByScope) {
-      throw StateError('Source outside allowed scope');
+        session?.account != account) {
+      throw StateError('Source authorization revoked');
     }
     return OperationPermit._(
       this,
       account,
       session!.revision,
-      _scopes[server.id] ?? 0,
-      access.generation,
+      _authorizations[server.id] ?? 0,
+      entry?.generation ?? access.generation(server.id),
       libraryId,
-      sessionOnly: sessionOnly,
+      entry,
     );
   }
 
@@ -1901,25 +2261,18 @@ class SourceSessionRegistry {
     try {
       final server = _allowed(permit.account.configuredServerId);
       final session = _sessions[server.id];
-      final libraryOk =
-          permit.sessionOnly ||
-          (server.participates &&
-              server.scopeKnown &&
-              server.libraryIds.isNotEmpty &&
-              (permit.libraryId == null ||
-                  server.libraryIds.contains(permit.libraryId)));
       return !_cloudDisconnects.contains(server.cloudCredentialRef) &&
           !_credentialChanges.contains(server.id) &&
-          server.region == permit.account.region &&
           server.serviceType == permit.account.serviceType &&
-          libraryOk &&
+          (permit.entry?.authorizes(access, server.id) ??
+              access.allows(server.id)) &&
           session?.account == permit.account &&
           session?.client.hasSession == true &&
           session?.client.userId == permit.account.userId &&
           session?.revision == permit.sessionRevision &&
-          (_scopes[server.id] ?? 0) == permit.scopeRevision &&
-          (server.region != AccessRegion.private ||
-              access.generation == permit.regionGeneration);
+          (_authorizations[server.id] ?? 0) == permit.authorizationRevision &&
+          (permit.entry?.generation ?? access.generation(server.id)) ==
+              permit.accessGeneration;
     } on StateError {
       return false;
     }
@@ -1936,8 +2289,8 @@ class SourceSessionRegistry {
         : server.lines.where((line) => line.id == lineId).firstOrNull;
     if (line == null) throw StateError('Unknown check line');
     final checkKey = jsonEncode([id, line.id]);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(server.id);
     _requireCurrent(server, scope, generation);
     final client = _clientFor(server.serviceType);
     client.setUserAgent(server.userAgent);
@@ -1955,6 +2308,7 @@ class SourceSessionRegistry {
     }
 
     var status = ManualCheckStatus.unknown;
+    MediaServerFailureKind? failureKind;
     try {
       status = await (() async {
         final info = await client.getPublicInfo(Uri.parse(line.address));
@@ -1983,8 +2337,10 @@ class SourceSessionRegistry {
             : ManualCheckStatus.needsLogin;
       })().timeout(timeout);
     } on TimeoutException {
+      failureKind = MediaServerFailureKind.timeout;
       status = ManualCheckStatus.timeout;
     } on MediaServerException catch (error) {
+      failureKind = error.kind;
       status = switch (error.kind) {
         MediaServerFailureKind.timeout => ManualCheckStatus.timeout,
         MediaServerFailureKind.sessionExpired ||
@@ -2001,13 +2357,15 @@ class SourceSessionRegistry {
     if (_checkAttempts[checkKey] != attempt) {
       throw StateError('Check superseded');
     }
-    if ((_scopes[id] ?? 0) != scope ||
-        _allowed(id).region != server.region ||
-        (server.region == AccessRegion.private &&
-            generation != access.generation)) {
+    if ((_authorizations[id] ?? 0) != scope ||
+        generation != access.generation(server.id)) {
       throw StateError('Check revoked');
     }
-    final result = ManualCheckResult(status, DateTime.now());
+    final result = ManualCheckResult(
+      status,
+      DateTime.now(),
+      failureKind: failureKind,
+    );
     await _update(id, (current) {
       _requireCurrent(server, scope, generation);
       if (_checkAttempts[checkKey] != attempt) {
@@ -2023,6 +2381,7 @@ class SourceSessionRegistry {
               (l) => l.id == line.id
                   ? l.copyWith(
                       checkStatus: status.name,
+                      checkFailureKind: failureKind?.name,
                       checkedAt: result.checkedAt,
                     )
                   : l,
@@ -2036,137 +2395,63 @@ class SourceSessionRegistry {
   }
 
   void _revokePrivate() {
-    for (final server in _servers.where(
-      (s) => s.region == AccessRegion.private,
-    )) {
-      _invalidate(server.id);
-    }
+    final id = access.revokingServerId;
+    if (id != null) _invalidate(id);
   }
 
-  Future<void> _clearPrivate(RestrictedStopPermit permit) async {
-    // Consumers freeze their own stop-only credentials before revocation.
-    for (final id in _sessions.keys.toList()) {
-      if (_sessions[id]!.account.region == AccessRegion.private) {
-        _sessions.remove(id)!.client.clearSession();
-      }
-    }
+  Future<void> _clearPrivate(ServerStopPermit permit) async {
+    _sessions.remove(permit.serverId)?.client.clearSession();
   }
 
-  Future<void> _saveOrdinary(
+  Future<void> _saveConfigurationSnapshot(
     ServerListSnapshot snapshot,
     Map<String, SavedServer> baseline,
   ) async {
     if (!_loaded) await load();
     final incoming = {for (final s in snapshot.servers) s.id: s};
-    if (incoming.length != snapshot.servers.length ||
-        snapshot.servers.any((s) => s.region != AccessRegion.ordinary)) {
-      throw StateError('Ordinary store cannot write private members');
+    if (incoming.length != snapshot.servers.length) {
+      throw StateError('Duplicate server');
     }
-    for (final s in _servers.where((s) => s.region == AccessRegion.private)) {
-      if (incoming.containsKey(s.id)) {
-        throw StateError(
-          'Private identity is not writable from ordinary context',
-        );
-      }
-    }
-    final removed = project(AccessRegion.ordinary)
-        .where((s) => baseline.containsKey(s.id) && !incoming.containsKey(s.id))
-        .toList();
-    for (final server in removed) {
-      _transitioning.add(server.id);
-      _invalidate(server.id);
-      final session = _sessions.remove(server.id);
-      try {
-        await Future.wait(
-          _migrationHooks.map((hook) => hook(session?.account, server.id)),
-        ).timeout(const Duration(seconds: 3));
-      } catch (_) {
-        _transitioning.remove(server.id);
-        session?.client.clearSession();
-        rethrow;
-      }
-      session?.client.clearSession();
-    }
-    try {
-      await _commit(
-        () {
-          if (_servers.any(
-                (s) =>
-                    s.region == AccessRegion.private &&
-                    incoming.containsKey(s.id),
-              ) ||
-              incoming.keys.any(_transitioning.contains)) {
-            throw StateError('Ordinary snapshot revoked by membership change');
+    await _commit(
+      () {
+        final next = <SavedServer>[];
+        for (final current in _servers) {
+          final update = incoming.remove(current.id);
+          if (update == null) {
+            if (!baseline.containsKey(current.id)) next.add(current);
+            continue;
           }
-          final next = <SavedServer>[];
-          for (final current in _servers) {
-            if (current.region == AccessRegion.private) {
-              next.add(current);
-              continue;
-            }
-            final updated = incoming.remove(current.id);
-            if (updated == null) {
-              if (!baseline.containsKey(current.id)) next.add(current);
-              continue;
-            }
-            final previous = baseline[current.id];
-            if (previous == null) {
-              throw StateError('Member appeared after ordinary snapshot');
-            }
-            final merged = _mergeDelta(
-              current.toJson(),
-              previous.toJson(),
-              updated.toJson(),
-            );
-            // Region, participation, verification and checks remain registry-owned.
-            for (final key in [
-              'serviceType',
-              'authorizationMethod',
-              'cloudCredentialRef',
-              'cloudAccountId',
-              'homeUserId',
-              'resourceCredentialRef',
-              'region',
-              'participates',
-              'libraryIds',
-              'scopeKnown',
-              'verifiedServerId',
-              'identityPending',
-              'checkedAt',
-              'checkStatus',
-            ]) {
-              merged[key] = current.toJson()[key];
-            }
-            merged['lines'] = _mergeLines(
-              current.lines,
-              previous.lines,
-              updated.lines,
-            );
-            next.add(SavedServer.fromJson(merged));
-          }
-          next.addAll(
-            incoming.values.map(
-              (s) => SavedServer.fromJson(
-                s
-                    .copyWith(
-                      region: AccessRegion.ordinary,
-                      libraryIds: const [],
-                      scopeKnown: false,
-                    )
-                    .toJson(),
-              ),
-            ),
+          final old = baseline[current.id];
+          if (old == null) throw StateError('Server appeared after snapshot');
+          final merged = _mergeDelta(
+            current.toConfigurationJson(),
+            old.toConfigurationJson(),
+            update.toConfigurationJson(),
           );
-          return next;
-        },
-        replaceLast: true,
-        lastServerId: snapshot.lastServerId,
-      );
-    } finally {
-      for (final server in removed) {
-        _transitioning.remove(server.id);
-      }
-    }
+          for (final key in [
+            'serviceType',
+            'authorizationMethod',
+            'cloudCredentialRef',
+            'cloudAccountId',
+            'homeUserId',
+            'resourceCredentialRef',
+            'protectionRef',
+            'verifiedServerId',
+            'identityPending',
+            'checkedAt',
+            'checkStatus',
+          ]) {
+            merged[key] = current.toConfigurationJson()[key];
+          }
+          merged['lines'] = _mergeLines(current.lines, old.lines, update.lines);
+          next.add(SavedServer.fromJson(merged));
+        }
+        next.addAll(incoming.values);
+        return next;
+      },
+      replaceLast: true,
+      lastServerId: snapshot.lastServerId,
+    );
   }
 
   static Map<String, dynamic> _mergeDelta(
@@ -2261,14 +2546,14 @@ class _ImportRevoked implements Exception {
 
 /// Compatibility projection for the existing single-service AuthController.
 /// Its writes are reconciled by the registry, never sent straight to disk.
-class _OrdinaryServerStore implements ServerListStore {
-  _OrdinaryServerStore(this.registry);
+class _RegistryServerStore implements ServerListStore {
+  _RegistryServerStore(this.registry);
   final SourceSessionRegistry registry;
   Map<String, SavedServer> _baseline = {};
   @override
   Future<ServerListSnapshot> load() async {
     if (!registry._loaded) await registry.load();
-    final ordinary = registry.project(AccessRegion.ordinary);
+    final ordinary = registry.project();
     _baseline = {for (final s in ordinary) s.id: s};
     return ServerListSnapshot(
       servers: ordinary,
@@ -2280,7 +2565,7 @@ class _OrdinaryServerStore implements ServerListStore {
 
   @override
   Future<void> save(ServerListSnapshot snapshot) async {
-    await registry._saveOrdinary(snapshot, _baseline);
+    await registry._saveConfigurationSnapshot(snapshot, _baseline);
     // Track what this consumer actually observed, not newer registry values.
     _baseline = {for (final s in snapshot.servers) s.id: s};
   }

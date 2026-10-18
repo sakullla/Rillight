@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 
@@ -90,8 +90,6 @@ class RecoveryFixture {
               username: type.name,
               serviceType: type,
               verifiedServerId: type.name,
-              scopeKnown: true,
-              libraryIds: const ['library'],
               lines: [
                 ServerLine(id: 'line', address: 'https://${type.name}.test'),
               ],
@@ -111,7 +109,7 @@ class RecoveryFixture {
             ),
         });
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: servers,
       credentials: credentials,
       createClient: () => primary,
@@ -156,7 +154,6 @@ class RecoveryFixture {
     source: SourceReference(
       account: SourceAccount(
         serviceType: type,
-        region: AccessRegion.ordinary,
         configuredServerId: type.name,
         verifiedServerId: type.name,
         userId: type.name,
@@ -217,8 +214,6 @@ void main() {
               username: type.name,
               serviceType: type,
               verifiedServerId: type.name,
-              scopeKnown: true,
-              libraryIds: const ['library'],
               lines: [
                 ServerLine(id: 'line', address: 'https://${type.name}.test'),
               ],
@@ -236,7 +231,7 @@ void main() {
         ),
     });
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: servers,
       credentials: credentials,
       createClient: () => primary,
@@ -275,7 +270,6 @@ void main() {
       source: SourceReference(
         account: SourceAccount(
           serviceType: type,
-          region: AccessRegion.ordinary,
           configuredServerId: type.name,
           verifiedServerId: type.name,
           userId: type.name,
@@ -312,7 +306,7 @@ void main() {
     expect(primary.releaseTokens, ['resource-emby', 'resource-emby']);
   });
   for (final revocation in [
-    'scope',
+    'entry-password',
     'logout',
     'delete',
     'private-generation',
@@ -324,24 +318,30 @@ void main() {
         addTearDown(fixture.dispose);
         var pending = fixture.snapshot(MediaServerType.plex, cleanupOnly: true);
         switch (revocation) {
-          case 'scope':
-            await fixture.registry.configureScope(
+          case 'entry-password':
+            await fixture.registry.access.setPassword(
               'plex',
-              participates: false,
-              libraryIds: {},
+              '1234',
+              '1234',
+              persistReference: (ref) =>
+                  fixture.registry.persistProtectionReference('plex', ref),
             );
           case 'logout':
             await fixture.registry.logoutSource('plex');
           case 'delete':
             await fixture.registry.logoutSource('plex', remove: true);
           case 'private-generation':
+            await fixture.registry.access.setPassword(
+              'plex',
+              '1234',
+              '1234',
+              persistReference: (ref) =>
+                  fixture.registry.persistProtectionReference('plex', ref),
+            );
+            await fixture.registry.access.unlock('plex', '1234');
             pending = PlaybackSessionSnapshot.fromJson({
               ...pending.toJson(),
-              'source': {
-                ...(pending.toJson()['source'] as Map),
-                'region': 'private',
-              },
-              'regionGeneration': -1,
+              'accessGeneration': -1,
             })!;
         }
         final store = MemoryPlaybackSessionSnapshotStore(
@@ -366,10 +366,12 @@ void main() {
   test('revoked pending is pruned while a different temporary failure stays retryable', () async {
     final fixture = await RecoveryFixture.create();
     addTearDown(fixture.dispose);
-    await fixture.registry.configureScope(
+    await fixture.registry.access.setPassword(
       'plex',
-      participates: false,
-      libraryIds: {},
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          fixture.registry.persistProtectionReference('plex', ref),
     );
     fixture.primary.fail = true;
     final store = MemoryPlaybackSessionSnapshotStore(
@@ -410,11 +412,7 @@ void main() {
         expect(client.releases.single, same(client.reports.single));
         expect(client.token, isNull);
         expect(
-          registry.sessionAccount(
-            'configured',
-            region: AccessRegion.ordinary,
-            libraryId: 'library',
-          ),
+          registry.sessionAccount('configured', libraryId: 'library'),
           isNull,
         );
       },
@@ -470,8 +468,15 @@ void main() {
       cleanup(registry, MediaServerType.jellyfin),
       throwsStateError,
     );
+    await registry.access.setPassword(
+      'configured',
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          registry.persistProtectionReference('configured', ref),
+    );
     await expectLater(
-      cleanup(registry, MediaServerType.plex, region: AccessRegion.private),
+      cleanup(registry, MediaServerType.plex, generation: -1),
       throwsStateError,
     );
     expect(client.reports, isEmpty);
@@ -515,7 +520,7 @@ Future<SourceSessionRegistry> setup(
   CredentialStore? credentials,
 }) async {
   final registry = SourceSessionRegistry(
-    access: TestRegionAccessController(),
+    access: TestServerAccessController(),
     store: MemoryServerListStore(
       ServerListSnapshot(
         servers: [
@@ -525,8 +530,6 @@ Future<SourceSessionRegistry> setup(
             username: 'user',
             serviceType: type,
             verifiedServerId: 'server',
-            scopeKnown: true,
-            libraryIds: const ['library'],
             lines: const [
               ServerLine(id: 'line', address: 'https://source.test'),
             ],
@@ -550,11 +553,10 @@ Future<bool> cleanup(
   MediaServerType type, {
   String user = 'user',
   String server = 'server',
-  AccessRegion region = AccessRegion.ordinary,
+  int? generation,
   bool cleanupOnly = false,
 }) => registry.recoverPlayback(
   account: SourceAccount(
-    region: region,
     configuredServerId: 'configured',
     verifiedServerId: server,
     userId: user,
@@ -570,4 +572,5 @@ Future<bool> cleanup(
   baseUrl: Uri.parse('https://source.test'),
   libraryId: 'library',
   cleanupOnly: cleanupOnly,
+  accessGeneration: generation,
 );

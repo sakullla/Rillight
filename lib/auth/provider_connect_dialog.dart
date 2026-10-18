@@ -15,6 +15,7 @@ import 'auth_controller.dart';
 import 'login_widgets.dart';
 import 'provider_connect_controller.dart';
 import 'server_list_store.dart';
+import 'server_paste_draft.dart';
 
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -63,7 +64,6 @@ Future<bool?> showProviderConnect(
   BuildContext context,
   AuthController auth, {
   SavedServer? existing,
-  AccessRegion region = AccessRegion.ordinary,
   bool home = false,
   String? userAgent,
 }) async {
@@ -75,7 +75,6 @@ Future<bool?> showProviderConnect(
       builder: (_) => ProviderConnectDialog(
         auth: auth,
         existing: existing,
-        region: region,
         home: home,
         initialUserAgent: userAgent,
       ),
@@ -90,21 +89,23 @@ class ProviderConnectDialog extends StatefulWidget {
     super.key,
     required this.auth,
     this.existing,
-    this.region = AccessRegion.ordinary,
     this.home = false,
     this.initialUserAgent,
     this.initialType,
     this.inline = false,
     this.onConnected,
+    this.initialDraft,
+    this.showTypePicker = false,
   });
   final AuthController auth;
   final SavedServer? existing;
-  final AccessRegion region;
   final bool home;
   final String? initialUserAgent;
   final MediaServerType? initialType;
   final bool inline;
   final VoidCallback? onConnected;
+  final ServerPasteDraft? initialDraft;
+  final bool showTypePicker;
   @override
   State<ProviderConnectDialog> createState() => _ProviderConnectDialogState();
 }
@@ -116,8 +117,11 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       userAgent = TextEditingController(),
       password = TextEditingController(),
       pin = TextEditingController();
+  final displayName = TextEditingController(),
+      extraLines = TextEditingController();
   HomeUser? homeUser;
   bool _passwordVisible = false;
+  bool _completionScheduled = false;
   VoidCallback? _releasePresentation;
   @override
   void initState() {
@@ -125,9 +129,9 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     controller = ProviderConnectController(
       auth: widget.auth,
       existing: widget.existing,
-      region: widget.region,
       userAgent: widget.initialUserAgent,
     );
+    controller.addListener(_completeWhenDone);
     if (widget.initialType != null && widget.existing == null) {
       controller.type = widget.initialType!;
     }
@@ -137,8 +141,16 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     address.text = widget.existing?.baseUrl ?? '';
     username.text = widget.existing?.username ?? '';
     userAgent.text = controller.userAgent;
+    final draft = widget.initialDraft;
+    if (draft != null) {
+      controller.type = draft.serviceType;
+      displayName.text = draft.name;
+      address.text = draft.lines.firstOrNull ?? '';
+      extraLines.text = draft.lines.skip(1).join('\n');
+      username.text = draft.username;
+      password.text = draft.password;
+    }
     userAgent.addListener(() => controller.userAgent = userAgent.text);
-    widget.auth.regionAccess.addListener(_accessChanged);
     if (widget.home) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(controller.restoreHome());
@@ -146,30 +158,9 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     }
   }
 
-  void _accessChanged() {
-    if (!widget.auth.regionAccess.allows(widget.region)) {
-      controller.reset();
-      address.clear();
-      username.clear();
-      password.clear();
-      pin.clear();
-      userAgent.clear();
-      if (mounted) {
-        final route = ModalRoute.of(context);
-        if (!widget.inline && route?.isActive == true) {
-          final navigator = Navigator.of(context);
-          // TV input editors are nested routes. Close them with their owner so
-          // locking cannot leave an editor displaying a private identity.
-          navigator.popUntil((candidate) => identical(candidate, route));
-          navigator.pop(false);
-        }
-      }
-    }
-  }
-
   @override
   void dispose() {
-    widget.auth.regionAccess.removeListener(_accessChanged);
+    controller.removeListener(_completeWhenDone);
     controller.dispose();
     final release = _releasePresentation;
     if (release != null) {
@@ -180,7 +171,22 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     username.dispose();
     password.dispose();
     pin.dispose();
+    displayName.dispose();
+    extraLines.dispose();
     super.dispose();
+  }
+
+  void _completeWhenDone() {
+    if (!mounted ||
+        _completionScheduled ||
+        controller.busy ||
+        controller.stage != ProviderConnectStage.done) {
+      return;
+    }
+    _completionScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && controller.stage == ProviderConnectStage.done) _finish();
+    });
   }
 
   Future<void> _finish() async {
@@ -228,6 +234,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: TvInput(
           key: Key(id),
+          autofocus:
+              widget.initialDraft != null && id == 'provider-display-name',
           label: label,
           controller: value,
           secret: secret,
@@ -436,6 +444,24 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     );
   }
 
+  Widget _draftLines(AppLocalizations l) => _tv
+      ? TvInput(
+          key: const Key('provider-extra-lines'),
+          controller: extraLines,
+          label: l.serversPasteExtra,
+          maxLines: 3,
+          keyboardType: TextInputType.multiline,
+        )
+      : AppTextField(
+          key: const Key('provider-extra-lines'),
+          controller: extraLines,
+          label: l.serversPasteExtra,
+          minLines: 2,
+          maxLines: 5,
+          keyboardType: TextInputType.multiline,
+          autocorrect: false,
+        );
+
   List<Widget> _credentials(AppLocalizations l, ProviderConnectController c) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
@@ -450,10 +476,34 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         ? userAgentInput
         : LoginAdvancedSection(
             toggleKey: const Key('provider-advanced'),
-            initiallyExpanded: userAgent.text.trim().isNotEmpty,
+            initiallyExpanded: false,
             children: [userAgentInput],
           );
-    void submit() => c.password(address.text, username.text, password.text);
+    void prepareDraft() {
+      c.displayName = displayName.text.trim().isEmpty
+          ? null
+          : displayName.text.trim();
+      c.extraLines
+        ..clear()
+        ..addAll(
+          [
+                // Plex authorization discovers the primary connection. Every
+                // pasted endpoint must still join the same identity transaction.
+                if (c.type == MediaServerType.plex) address.text,
+                extraLines.text,
+              ]
+              .join('\n')
+              .split('\n')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty),
+        );
+    }
+
+    void submit() {
+      prepareDraft();
+      c.password(address.text, username.text, password.text);
+    }
+
     if (c.type == MediaServerType.plex) {
       final s = _tv ? TvDesign.scaleOf(context) : 1.0;
       Widget step(int index, String text) => Padding(
@@ -493,6 +543,25 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         ),
       );
       return [
+        if (widget.existing == null && (!_tv || widget.initialDraft != null))
+          _input(
+            'provider-display-name',
+            displayName,
+            l.serversPasteName,
+            action: TextInputAction.next,
+          ),
+        if (widget.initialDraft != null) ...[
+          _input(
+            'provider-address',
+            address,
+            l.serverAddress,
+            keyboardType: TextInputType.url,
+            icon: AppIcons.link,
+            action: TextInputAction.next,
+          ),
+          _draftLines(l),
+          SizedBox(height: 16 * s),
+        ],
         Container(
           padding: EdgeInsets.all(16 * s),
           decoration: BoxDecoration(
@@ -533,7 +602,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         _primary(
           'provider-authorize',
           l.providerPlexAuthorize,
-          c.busy ? null : () => c.authorize(address.text),
+          c.busy
+              ? null
+              : () {
+                  prepareDraft();
+                  c.authorize(address.text);
+                },
           icon: AppIcons.openInNew,
           busy: c.busy,
         ),
@@ -542,6 +616,13 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       ];
     }
     return [
+      if (widget.existing == null && (!_tv || widget.initialDraft != null))
+        _input(
+          'provider-display-name',
+          displayName,
+          l.serversPasteName,
+          action: TextInputAction.next,
+        ),
       AutofillGroup(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -577,6 +658,10 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           ],
         ),
       ),
+      if (widget.initialDraft != null) ...[
+        const SizedBox(height: 12),
+        _draftLines(l),
+      ],
       if (_tv) userAgentInput,
       const SizedBox(height: 14),
       _primary(
@@ -592,7 +677,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         _secondary(
           'provider-authorize',
           l.providerQuickConnect,
-          c.busy ? null : () => c.authorize(address.text),
+          c.busy
+              ? null
+              : () {
+                  prepareDraft();
+                  c.authorize(address.text);
+                },
           icon: AppIcons.bolt,
         ),
       ],
@@ -959,131 +1049,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     ];
   }
 
-  List<Widget> _libraries(AppLocalizations l, ProviderConnectController c) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final s = _tv ? TvDesign.scaleOf(context) : 1.0;
-    final all =
-        c.libraries.isNotEmpty &&
-        c.libraries.keys.every(c.selectedLibraries.contains);
-    void toggle(String id, bool selected) => setState(() {
-      selected ? c.selectedLibraries.add(id) : c.selectedLibraries.remove(id);
-    });
-    return [
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 32 * s,
-            height: 32 * s,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xff34c759).withValues(alpha: .18),
-            ),
-            child: Icon(
-              AppIcons.check,
-              fill: AppIcons.filled,
-              size: 20 * s,
-              color: const Color(0xff66bb6a),
-            ),
-          ),
-          SizedBox(width: 12 * s),
-          Expanded(
-            child: Text(
-              l.providerChooseLibraries,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ),
-        ],
-      ),
-      SizedBox(height: 12 * s),
-      if (c.libraries.isNotEmpty)
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${c.selectedLibraries.length}/${c.libraries.length}',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            _quiet(
-              all ? l.providerSelectNone : l.providerSelectAll,
-              c.busy
-                  ? null
-                  : () => setState(() {
-                      if (all) {
-                        c.selectedLibraries.clear();
-                      } else {
-                        c.selectedLibraries.addAll(c.libraries.keys);
-                      }
-                    }),
-              key: const Key('provider-libraries-all'),
-            ),
-          ],
-        ),
-      if (_tv)
-        for (final library in c.libraries.entries)
-          Padding(
-            padding: EdgeInsets.only(top: 6 * s),
-            child: TvAction(
-              variant: TvActionVariant.tile,
-              selected: c.selectedLibraries.contains(library.key),
-              onPressed: c.busy
-                  ? null
-                  : () => toggle(
-                      library.key,
-                      !c.selectedLibraries.contains(library.key),
-                    ),
-              leading: Icon(
-                AppIcons.checkbox,
-                fill: c.selectedLibraries.contains(library.key)
-                    ? AppIcons.filled
-                    : AppIcons.outline,
-              ),
-              child: Text(library.value),
-            ),
-          )
-      else if (c.libraries.isNotEmpty)
-        DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: .7),
-            ),
-          ),
-          child: Column(
-            children: [
-              for (final library in c.libraries.entries)
-                AppSwitchTile(
-                  title: Text(library.value),
-                  value: c.selectedLibraries.contains(library.key),
-                  onChanged: c.busy
-                      ? null
-                      : (selected) => toggle(library.key, selected == true),
-                ),
-            ],
-          ),
-        ),
-      if (c.libraries.isEmpty && !c.busy)
-        Text(
-          l.providerNoLibraries,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: _quiet(
-          l.sourceDiscoverLibraries,
-          c.busy ? null : c.retryLibraries,
-          icon: AppIcons.refresh,
-        ),
-      ),
-    ];
-  }
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
@@ -1122,7 +1087,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                           child: const AppLoadingBar(minHeight: 3),
                         ),
                       ),
-                    if (!widget.inline &&
+                    if ((!widget.inline || widget.showTypePicker) &&
                         c.stage == ProviderConnectStage.credentials) ...[
                       _typeSwitcher(c),
                       SizedBox(height: 10 * s),
@@ -1143,8 +1108,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                       ..._authorization(l, c),
                     if (c.stage == ProviderConnectStage.resources)
                       ..._resources(l, c, resources),
-                    if (c.stage == ProviderConnectStage.libraries)
-                      ..._libraries(l, c),
                   ],
                 ),
               ),
@@ -1162,25 +1125,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                         onPressed: () => Navigator.pop(context, false),
                         variant: AppButtonVariant.plain,
                         child: Text(l.cancelAction),
-                      ),
-              if (c.stage == ProviderConnectStage.libraries)
-                _tv
-                    ? TvAction(
-                        key: const Key('provider-finish'),
-                        emphasized: true,
-                        onPressed: c.busy ? null : _finish,
-                        child: Text(l.providerFinish),
-                      )
-                    : AppButton.icon(
-                        key: const Key('provider-finish'),
-                        onPressed: c.busy ? null : _finish,
-                        icon: const Icon(
-                          AppIcons.check,
-                          fill: AppIcons.filled,
-                          size: 18,
-                        ),
-                        label: Text(l.providerFinish),
-                        variant: AppButtonVariant.filled,
                       ),
             ],
           ),

@@ -5,6 +5,7 @@ import '../helpers/settle.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -700,7 +701,8 @@ void main() {
           ),
         ],
       );
-      final dio = dioForFakeEmby(FakeEmbyAdapter([home, other]));
+      final transport = _GatedAdapter([home, other]);
+      final dio = dioForFakeEmby(transport);
       final auth = AuthController.memory(
         client: EmbyClient(device: _device, dio: dio),
       );
@@ -728,14 +730,7 @@ void main() {
           gate.complete();
         }
       });
-      dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (options, handler) async {
-            await gate.future;
-            handler.next(options);
-          },
-        ),
-      );
+      transport.gate = gate.future;
       final connectingFuture = _exchange(offer, path: '/status');
       await _waitForPhone(assist!);
       final confirmFuture = assist!.confirm(auth);
@@ -769,7 +764,8 @@ void main() {
 
   cases.test('dispose during a failed connect still delivers failure and keeps the session', () async {
     final server = FakeEmbyServer();
-    final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
+    final transport = _GatedAdapter([server]);
+    final dio = dioForFakeEmby(transport);
     final auth = AuthController.memory(
       client: EmbyClient(device: _device, dio: dio),
     );
@@ -795,14 +791,7 @@ void main() {
         gate.complete();
       }
     });
-    dio.interceptors.add(
-      InterceptorsWrapper(
-        onRequest: (options, handler) async {
-          await gate.future;
-          handler.next(options);
-        },
-      ),
-    );
+    transport.gate = gate.future;
     final connectingFuture = _exchange(offer, path: '/status');
     await _waitForPhone(assist!);
     final confirmFuture = assist!.confirm(auth);
@@ -982,3 +971,19 @@ final cases = CaseShard(3);
 
 void mainShard(int part, int expectedParts) =>
     cases.register(part, main, expectedParts: expectedParts);
+
+/// Prepared authorization owns a fresh Dio, while the injected transport is
+/// shared. Delay the actual request rather than an unused client interceptor.
+class _GatedAdapter extends FakeEmbyAdapter {
+  _GatedAdapter(super.servers);
+  Future<void>? gate;
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? stream,
+    Future<void>? cancel,
+  ) async {
+    await gate;
+    return super.fetch(options, stream, cancel);
+  }
+}

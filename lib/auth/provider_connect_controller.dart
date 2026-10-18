@@ -10,26 +10,22 @@ import '../media_server/media_server_client.dart';
 import '../media_server/server_address.dart';
 import '../plex/plex_authentication.dart';
 import 'auth_controller.dart';
+import 'provider_identity.dart';
+import 'server_paste_draft.dart';
 import 'cloud_credentials.dart';
+import 'connection_failure.dart';
 import 'credential_store.dart';
 import 'server_list_store.dart';
 import 'source_sessions.dart';
 
-enum ProviderConnectStage {
-  credentials,
-  authorization,
-  resources,
-  libraries,
-  done,
-}
+enum ProviderConnectStage { credentials, authorization, resources, done }
 
-/// UI transaction shared by desktop, phone and remote controls. Discovery never
-/// selects aggregation libraries; the user confirms that separately.
+/// Shared candidate authorization for desktop, phone and remote controls.
+/// Successful authorization enters content directly, without a scope step.
 class ProviderConnectController extends ChangeNotifier {
   ProviderConnectController({
     required this.auth,
     this.existing,
-    this.region = AccessRegion.ordinary,
     String? userAgent,
     this.pollInterval,
   }) : type = existing?.serviceType ?? MediaServerType.emby,
@@ -37,11 +33,18 @@ class ProviderConnectController extends ChangeNotifier {
 
   final AuthController auth;
   final SavedServer? existing;
-  final AccessRegion region;
   final Duration? pollInterval;
   MediaServerType type;
   String userAgent;
+
+  /// Editable paste preview fields; no writes occur until authorization commits.
+  String? displayName;
+  final List<String> extraLines = [];
+  PendingCloudCredentials? _pendingCloud;
   String? _submittedPassword;
+  String? _submittedName;
+  SavedServer? _configured;
+  List<String> _submittedLines = const [];
   ProviderConnectStage stage = ProviderConnectStage.credentials;
   bool busy = false;
   MediaServerFailureKind? failure;
@@ -50,9 +53,8 @@ class ProviderConnectController extends ChangeNotifier {
   CloudAccount? account;
   List<HomeUser> users = [];
   List<AuthorizedServerResource> resources = [];
-  Map<String, String> libraries = {};
-  final Set<String> selectedLibraries = {};
   String? sourceId;
+  bool _activateOnCommit = false;
   SourceAuthorization? _authorization;
   PlexAuthentication? _plex;
   MediaServerClient? _client;
@@ -65,7 +67,7 @@ class ProviderConnectController extends ChangeNotifier {
   }
 
   void _guard(int epoch) {
-    if (_disposed || epoch != _epoch || !auth.regionAccess.allows(region)) {
+    if (_disposed || epoch != _epoch) {
       throw StateError('Authorization revoked');
     }
   }
@@ -80,9 +82,7 @@ class ProviderConnectController extends ChangeNotifier {
       await operation(epoch);
     } catch (error) {
       if (!_disposed && epoch == _epoch) {
-        failure = error is MediaServerException
-            ? error.kind
-            : MediaServerFailureKind.unknown;
+        failure = connectionFailure(error).kind;
       }
     } finally {
       if (!_disposed && epoch == _epoch) {
@@ -96,7 +96,6 @@ class ProviderConnectController extends ChangeNotifier {
     _authorization?.cancel();
     final authorization = await auth.sources.beginAuthorization(
       serviceType: type,
-      region: region,
       configuredServerId: existing?.id,
     );
     if (_disposed || epoch != _epoch) {
@@ -104,6 +103,9 @@ class ProviderConnectController extends ChangeNotifier {
       return;
     }
     _authorization = authorization;
+    _configured = existing == null ? null : auth.sources.server(existing!.id);
+    _submittedName = displayName;
+    _submittedLines = List.of(extraLines);
     _guard(epoch);
     authorization.requireValid();
     _client = auth
@@ -114,9 +116,11 @@ class ProviderConnectController extends ChangeNotifier {
       final base = auth.plexAuthentication;
       _plex = PlexAuthentication(
         device: base.device,
-        readCredential: base.readCredential,
-        writeCredential: base.writeCredential,
-        deleteCredential: base.deleteCredential,
+        readCredential: (_pendingCloud = PendingCloudCredentials(
+          CloudCredentialStore(auth.credentials),
+        )).read,
+        writeCredential: _pendingCloud!.write,
+        deleteCredential: _pendingCloud!.delete,
         dio: base.dio,
         accountUrl: base.accountUrl,
         homeUrl: base.homeUrl,
@@ -128,6 +132,30 @@ class ProviderConnectController extends ChangeNotifier {
     }
   }
 
+  /// The caller selects exactly one parsed group and may edit it first.
+  Future<void> submitDraft(
+    ServerPasteDraft draft, {
+    bool acceptUnrecognized = false,
+  }) {
+    if (busy || _disposed) return Future.value();
+    if (draft.unrecognized.isNotEmpty && !acceptUnrecognized) {
+      failure = MediaServerFailureKind.invalidResponse;
+      _changed();
+      return Future.value();
+    }
+    if (draft.lines.isEmpty) {
+      failure = MediaServerFailureKind.invalidAddress;
+      _changed();
+      return Future.value();
+    }
+    type = draft.serviceType;
+    displayName = draft.name.isEmpty ? null : draft.name;
+    extraLines
+      ..clear()
+      ..addAll(draft.lines.skip(1));
+    return password(draft.lines.first, draft.username, draft.password);
+  }
+
   Future<void> password(String address, String username, String password) =>
       _run((epoch) async {
         await _begin(epoch);
@@ -136,7 +164,7 @@ class ProviderConnectController extends ChangeNotifier {
         final uri = normalizeServerAddress(address);
         final info = await _client!.getPublicInfo(uri);
         _guard(epoch);
-        _authorization!.requireValid();
+        _authorization!.requireServerIdentity(info.id);
         final session = await _client!.authenticateByName(
           baseUrl: uri,
           username: username.trim(),
@@ -170,6 +198,11 @@ class ProviderConnectController extends ChangeNotifier {
     final uri = type == MediaServerType.plex
         ? null
         : normalizeServerAddress(address);
+    if (uri != null) {
+      final info = await _client!.getPublicInfo(uri);
+      _guard(epoch);
+      _authorization!.requireServerIdentity(info.id);
+    }
     final availability = await interactive.availability(method, server: uri);
     _authorization!.requireValid();
     if (!availability.isAvailable) {
@@ -266,29 +299,37 @@ class ProviderConnectController extends ChangeNotifier {
     if (existing != null && resource.server.id != existing!.verifiedServerId) {
       throw StateError('Server identity mismatch');
     }
-    final secret = await CloudCredentialStore(auth.credentials)
-        .readCredential(resource.resourceCredentialRef);
+    final secret = await _pendingCloud!.read(resource.resourceCredentialRef);
     _authorization!.requireValid();
     _guard(epoch);
     final id = _authorization!.id;
-    final lines = [
-      for (var i = 0; i < resource.connections.length; i++)
-        ServerLine(
-          id: '$id-line-$i',
-          address: resource.connections[i].uri.toString(),
-        ),
-    ];
-    final selected = resource.connections.indexOf(connection);
+    // First import admits only the selected discovery endpoint. Reauthorization
+    // retains the configured lines, IDs, names and order and verifies all of them.
+    final configured = _configured;
+    final address = normalizeServerAddress(connection.uri.toString())
+        .toString();
+    final oldLine = configured?.lines
+        .where((l) => normalizeServerAddress(l.address).toString() == address)
+        .firstOrNull;
+    final selectedLine =
+        oldLine ?? ServerLine(id: generateLineId(), address: address);
+    final lines = [...?configured?.lines, if (oldLine == null) selectedLine];
     final server = SavedServer(
       id: id,
       name: resource.server.serverName,
-      nickname: existing?.nickname,
+      nickname: _submittedName ?? _configured?.nickname,
       userAgent: normalizeUserAgent(userAgent),
       username: resource.user.name,
-      region: region,
       serviceType: type,
       lines: lines,
-      activeLineId: lines[selected].id,
+      activeLineId: selectedLine.id,
+      lastSuccessfulLineId: selectedLine.id,
+      lineSelection: _configured?.lineSelection.isAutomatic == false
+          ? LineSelection.fixed(selectedLine.id)
+          : const LineSelection.auto(),
+      iconId: _configured?.iconId,
+      protectionRef: _configured?.protectionRef,
+      credentialRef: _configured?.credentialRef,
       verifiedServerId: resource.server.id,
       authorizationMethod: AuthorizationMethod.browserPin,
       cloudAccountId: account!.id,
@@ -332,20 +373,24 @@ class ProviderConnectController extends ChangeNotifier {
         name: info.serverName,
         username: session.user.name,
         serviceType: type,
-        region: region,
         authorizationMethod: method,
         verifiedServerId: info.id,
-        nickname: existing?.nickname,
+        nickname: _submittedName ?? _configured?.nickname,
         userAgent: normalizeUserAgent(userAgent),
-        lines: existing == null
+        lines: _configured == null
             ? [ServerLine(id: '$id-line', address: uri.toString())]
             : [
-                for (final line in existing!.lines)
-                  line.id == existing!.activeLine?.id
+                for (final line in _configured!.lines)
+                  line.id == _configured!.activeLine?.id
                       ? line.copyWith(address: uri.toString())
                       : line,
               ],
-        activeLineId: existing?.activeLine?.id ?? '$id-line',
+        activeLineId: _configured?.activeLine?.id ?? '$id-line',
+        lineSelection: _configured?.lineSelection ?? const LineSelection.auto(),
+        lastSuccessfulLineId: _configured?.lastSuccessfulLineId,
+        iconId: _configured?.iconId,
+        protectionRef: _configured?.protectionRef,
+        credentialRef: _configured?.credentialRef,
       ),
       StoredCredentials(
         password: _submittedPassword,
@@ -364,53 +409,53 @@ class ProviderConnectController extends ChangeNotifier {
     StoredCredentials credentials,
   ) async {
     _guard(epoch);
+    final addresses = server.lines
+        .map((l) => normalizeServerAddress(l.address).toString())
+        .toSet();
+    final lines = [...server.lines];
+    for (final raw in _submittedLines) {
+      final address = normalizeServerAddress(raw).toString();
+      if (addresses.add(address)) {
+        lines.add(ServerLine(id: generateLineId(), address: address));
+      }
+    }
+    server = server.copyWith(lines: lines);
+    _activateOnCommit =
+        existing == null || auth.session?.server.id == server.id;
     await auth.sources.commitAuthorization(
       _authorization!,
       server: server,
       value: credentials,
+      candidateVerifier: type == MediaServerType.plex
+          ? (s, c, client) => verifyProviderIdentity(_plex!, s, c, client)
+          : null,
+      persistCandidate: _pendingCloud?.commit,
+      rollbackCandidate: _pendingCloud?.rollback,
+      remember: _activateOnCommit,
     );
     _guard(epoch);
     sourceId = server.id;
-    stage = ProviderConnectStage.libraries;
-    await auth.refreshServers();
-    _guard(epoch);
-    await _loadLibraries(epoch);
+    await _finish(epoch);
   }
 
-  Future<void> _loadLibraries(int epoch) async {
-    final next = await auth.sources.discoverLibraries(sourceId!);
-    _guard(epoch);
-    libraries = next;
-    selectedLibraries.clear();
-    selectedLibraries.addAll(
-      auth.sources
-          .project(region)
-          .firstWhere((s) => s.id == sourceId)
-          .libraryIds,
-    );
-  }
-
-  Future<void> retryLibraries() => _run(_loadLibraries);
-
-  Future<void> finish() => _run((epoch) async {
-    _guard(epoch);
-    await auth.sources.configureScope(
-      sourceId!,
-      participates: true,
-      libraryIds: selectedLibraries,
-    );
+  Future<void> _finish(int epoch) async {
     _guard(epoch);
     await auth.refreshServers();
     _guard(epoch);
-    if (region == AccessRegion.ordinary) {
-      await auth.switchTo(sourceId!, guard: () => _guard(epoch));
+    if (_activateOnCommit) {
+      await auth.activateCommittedSource(sourceId!, guard: () => _guard(epoch));
       _guard(epoch);
       if (auth.session?.server.id != sourceId) {
         throw StateError('Source activation failed');
       }
     }
     stage = ProviderConnectStage.done;
-  });
+  }
+
+  Future<void> finish() =>
+      stage == ProviderConnectStage.done || sourceId == null
+      ? Future.value()
+      : _run(_finish);
 
   void reset([MediaServerType? service]) {
     _epoch++;
@@ -420,12 +465,16 @@ class ProviderConnectController extends ChangeNotifier {
     if (pending != null) unawaited(pending.cancel().catchError((Object _) {}));
     _client?.clearSession();
     _submittedPassword = null;
+    _submittedName = null;
+    _configured = null;
+    _submittedLines = const [];
+    displayName = null;
+    extraLines.clear();
+    _pendingCloud = null;
     attempt = null;
     account = null;
     resources = [];
     users = [];
-    libraries = {};
-    selectedLibraries.clear();
     sourceId = null;
     failure = null;
     authorizationStatus = null;

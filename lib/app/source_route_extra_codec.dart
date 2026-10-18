@@ -26,7 +26,7 @@ class _Encode extends Converter<Object?, Object?> {
         'seasonId': input.seasonId,
         'source': input.source == null ? null : encodeSource(input.source!),
         'libraryId': input.libraryId,
-        'regionGeneration': input.regionGeneration,
+        'accessGeneration': input.accessGeneration,
       };
     }
     if (input is PlayerOpenRequest) {
@@ -36,7 +36,7 @@ class _Encode extends Converter<Object?, Object?> {
         'source': input.source == null ? null : encodeSource(input.source!),
         'work': input.work == null ? null : encodeSource(input.work!),
         'libraryId': input.libraryId,
-        'regionGeneration': input.regionGeneration,
+        'accessGeneration': input.accessGeneration,
         'autoResume': input.autoResume,
         'mediaSourceId': input.mediaSourceId,
         'audioStreamIndex': input.audioStreamIndex,
@@ -63,9 +63,14 @@ class _Decode extends Converter<Object?, Object?> {
   Object? convert(Object? input) {
     if (input is! Map || !input.containsKey('rillightRouteExtra')) return input;
     final value = Map<String, dynamic>.from(input);
+    if (value.containsKey('regionGeneration')) {
+      throw const FormatException('Obsolete route authorization');
+    }
     final source = value['source'] == null
         ? null
-        : decodeSource(Map<String, dynamic>.from(value['source'] as Map));
+        : decodeAuthorizedSource(
+            Map<String, dynamic>.from(value['source'] as Map),
+          );
     switch (value['rillightRouteExtra']) {
       case 'detail-v1':
         return PlayerHostOpenItemCommand(
@@ -73,7 +78,7 @@ class _Decode extends Converter<Object?, Object?> {
           seasonId: value['seasonId'] as String?,
           source: source,
           libraryId: value['libraryId'] as String?,
-          regionGeneration: value['regionGeneration'] as int?,
+          accessGeneration: value['accessGeneration'] as int?,
         );
       case 'player-v1':
         return PlayerOpenRequest(
@@ -81,9 +86,11 @@ class _Decode extends Converter<Object?, Object?> {
           source: source,
           work: value['work'] == null
               ? null
-              : decodeSource(Map<String, dynamic>.from(value['work'] as Map)),
+              : decodeAuthorizedSource(
+                  Map<String, dynamic>.from(value['work'] as Map),
+                ),
           libraryId: value['libraryId'] as String?,
-          regionGeneration: value['regionGeneration'] as int?,
+          accessGeneration: value['accessGeneration'] as int?,
           autoResume: value['autoResume'] as bool,
           mediaSourceId: value['mediaSourceId'] as String?,
           audioStreamIndex: value['audioStreamIndex'] as int?,

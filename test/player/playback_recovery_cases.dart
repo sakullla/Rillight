@@ -469,7 +469,7 @@ void main() {
   );
 
   test(
-    'slow source switch uses the open budget after retiring the old session',
+    'slow source switch cannot extend the shared recovery deadline',
     () async {
       final freshBackend = _RecoveryBackend();
       final fresh = PlayerController(
@@ -487,13 +487,13 @@ void main() {
         freshBackend.openGate = gate;
         final switchWork = fresh.switchMediaVersion('alternate');
         await Future<void>.delayed(const Duration(milliseconds: 150));
-        expect(fresh.isRecovering, isTrue);
-        expect(fresh.error, isNull);
+        expect(fresh.isRecovering, isFalse);
+        expect(fresh.state.phase, PlaybackPhase.failed);
         gate.complete();
         await switchWork;
-        expect(fresh.activeMediaSourceId, 'alternate');
-        expect(fresh.isPlaying, isTrue);
-        expect(fresh.error, isNull);
+        expect(fresh.activeMediaSourceId, isNot('alternate'));
+        expect(fresh.isPlaying, isFalse);
+        expect(fresh.error, PlayerErrorKind.load);
       } finally {
         if (!gate.isCompleted) gate.complete();
         await fresh.disposeAsync();
@@ -503,7 +503,7 @@ void main() {
   );
 
   test(
-    'restoring the previous source gets its own bounded open budget',
+    'restoring the previous source fits within the remaining shared budget',
     () async {
       final restoringBackend = _RecoveryBackend();
       final restoring = PlayerController(

@@ -16,6 +16,7 @@ import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
 
 import 'cache/cache_limits.dart';
+import 'playback_recovery_coordinator.dart';
 
 typedef CorePlayerFactory = Future<CorePlayer> Function();
 
@@ -25,6 +26,8 @@ typedef CorePlayerFactory = Future<CorePlayer> Function();
 class RillightVideoBackend extends VideoBackend
     implements
         VideoBackendFailureContext,
+        VideoBackendRecoveryBudget,
+        VideoBackendSourceRenewalFeedback,
         VideoBackendCapabilities,
         VideoBackendSubtitlePresentation,
         VideoBackendPhonePresentation,
@@ -123,6 +126,13 @@ class RillightVideoBackend extends VideoBackend
     _onNativePresentation();
   }
 
+  PlaybackRecoveryBudget? _recoveryBudget;
+  @override
+  set recoveryBudget(PlaybackRecoveryBudget? value) {
+    _recoveryBudget = value;
+    _transport?.recoveryBudget = value;
+  }
+
   PlaybackTransportSession? _transport;
   bool _transportSuspended = false;
   bool _nativeRetained = false;
@@ -159,6 +169,7 @@ class RillightVideoBackend extends VideoBackend
   String _coreSourceDiagnostics = '';
   Map<String, Object?> _lastTransportDiagnostics = const {};
   bool _authenticationReported = false;
+  String? _foregroundRenewalUrl;
   VideoOpenRequest? _lastOpenRequest;
   bool _opened = false;
   final _openingDownloadProgress = Stopwatch();
@@ -169,15 +180,9 @@ class RillightVideoBackend extends VideoBackend
   bool _wantsPlayback = true;
   bool _recovering = false;
   int _recoveryEpoch = 0;
-  Uri? _selectedSubtitleUri;
-  int? _selectedSubtitleServerIndex;
-  String? _selectedSubtitleTitle;
   Uri? _secondarySelectedSubtitleUri;
-  int? _secondarySelectedSubtitleServerIndex;
-  String? _secondarySelectedSubtitleTitle;
   int? _selectedSecondarySubtitleIndex;
   double _volume = 1;
-  double _rate = 1;
   PlaybackOutputStatus _outputStatus = PlaybackOutputStatus.unknown;
   int _acceptedOutputEpoch = 0;
 
@@ -564,12 +569,7 @@ class RillightVideoBackend extends VideoBackend
       });
       return;
     }
-    _selectedSubtitleUri = null;
-    _selectedSubtitleServerIndex = null;
-    _selectedSubtitleTitle = null;
     _secondarySelectedSubtitleUri = null;
-    _secondarySelectedSubtitleServerIndex = null;
-    _secondarySelectedSubtitleTitle = null;
     await _open(request, reuseTransport: reuseTransport);
   }
 
@@ -644,6 +644,7 @@ class RillightVideoBackend extends VideoBackend
     _coreSourceDiagnostics = '';
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
+    _foregroundRenewalUrl = null;
     _sourceRenewalRequestedAt = null;
     if (!sameSession) {
       if (_outputStatus != PlaybackOutputStatus.unknown) {
@@ -715,6 +716,8 @@ class RillightVideoBackend extends VideoBackend
         return;
       }
       _transport = transport;
+      transport.recoveryBudget = _recoveryBudget;
+      _recoveryBudget?.check();
       // Start the continuous download during decoder open, not after its
       // probes have already waited for a sequence of tiny HTTP reads. The
       // transport yields its single producer to uncached index/track probes.
@@ -979,10 +982,56 @@ class RillightVideoBackend extends VideoBackend
 
   void _reportAuthentication(Map<String, Object?> data, int generation) {
     if (_authenticationReported || generation != _generation) return;
-    final status = data['authenticationStatus'];
-    // A media 403 may be a source-specific or expired signed URL. It does not
-    // prove the Emby session expired, and must leave source retry available.
-    if (status != 401) return;
+    if (data['terminalRecoveryFailure'] == 'certificate') {
+      _authenticationReported = true;
+      _emit(
+        VideoEventKind.error,
+        const PlaybackRecoveryFailure(PlaybackRecoveryFailureKind.certificate),
+        generation,
+      );
+      return;
+    }
+    final authentication = data['authenticationStatus'];
+    final lastMediaStatus = data['lastMediaUpstreamStatus'];
+    // Read-ahead leaves the last foreground HTTP status unchanged. Its failed
+    // foreground consumer publishes rateLimitStatus separately; background-only
+    // prefetchRateLimitStatus must never interrupt valid cached playback.
+    final status = authentication == 401 || lastMediaStatus == 401
+        ? 401
+        : authentication ?? data['rateLimitStatus'] ?? lastMediaStatus;
+    if (status == 429 ||
+        status == 403 && !isExpiredPlaybackUrl(_lastOpenRequest?.url)) {
+      // A diagnostic poll may observe a transient 403 while transport is still
+      // backing off. Only exhaustion/demand failure ends playback recovery.
+      if (status == 403 && data['rateLimitStatus'] != 403) return;
+      _authenticationReported = true;
+      _emit(
+        VideoEventKind.error,
+        PlaybackRecoveryFailure(
+          PlaybackRecoveryFailureKind.rateLimited,
+          retryAfter: data['retryAfterMs'] is int
+              ? Duration(milliseconds: data['retryAfterMs'] as int)
+              : null,
+        ),
+        generation,
+      );
+      return;
+    }
+    if (status != 401 && status != 403) return;
+    if (status == 403) {
+      if (isExpiredPlaybackUrl(_lastOpenRequest?.url)) {
+        final url = _lastOpenRequest!.url.toString();
+        if (_foregroundRenewalUrl != url) {
+          _foregroundRenewalUrl = url;
+          _emit(
+            VideoEventKind.sourceRefreshRequired,
+            const RequiredSourceRenewal(403),
+            generation,
+          );
+        }
+      }
+      return;
+    }
     _authenticationReported = true;
     _nativeEvents.add({'kind': 'authenticationRequired', 'value': status});
     _emit(VideoEventKind.authenticationRequired, status as int, generation);
@@ -992,16 +1041,6 @@ class RillightVideoBackend extends VideoBackend
     if (_recovering || generation != _generation || _disposed) return;
     _recovering = true;
     final epoch = _recoveryEpoch;
-    final request = _lastOpenRequest;
-    final selectedAudio = selectedAudioIndex;
-    final selectedSubtitle = selectedSubtitleIndex;
-    final selectedUri = _selectedSubtitleUri;
-    final selectedTitle = _selectedSubtitleTitle;
-    final selectedServerIndex = _selectedSubtitleServerIndex;
-    final secondaryUri = _secondarySelectedSubtitleUri;
-    final secondarySubtitle = _selectedSecondarySubtitleIndex;
-    final secondaryTitle = _secondarySelectedSubtitleTitle;
-    final secondaryServerIndex = _secondarySelectedSubtitleServerIndex;
     try {
       Map<String, Object?> data = const {};
       try {
@@ -1012,108 +1051,23 @@ class RillightVideoBackend extends VideoBackend
       } catch (_) {}
       if (epoch != _recoveryEpoch || _disposed) return;
       _reportAuthentication(data, generation);
-      if (data['lastMediaUpstreamStatus'] == 403) {
-        // Retry must fetch fresh PlaybackInfo in the controller; reopening
-        // the same rejected signed URL here cannot restore access.
-        _emit(VideoEventKind.error, 'Media HTTP 403', generation);
-        return;
-      }
-      final status = data['lastUpstreamStatus'];
-      final retryableStatus =
-          status == 408 ||
-          status == 429 ||
-          (status is int && status >= 500 && status <= 599);
-      final exhaustedTransport =
-          ((data['recoveryFailures'] as num?)?.toInt() ?? 0) > 0;
-      if (request == null ||
-          _authenticationReported ||
-          (!retryableStatus && !exhaustedTransport)) {
-        _emit(VideoEventKind.error, failure, generation);
-        return;
-      }
-      _emit(VideoEventKind.buffering, true, generation);
-      for (var attempt = 0; attempt < 2; attempt++) {
-        if (epoch != _recoveryEpoch || _disposed) return;
-        await Future<void>.delayed(Duration(seconds: attempt + 1));
-        if (epoch != _recoveryEpoch || _disposed) return;
-        try {
-          await _open(
-            VideoOpenRequest(
-              sessionId: request.sessionId,
-              url: request.url,
-              start: position,
-              headers: request.headers,
-              credentialOrigin: request.credentialOrigin,
-              authorization: request.authorization,
-              credentialHeaders: request.credentialHeaders,
-              playMethod: request.playMethod,
-              isInfiniteStream: request.isInfiniteStream,
-              mediaStreams: request.mediaStreams,
-              startPaused: !_wantsPlayback,
-              // Reconnection restores tracks and gain just like first open.
-              // Android's tunneled codecs still require initial play intent.
-              holdPlaybackForSettings: !Platform.isAndroid,
-              // A recovery has its own validated transport; do not replay an
-              // old episode-start prefix after a source or timeline change.
-            ),
-          );
-          if (epoch != _recoveryEpoch || _disposed) return;
-          if (selectedAudio != null) await setAudioIndex(selectedAudio);
-          if (selectedUri != null) {
-            await setSubtitleUri(
-              selectedUri,
-              title: selectedTitle,
-              index: selectedServerIndex,
-            );
-          } else if (selectedSubtitle != null) {
-            await setSubtitleIndex(selectedSubtitle);
-          }
-          // 次字幕独立恢复:主槽失败不阻断,恢复失败只放弃该槽。
-          if (secondaryUri != null) {
-            try {
-              await setSubtitleUri(
-                secondaryUri,
-                title: secondaryTitle,
-                index: secondaryServerIndex,
-                slot: 1,
-              );
-            } catch (_) {
-              _secondarySelectedSubtitleUri = null;
-              _secondarySelectedSubtitleServerIndex = null;
-              _secondarySelectedSubtitleTitle = null;
-              _selectedSecondarySubtitleIndex = null;
-            }
-          } else if (secondarySubtitle != null) {
-            try {
-              await setSubtitleIndex(secondarySubtitle, slot: 1);
-            } catch (_) {
-              _selectedSecondarySubtitleIndex = null;
-            }
-          }
-          await _command('volume', {'value': _volume});
-          await _command('rate', {'value': _rate});
-          await _command(_wantsPlayback ? 'play' : 'pause');
-          _lastFailure = null;
-          _emit(VideoEventKind.buffering, false, _generation);
-          return;
-        } catch (error) {
-          failure = error.toString();
-          if (epoch != _recoveryEpoch || _disposed) return;
-          final auth = _lastTransportDiagnostics['authenticationStatus'];
-          if (auth == 401) return;
-        }
-      }
-      _emit(VideoEventKind.error, failure, _generation);
+      if (_authenticationReported) return;
+      // The controller owns line recovery and URL renewal. Reopening here
+      // multiplied proxy retries and discarded the operation deadline.
+      _emit(VideoEventKind.error, failure, generation);
     } finally {
       if (epoch == _recoveryEpoch) _recovering = false;
     }
   }
 
   void _maybeRequestSourceRenewal(Map<String, Object?> data, int generation) {
-    if (_disposed || generation != _generation) return;
+    if (_disposed || generation != _generation || _authenticationReported) {
+      return;
+    }
     final rejectedSource =
         data['readAheadFailed'] == true &&
-        (data['prefetchAuthenticationStatus'] == 403 ||
+        ((data['prefetchRateLimitStatus'] == 403 &&
+                isExpiredPlaybackUrl(_lastOpenRequest?.url)) ||
             const {
               'producer:HttpException',
               'producer:SocketException',
@@ -1449,7 +1403,15 @@ class RillightVideoBackend extends VideoBackend
   }
 
   @override
+  void finishSourceRenewal({required bool succeeded}) {
+    // This is a renewal result, not terminal authentication. In particular,
+    // failed renewal must leave subsequent fatal native errors observable.
+    if (!succeeded) _sourceRenewalRequestedAt = DateTime.now();
+  }
+
+  @override
   Future<void> refreshSourceUrl(Uri url) async {
+    final generation = _generation;
     final transport = _transport;
     final route = _mediaRoute;
     final request = _lastOpenRequest;
@@ -1460,7 +1422,8 @@ class RillightVideoBackend extends VideoBackend
       return;
     }
     await transport.refreshSourceUrl(route, url);
-    if (!identical(transport, _transport)) return;
+    if (generation != _generation || !identical(transport, _transport)) return;
+    _authenticationReported = false;
     _sourceRenewalCount++;
     _lastOpenRequest = VideoOpenRequest(
       sessionId: request.sessionId,
@@ -1512,7 +1475,6 @@ class RillightVideoBackend extends VideoBackend
 
   @override
   Future<void> setRate(double value) async {
-    _rate = value;
     if (_recovering) return;
     await _command('rate', {'value': value});
   }
@@ -1569,13 +1531,7 @@ class RillightVideoBackend extends VideoBackend
     });
     if (slot == 1) {
       _secondarySelectedSubtitleUri = null;
-      _secondarySelectedSubtitleServerIndex = null;
-      _secondarySelectedSubtitleTitle = null;
       _selectedSecondarySubtitleIndex = index;
-    } else {
-      _selectedSubtitleUri = null;
-      _selectedSubtitleServerIndex = null;
-      _selectedSubtitleTitle = null;
     }
     _invalidateTrack();
   }
@@ -1600,13 +1556,8 @@ class RillightVideoBackend extends VideoBackend
     });
     if (slot == 1) {
       _secondarySelectedSubtitleUri = uri;
-      _secondarySelectedSubtitleServerIndex = index;
-      _secondarySelectedSubtitleTitle = title;
       _selectedSecondarySubtitleIndex = index;
     } else {
-      _selectedSubtitleUri = uri;
-      _selectedSubtitleServerIndex = index;
-      _selectedSubtitleTitle = title;
       selectedSubtitleIndex = index;
     }
     _invalidateTrack();
@@ -1618,13 +1569,7 @@ class RillightVideoBackend extends VideoBackend
     await _command('subtitleOff', {'slot': slot});
     if (slot == 1) {
       _secondarySelectedSubtitleUri = null;
-      _secondarySelectedSubtitleServerIndex = null;
-      _secondarySelectedSubtitleTitle = null;
       _selectedSecondarySubtitleIndex = null;
-    } else {
-      _selectedSubtitleUri = null;
-      _selectedSubtitleServerIndex = null;
-      _selectedSubtitleTitle = null;
     }
     _invalidateTrack();
   }

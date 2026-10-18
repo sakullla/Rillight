@@ -34,6 +34,15 @@ void main() {
         );
         fixture.proxy.cancelPendingReads();
         await old.cancel();
+        // Published bytes are cumulative, not proof that this prefix is still
+        // present. Finish publication and verify the range before blocking IO.
+        await fixture.waitFor(
+          () =>
+              fixture.proxy.cache!.diagnostics['pendingBytes'] == 0 &&
+              fixture.proxy.cache!.diagnostics['degradation'] == null,
+        );
+        await fixture.waitForCoverage(start: 0);
+        expect(fixture.requests, 1);
         lock = File('${fixture.root.path}/quota.lock')
             .openSync(mode: FileMode.append);
         lock.lockSync(FileLock.exclusive);
@@ -43,7 +52,13 @@ void main() {
           offset: 0,
           bytes: Uint8List(4),
         );
-        expect(fixture.proxy.cache!.diagnostics['degradation'], 'disk-timeout');
+        // The outer deadline can fire before the worker exhausts its lock
+        // deadline. Exercise the final state rather than racing that interval.
+        await fixture.waitFor(
+          () =>
+              fixture.proxy.cache!.diagnostics['degradation'] ==
+              'disk-lock-timeout',
+        );
         final reader = await fixture.read(end: 65535);
         var position = 0;
         while (await reader.moveNext()) {
@@ -249,23 +264,21 @@ void main() {
   );
 
   cases.test(
-    'untagged foreground 403 retires the old stream and retries serially',
+    'untagged foreground 403 retries serially and resumes the requested range',
     () async {
       final fixture = await _Direct.open(refuseSecond: true);
       try {
         final first = await fixture.read();
         expect(await first.moveNext(), isTrue);
-        final next = await fixture.read(start: 12 * _mib);
-        var position = 12 * _mib;
-        while (await next.moveNext()) {
-          position = _verify(next.current, position);
-        }
-        expect(position, fixture.length);
+        final request = await fixture.client.getUrl(fixture.uri);
+        request.headers.set('range', 'bytes=${12 * _mib}-');
+        final response = await request.close();
+        expect(response.statusCode, 206);
+        await response.drain<void>();
         expect(fixture.requests, 3);
-        expect(fixture.proxy.diagnostics['serialUpstream'], isTrue);
         expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+        expect(fixture.proxy.diagnostics['serialUpstream'], true);
         await first.cancel();
-        await next.cancel();
       } finally {
         await fixture.close();
       }

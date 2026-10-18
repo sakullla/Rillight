@@ -14,7 +14,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/source_sessions.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -50,6 +50,7 @@ import 'package:rillight/auth/provider_identity.dart';
 
 import 'danmaku.dart';
 import 'updates.dart';
+import 'player_lines.dart';
 import '../../test/app/update_ui_fixture.dart';
 
 import 'package:rillight/app/updates/update_platform_contract.dart';
@@ -118,6 +119,7 @@ void main() {
     for (final theme in ['dark', 'light']) {
       final selectedTheme = Platform.environment['RILLIGHT_CAPTURE_THEME'];
       if (selectedTheme != 'all' && selectedTheme != theme) continue;
+      final records = <Map<String, Object>>[];
       testWidgets('${config.$1} ${config.$3} $theme', (tester) async {
         isolateImageCache();
         tester.view.devicePixelRatio = pixelRatioOf(config);
@@ -130,6 +132,7 @@ void main() {
           config.$1,
           theme,
           config.$3,
+          records: records,
         );
         final server = captureServer();
         final mirror = FakeEmbyServer(
@@ -139,7 +142,21 @@ void main() {
           views: server.views,
           items: server.items,
         );
-        final adapter = CaptureAdapter([server, mirror]);
+        final backup = FakeEmbyServer(
+          serverId: server.serverId,
+          serverName: server.serverName,
+          baseUrl: Uri.parse('http://capture-backup.test:8096'),
+          views: server.views,
+          items: server.items,
+        );
+        final remote = FakeEmbyServer(
+          serverId: server.serverId,
+          serverName: server.serverName,
+          baseUrl: Uri.parse('http://capture-remote.test:8096'),
+          views: server.views,
+          items: server.items,
+        );
+        final adapter = CaptureAdapter([server, mirror, backup, remote]);
         final credentials = MemoryCredentialStore();
         await tester.runAsync(() async {
           CaptureProviders.reset();
@@ -161,7 +178,7 @@ void main() {
         final providers = CaptureProviders(adapter, credentials);
         final servers = MemoryServerListStore();
         final sources = SourceSessionRegistry(
-          access: RegionAccessController(),
+          access: ServerAccessController(store: MemoryServerAccessStore()),
           store: servers,
           credentials: credentials,
           createProviderClient: providers.create,
@@ -216,22 +233,28 @@ void main() {
             password: 'correct-horse',
           );
           final firstId = auth.session!.server.id;
-          await sources.configureScope(
-            firstId,
-            participates: true,
-            libraryIds: {'view-movies', 'view-tv'},
-          );
           await auth.connect(
             address: mirror.baseUrl.toString(),
             username: 'alice',
             password: 'correct-horse',
           );
-          await sources.configureScope(
-            auth.session!.server.id,
-            participates: true,
-            libraryIds: {'view-movies', 'view-tv'},
-          );
           await auth.switchTo(firstId);
+          await auth.addLine(firstId, backup.baseUrl.toString());
+          await auth.addLine(firstId, remote.baseUrl.toString());
+          final configured = auth.sources.server(firstId);
+          await auth.saveConfiguration(
+            firstId,
+            nickname: configured.displayName,
+            userAgent: configured.userAgent ?? '',
+            lines: [
+              configured.lines[0].copyWith(nickname: '家庭直连'),
+              configured.lines[1].copyWith(nickname: '外网入口 · 长名称测试的备用连接'),
+              configured.lines[2].copyWith(nickname: '备用入口'),
+            ],
+          );
+          backup.publicInfoStatus = 503;
+          await sources.check(firstId, lineId: configured.lines[1].id);
+          await auth.refreshServers();
           await appearance.setStyle(
             theme == 'dark' ? AppearanceStyle.dark : AppearanceStyle.light,
           );
@@ -415,7 +438,7 @@ void main() {
           if (config.$1 == 'desktop') {
             await capture.tap(PlayerKeys.open);
           } else {
-            app.router.go('/play/movie-up');
+            unawaited(app.router.push('/play/movie-up'));
           }
           await capture.advance(400);
           await capture.save('player-loading');
@@ -426,6 +449,7 @@ void main() {
             await capture.tap(PlayerKeys.resumeFromStart);
           }
           await capture.save('player-controls');
+          await capture.playerLineStates(backend, backup, remote);
           expect(backend.openCount, greaterThan(0));
           backend.emitEvent(
             VideoEventKind.bufferSnapshot,
@@ -604,9 +628,8 @@ void main() {
               String itemId, {
               bool autoResume = false,
             }) async {
-              if (config.$1 == 'desktop') {
-                await app.windowHost.close();
-              } else {
+              await capture.closeCapturedPlayer();
+              if (config.$1 != 'desktop') {
                 app.router.go('/item/$itemId');
                 await capture.advance(300);
               }
@@ -624,7 +647,7 @@ void main() {
               if (config.$1 == 'desktop') {
                 await app.windowHost.open(request);
               } else {
-                app.router.go('/play/$itemId', extra: request);
+                unawaited(app.router.push('/play/$itemId', extra: request));
               }
               await capture.advance(800);
             }
@@ -744,10 +767,10 @@ void main() {
           }
           if (config.$1 == 'desktop') {
             await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-            await app.windowHost.close();
             await capture.advance(400);
           }
         }
+        await capture.closeCapturedPlayer();
         tester.view.physicalSize = config.$3;
         if (config.$1 == 'tv') {
           await capture.captureTvAppearance(app, snapshots);
@@ -779,26 +802,60 @@ void main() {
             }
           }
         }
-        if (capture.wants('login') || capture.wants('player')) {
+        if ((capture.wants('login') || capture.wants('player')) &&
+            CaptureSession.knownStates
+                .where((state) => state.startsWith('provider-'))
+                .any(capture.shouldCapture)) {
           await capture.providerPages(
             app,
             auth,
             server,
             () => backend = CaptureBackend(),
+            snapshots,
           );
         }
         await tester.pumpWidget(const SizedBox.shrink());
-        // 提示条等延时 4s 的计时器在界面销毁后仍会挂着,推进到它们走完再收尾。
-        await capture.advance(6000);
+        await capture.advance(500);
         await history.close();
         app.router.dispose();
         updates.dispose();
         auth.dispose();
         appearance.dispose();
         CaptureProviders.closeClients();
-        // dispose 过程中新建的延时计时器也要走完,否则测试收尾断言会失败。
-        await tester.pump(const Duration(seconds: 30));
+        // Dio cancellation schedules interceptor futures on the fake clock.
+        // Drain them after closing the clients, not before cancellation begins.
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
       }, tags: ['integration']);
+      final states = (Platform.environment['RILLIGHT_CAPTURE_STATES'] ?? '')
+          .split(',')
+          .where((state) => state.isNotEmpty)
+          .toSet();
+      final features = (Platform.environment['RILLIGHT_CAPTURE_FEATURES'] ?? '')
+          .split(',')
+          .where((feature) => feature.isNotEmpty)
+          .toSet();
+      if ((features.isEmpty || features.contains('entry')) &&
+          (states.isEmpty || states.contains('entry-history-recovery'))) {
+        testWidgets('${config.$1} ${config.$3} $theme startup recovery', (
+          tester,
+        ) async {
+          isolateImageCache();
+          tester.view.devicePixelRatio = pixelRatioOf(config);
+          tester.view.physicalSize = config.$3;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final capture = CaptureSession(
+            tester,
+            out,
+            config.$1,
+            theme,
+            config.$3,
+            records: records,
+          );
+          await capture.entryRecovery();
+        }, tags: ['integration']);
+      }
     }
   }
 }
@@ -814,12 +871,19 @@ Future<void> revealPhoneHero(
 }
 
 class CaptureSession {
-  CaptureSession(this.tester, this.out, this.platform, this.theme, this.size);
+  CaptureSession(
+    this.tester,
+    this.out,
+    this.platform,
+    this.theme,
+    this.size, {
+    List<Map<String, Object>>? records,
+  }) : records = records ?? [];
   final WidgetTester tester;
   final String out, platform, theme;
   final Size size;
   final boundary = GlobalKey();
-  final records = <Map<String, Object>>[];
+  final List<Map<String, Object>> records;
   static final knownStates = (jsonDecode(
     File('tool/ui_capture/scenarios.json').readAsStringSync(),
   ) as List).map((entry) => (entry as Map)['id'] as String).toSet();
@@ -947,7 +1011,7 @@ class CaptureSession {
     await tap(const Key('mobile-player-panel-close'));
   }
 
-  Future<void> save(String state) async {
+  Future<void> save(String state, {String? renderedTheme}) async {
     expect(
       knownStates.contains(state),
       isTrue,
@@ -975,13 +1039,15 @@ class CaptureSession {
         'height': height,
         'profileWidth': size.width.toInt(),
         'renderedTheme':
-            state.startsWith('player') ||
-                (state.startsWith('provider-') && state.contains('-player')) ||
-                state.startsWith('danmaku') ||
-                state.startsWith('detail-gallery') ||
-                state == 'tv-lan-phone'
-            ? 'dark'
-            : theme,
+            renderedTheme ??
+            (state.startsWith('player') ||
+                    (state.startsWith('provider-') &&
+                        state.contains('-player')) ||
+                    state.startsWith('danmaku') ||
+                    state.startsWith('detail-gallery') ||
+                    state == 'tv-lan-phone'
+                ? 'dark'
+                : theme),
         'file': file,
       });
       await File('$out/$platform-${size.width.toInt()}-$theme.json')
@@ -1057,9 +1123,9 @@ class CaptureSession {
     if (!wants('settings') || !shouldCapture('tv-appearance-signed-in')) {
       return;
     }
-    // 播放会留下会话快照。回到首页时电视壳用独立网络补报停止；
-    // 捕获环境没有这条连接，恢复失败会换成重试页，设置里的外观三态就不在了。
-    await tester.runAsync(snapshots.delete);
+    // Normal player close must finish its stopped report before settings opens.
+    // Never erase a pending session just to make a screenshot reachable.
+    expect(snapshots.snapshot, isNull);
     app.router.go('/');
     for (
       var i = 0;
@@ -1067,10 +1133,6 @@ class CaptureSession {
       i++
     ) {
       await tester.pump(const Duration(milliseconds: 50));
-      if (find.text('重试').evaluate().isNotEmpty) {
-        await tester.runAsync(snapshots.delete);
-        await tester.tap(find.text('重试'));
-      }
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );

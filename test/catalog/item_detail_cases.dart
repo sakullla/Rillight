@@ -141,13 +141,6 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
-    await tester.runAsync(
-      () => auth.sources.configureScope(
-        auth.session!.server.id,
-        participates: true,
-        libraryIds: {'view-movies', 'view-tv', 'view-mixed', 'view-untyped'},
-      ),
-    );
     final runtime = await tester.runAsync(() async => auth.runtime());
     final app = RillightApp(
       auth: auth,

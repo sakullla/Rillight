@@ -7,12 +7,13 @@ import 'dart:async';
 import 'package:fake_async/fake_async.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
+
+import '../auth/server_ui_harness.dart';
+
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -22,6 +23,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -130,15 +132,124 @@ void main() {
         snapshotStoreForPid: storeFor,
       );
       try {
-        await host.open(const PlayerOpenRequest(itemId: 'movie-1'));
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
         expect(control.spawnedArguments, hasLength(1));
-        expect(control.startupPayloads.single, isNotNull);
-        expect(host.current!.source, isNull);
-        expect(auth.session!.server.scopeKnown, isFalse);
+        expect(control.startupPayloads.single, isNull);
+        expect(host.current!.source, isNotNull);
+        final launch = PlayerWindowLaunch.fromArguments(
+          control.spawnedArguments.single,
+        );
+        expect(launch.startupHandoff, isNotNull);
+        expect(launch.accessGeneration, isNotNull);
+        expect(launch.recoveryDeadlineUtc, isNotNull);
+        expect(launch.recoveryAttemptDeadlineUtc, isNotNull);
+        expect(
+          auth.session!.server.toJson().containsKey('scopeKnown'),
+          isFalse,
+        );
         await auth.logout();
         await host.close();
         expect(control.alive, isEmpty);
       } finally {
+        await host.forceClose();
+        host.dispose();
+        await history.close();
+        auth.dispose();
+      }
+    },
+  );
+
+  test('ordinary host metadata failure tries same-server backup within inherited deadline', () async {
+    final auth = await loggedInAuth();
+    final alternate = FakeEmbyServer(
+      baseUrl: Uri.parse('http://backup.test:8096'),
+    );
+    alternate.issuedTokens.addAll(server.issuedTokens);
+    adapter.add(alternate);
+    expect(
+      await auth.addLine(auth.session!.server.id, alternate.baseUrl.toString()),
+      isTrue,
+    );
+    final history = await HistoryWriter.open(
+      registry: auth.sources,
+      store: MemoryHistoryStore(),
+    );
+    final host = DesktopPlayerWindowHost(
+      auth: auth,
+      runtime: PlaybackRuntime(auth: auth, history: history),
+      processControl: control,
+      snapshotStoreForPid: storeFor,
+    );
+    final gate = server.holdItemGet = Completer<void>();
+    server.itemStatus = 503;
+    final before = DateTime.now().toUtc();
+    try {
+      final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      gate.complete();
+      await opening;
+      final launch = PlayerWindowLaunch.fromArguments(
+        control.spawnedArguments.single,
+      );
+      expect(Uri.parse(launch.baseUrl).host, 'backup.test');
+      expect(
+        launch.request.source!.account.configuredServerId,
+        auth.session!.server.id,
+      );
+      expect(launch.recoveryAttemptedLineIds, hasLength(2));
+      expect(
+        launch.recoveryDeadlineUtc!.difference(before),
+        lessThanOrEqualTo(const Duration(milliseconds: 45020)),
+      );
+      expect(
+        launch.recoveryDeadlineUtc!.difference(DateTime.now().toUtc()),
+        lessThan(const Duration(milliseconds: 44950)),
+      );
+      expect(
+        launch.recoveryAttemptDeadlineUtc!.difference(DateTime.now().toUtc()),
+        lessThanOrEqualTo(const Duration(seconds: 8)),
+      );
+      // Metadata preparation alone never persists a successful playback line.
+      expect(auth.client.baseUrl, server.baseUrl);
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      await host.forceClose();
+      host.dispose();
+      await history.close();
+      auth.dispose();
+    }
+  });
+
+  test(
+    'closing ordinary metadata recovery invalidates late work before spawn',
+    () async {
+      final auth = await loggedInAuth();
+      final history = await HistoryWriter.open(
+        registry: auth.sources,
+        store: MemoryHistoryStore(),
+      );
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        runtime: PlaybackRuntime(auth: auth, history: history),
+        processControl: control,
+        snapshotStoreForPid: storeFor,
+      );
+      final gate = server.holdItemGet = Completer<void>();
+      try {
+        final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final rejected = expectLater(
+          opening,
+          throwsA(isA<PlaybackRecoveryCancelled>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await host.close();
+        await rejected;
+        gate.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(control.spawnedArguments, isEmpty);
+        expect(host.current, isNull);
+      } finally {
+        if (!gate.isCompleted) gate.complete();
         await host.forceClose();
         host.dispose();
         await history.close();
@@ -808,7 +919,9 @@ void main() {
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
       await settle(tester);
-      await tester.tap(find.text('退出登录'));
+      await openServerEditor(tester, auth.session!.server.id);
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
       await pumpUntil(tester, () => !auth.isLoggedIn);
       await settle(tester);
 
@@ -821,7 +934,7 @@ void main() {
     }, tags: ['integration']);
 
     testWidgets(
-      'a failed line switch keeps the player window; success closes it',
+      'line selection delegates to playback without closing the current window',
       (tester) async {
         final lan = FakeEmbyServer(
           baseUrl: Uri.parse('http://host-lan.test:8096'),
@@ -869,54 +982,25 @@ void main() {
         await tester.pump();
         expect(host.current?.itemId, 'movie-up');
 
-        lan.publicInfoStatus = 500;
-        lan.publicInfoRawBody = 'upstream timeout';
+        final choices = <LineSelection>[];
+        auth.playbackLineSelection = (id, selection, guard) async {
+          choices.add(selection);
+        };
         await tester.tap(find.byKey(SessionActions.serverMenuKey));
         await settle(tester);
         final saved = auth.savedServers.single;
         final lanLine = saved.lines.firstWhere(
           (line) => line.address == lan.baseUrl.toString(),
         );
-
-        // 切换失败:播放窗口保留,不触发停播,会话仍在原线路。
-        await tester.tap(
-          find.byKey(ServerSwitcherDialog.lineOptionKey(saved.id, lanLine.id)),
-        );
-        await settle(tester);
-        expect(auth.isLoggedIn, isTrue);
+        await serverUiTap(tester, Key('server-lines-${saved.id}'));
+        expect(host.current?.itemId, 'movie-up');
+        await serverUiTap(tester, Key('server-line-choice-${lanLine.id}'));
+        expect(choices.single, LineSelection.fixed(lanLine.id));
         expect(auth.client.baseUrl, wan.baseUrl);
         expect(host.current?.itemId, 'movie-up');
-        expect(
-          calls.where(
-            (entry) =>
-                entry.startsWith('requestClose:') || entry.startsWith('kill:'),
-          ),
-          isEmpty,
-        );
-        expect(find.byKey(SessionActions.lineSwitchFailureKey), findsOneWidget);
-        expect(find.textContaining('切换线路失败'), findsOneWidget);
-
-        // 恢复后同一入口切换成功:播放窗口被关闭,路由回到首页。
-        lan.publicInfoStatus = null;
-        lan.publicInfoRawBody = null;
-        await tester.tap(find.byKey(SessionActions.serverMenuKey));
+        expect(calls, isNot(contains('requestClose:$pid')));
+        await host.close();
         await settle(tester);
-        await tester.tap(
-          find.byKey(ServerSwitcherDialog.lineOptionKey(saved.id, lanLine.id)),
-        );
-        await pumpUntil(tester, () => host.current == null);
-        await settle(tester);
-        expect(auth.client.baseUrl, lan.baseUrl);
-        expect(auth.lineSwitchFailure, isNull);
-        expect(host.current, isNull);
-        expect(calls, contains('requestClose:$pid'));
-        expect(
-          GoRouter.of(tester.element(find.byKey(SessionActions.serverMenuKey)))
-              .state
-              .uri
-              .path,
-          '/',
-        );
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],

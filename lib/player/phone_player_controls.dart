@@ -1,3 +1,5 @@
+import 'playback_line_recovery_ui.dart';
+
 import 'dart:async';
 
 import 'source_switch_menu.dart';
@@ -308,7 +310,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           children: [
             _buildTopBar(context, insets),
             Expanded(
-              child: locked || _canControl
+              child:
+                  locked ||
+                      (_canControl && !playbackNeedsLineStatus(_controller))
                   ? const SizedBox.shrink()
                   : Padding(
                       padding: EdgeInsets.only(
@@ -318,7 +322,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       child: widget.center,
                     ),
             ),
-            if (!locked) _buildBottomBar(context, insets),
+            if (!locked && !playbackNeedsLineStatus(_controller))
+              _buildBottomBar(context, insets),
           ],
         ),
       ),
@@ -593,7 +598,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               ),
             if (c.playbackLineFailure != null)
               Text(
-                l.playbackLineFailed(c.playbackLineFailure!),
+                c.playbackLineFailure!,
                 key: const Key('playback-line-failure'),
                 style: _stageReadout(),
               ),

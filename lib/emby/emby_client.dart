@@ -199,7 +199,10 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
         )
       : null;
   @override
-  EmbyClient createDetached() => EmbyClient(device: device);
+  EmbyClient createDetached() => (withRequestGuard(() {}) as EmbyClient)
+    ..onSessionExpired = null
+    ..onRefreshSession = null
+    ..clearSession();
   @override
   ResolvedPlayback? resolvePlayback({
     required PlaybackInfo info,
@@ -313,6 +316,8 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
     );
     final guarded = EmbyClient(device: device, dio: dio)
       .._requestGuard = check
+      ..onSessionExpired = onSessionExpired
+      ..onRefreshSession = onRefreshSession
       ..setUserAgent(customUserAgent);
     if (hasSession) {
       guarded.attachSession(
@@ -388,7 +393,7 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
     try {
       final response = await _dio.getUri<dynamic>(
         uri,
-        options: Options(headers: _headers()),
+        options: Options(headers: _headers(), followRedirects: false),
       );
       return decodeEmbyPublicServerInfo(
         _asJsonMap(response.data, notEmby: true),
@@ -418,6 +423,7 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
         uri,
         data: {'Username': username, 'Pw': password},
         options: Options(
+          followRedirects: false,
           headers: {..._headers(), 'Content-Type': 'application/json'},
         ),
       );
@@ -1411,6 +1417,7 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
         uri,
         data: body,
         options: Options(
+          followRedirects: false,
           method: method,
           headers: _headers(token: _accessToken, userId: _userId),
         ),

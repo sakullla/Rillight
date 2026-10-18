@@ -4,7 +4,6 @@ import '../../auth/source_sessions.dart';
 import '../../media_server/models.dart';
 
 export '../../auth/source_sessions.dart' show SourceAccount;
-export '../../auth/region_access.dart' show AccessRegion;
 
 /// A value reference, not a permission. Resolve through SourceSessionRegistry
 /// and use its OperationPermit at dispatch AND receipt before presenting data.
@@ -24,7 +23,6 @@ class SourceReference {
     account.serviceType.name,
     account.cloudAccountId,
     account.homeUserId,
-    account.region.name,
     account.configuredServerId,
     account.verifiedServerId,
     account.userId,
@@ -112,7 +110,6 @@ enum MatchReason {
   providerConflict,
   yearConflict,
   typeConflict,
-  regionConflict,
   unsupportedType,
 }
 
@@ -128,9 +125,6 @@ String _title(String title) =>
     title.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
 MatchDecision compareWorks(WorkSource a, WorkSource b) {
-  if (a.reference.account.region != b.reference.account.region) {
-    return const MatchDecision(MatchKind.conflict, MatchReason.regionConflict);
-  }
   if (a.type != b.type) {
     return const MatchDecision(MatchKind.conflict, MatchReason.typeConflict);
   }
@@ -260,11 +254,10 @@ class WorkIndex {
   // candidates: compareWorks still checks every pair for conflicting facts.
   static Iterable<Object> _evidence(WorkSource source) sync* {
     if (source.type != 'Movie' && source.type != 'Series') return;
-    final region = source.reference.account.region;
-    yield (region, source.type, source.reference.item);
+    yield (source.type, source.reference.item);
     for (final entry in source.providerIds.entries) {
       if (_reliable(entry.key, entry.value)) {
-        yield (region, source.type, entry.key, entry.value);
+        yield (source.type, entry.key, entry.value);
       }
     }
   }

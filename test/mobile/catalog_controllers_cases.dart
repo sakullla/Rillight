@@ -170,7 +170,7 @@ void main() {
       });
       final arrived = Completer<void>(), release = Completer<void>();
       final requests = <int>[];
-      dio.interceptors.add(
+      fakeEmbyTransport(dio).interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
             if (options.uri.queryParameters['ParentId'] == 'view-movies') {
@@ -281,7 +281,7 @@ void main() {
     addTearDown(search.dispose);
     final entered = Completer<void>();
     final release = Completer<void>();
-    dio.interceptors.add(
+    fakeEmbyTransport(dio).interceptors.add(
       InterceptorsWrapper(
         onResponse: (response, handler) async {
           if (response.requestOptions.uri.queryParameters['SearchTerm'] ==
@@ -323,7 +323,7 @@ void main() {
     addTearDown(() {
       if (!release.isCompleted) release.complete();
     });
-    dio.interceptors.add(
+    fakeEmbyTransport(dio).interceptors.add(
       InterceptorsWrapper(
         onResponse: (response, handler) async {
           final query = response.requestOptions.uri.queryParameters;
@@ -377,7 +377,7 @@ void main() {
     final entered = Completer<void>();
     final release = Completer<void>();
     final done = Completer<void>();
-    dio.interceptors.add(
+    fakeEmbyTransport(dio).interceptors.add(
       InterceptorsWrapper(
         onResponse: (response, handler) async {
           if (response.requestOptions.uri.queryParameters['Filters'] ==
@@ -439,7 +439,7 @@ void main() {
           addTearDown(search.dispose);
           await loadDetailReady(detail);
           final entered = Completer<void>(), release = Completer<void>();
-          dio.interceptors.add(
+          fakeEmbyTransport(dio).interceptors.add(
             InterceptorsWrapper(
               onResponse: (response, handler) async {
                 if (!entered.isCompleted &&

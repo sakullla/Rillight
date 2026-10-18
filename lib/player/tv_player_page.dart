@@ -1,3 +1,6 @@
+import 'playback_entry_access.dart';
+import 'playback_line_recovery_ui.dart';
+
 import 'dart:async';
 
 import 'source_switch_menu.dart';
@@ -62,6 +65,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   bool _closing = false;
   bool _revocationExitScheduled = false;
   bool _focusedFailure = false;
+  String? _focusedLineStatus;
   bool _focusedEnd = false;
   String? _focusedNextId;
   double? _seek;
@@ -71,6 +75,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   final _playFocus = FocusNode();
   final _surfaceFocus = FocusNode();
   final _retryFocus = FocusNode();
+  final _lineStatusFocus = FocusNode(debugLabel: 'playback line decision');
+  final _lineConfirmationFocus = FocusNode(
+    debugLabel: 'playback line confirmation',
+  );
   final _nextPlayFocus = FocusNode();
   final _nextCancelFocus = FocusNode();
   final _endedReplayFocus = FocusNode();
@@ -90,10 +98,15 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     auth.addListener(_authChanged);
     final matched = serverMatchingPlayback(auth, auth.client.baseUrl);
     final created = PlayerController(
-      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
+      runtime: bindings.runtime,
+      recoveryDeadlineUtc: bindings.recoveryDeadlineUtc,
+      recoveryAttemptDeadlineUtc: bindings.recoveryAttemptDeadlineUtc,
+      recoveryAttemptedLineIds: bindings.recoveryAttemptedLineIds,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
+      initialLineSelection:
+          bindings.playbackLineSelectionSnapshot ?? matched?.lineSelection,
       playbackLineSnapshot: matched?.lines ?? const [],
       verifiedPlaybackServerId: matched?.verifiedServerId,
       itemId: widget.itemId,
@@ -118,13 +131,32 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     if (c.permissionRevoked) {
       if (!_revocationExitScheduled) {
         _revocationExitScheduled = true;
-        final router = GoRouter.maybeOf(context);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) router?.go('/', extra: null);
+          if (mounted) unawaited(_close());
         });
         WidgetsBinding.instance.ensureVisualUpdate();
       }
       return;
+    }
+    if (playbackNeedsLineStatus(c)) {
+      final status = c.switchConfirmation != null
+          ? 'confirmation'
+          : c.isRecovering
+          ? 'recovering'
+          : 'stopped';
+      if (_focusedLineStatus != status) {
+        _requestFocus(switch (status) {
+          'confirmation' => _lineConfirmationFocus,
+          'stopped' => _retryFocus,
+          _ => _lineStatusFocus,
+        });
+      }
+      _focusedLineStatus = status;
+      return;
+    }
+    if (_focusedLineStatus != null) {
+      _focusedLineStatus = null;
+      _requestFocus(_surfaceFocus);
     }
     final ended =
         c.playbackEnded && c.nextEpisode == null && !c.loading && !_failed;
@@ -162,7 +194,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         !_skipFocus.hasFocus) {
       _requestFocus(_surfaceFocus);
     }
-    if (c.loading) return;
+    if (c.loading || playbackNeedsLineStatus(c)) return;
     if (_failed) {
       if (!_focusedFailure) _requestFocus(_retryFocus);
       _focusedFailure = true;
@@ -218,6 +250,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {
     if (_closing) return;
     _closing = true;
+    final actualOrigin = controller?.origin;
     final command = controller?.endedSeriesCommand;
     final lease = controller?.origin?.permit;
     final sourceBound =
@@ -239,6 +272,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     // pop can let a predictive back gesture pop the following detail route.
     // A tracks sheet may cover this route when authentication changes. Remove
     // its overlays first, then pop the route whose session we actually closed.
+    if (controller?.permissionRevoked == true &&
+        !playbackEntryStillAllowed(_auth!, actualOrigin)) {
+      GoRouter.of(context).go(AppRoutes.home, extra: null);
+      return;
+    }
     navigator.popUntil((candidate) => identical(candidate, route));
     navigator.pop();
     if (router != null &&
@@ -273,6 +311,14 @@ class TvPlayerPageState extends State<TvPlayerPage> {
 
   void _back() {
     final c = controller!;
+    if (c.switchConfirmation != null) {
+      unawaited(c.confirmMediaSourceSwitch(SwitchResumeChoice.cancel));
+      return;
+    }
+    if (c.isRecovering) {
+      c.cancelLineRecovery();
+      return;
+    }
     if (_skipFocus.hasPrimaryFocus) {
       _seek = null;
       c.setControlsPinned(false);
@@ -928,11 +974,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                         selected: c.playbackRate == rate,
                                       ),
                                     ),
-                                if (c.playbackLineFailure != null)
+                                if (c.playbackLineFailure != null &&
+                                    !playbackNeedsLineStatus(c))
                                   Text(
-                                    l.playbackLineFailed(
-                                      c.playbackLineFailure!,
-                                    ),
+                                    c.playbackLineFailure!,
                                     key: const Key('playback-line-failure'),
                                   ),
                                 if (c.trackFailure != null)
@@ -972,6 +1017,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     _playFocus.dispose();
     _surfaceFocus.dispose();
     _retryFocus.dispose();
+    _lineStatusFocus.dispose();
+    _lineConfirmationFocus.dispose();
     _seekFocus.dispose();
     _nextPlayFocus.dispose();
     _nextCancelFocus.dispose();
@@ -1095,23 +1142,26 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     FocusNode? focusNode,
     bool showLabel = true,
   }) {
-    return _TvPlaybackAction(
-      key: Key(key),
-      focusNode: focusNode,
-      onPressed: onPressed,
-      child: showLabel
-          ? Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, fill: AppIcons.filled),
-                SizedBox(width: context.tvdp(6)),
-                Text(label),
-              ],
-            )
-          : AppTooltip(
-              message: label,
-              child: Icon(icon, fill: AppIcons.filled),
-            ),
+    return ExcludeFocus(
+      excluding: playbackNeedsLineStatus(controller!),
+      child: _TvPlaybackAction(
+        key: Key(key),
+        focusNode: focusNode,
+        onPressed: onPressed,
+        child: showLabel
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, fill: AppIcons.filled),
+                  SizedBox(width: context.tvdp(6)),
+                  Text(label),
+                ],
+              )
+            : AppTooltip(
+                message: label,
+                child: Icon(icon, fill: AppIcons.filled),
+              ),
+      ),
     );
   }
 
@@ -1318,7 +1368,18 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                 ),
                 Expanded(
                   child: Center(
-                    child: c.loading
+                    child: playbackNeedsLineStatus(c)
+                        ? PlayerLineStatus(
+                            controller: c,
+                            primaryFocusNode: c.switchConfirmation != null
+                                ? _lineConfirmationFocus
+                                : c.isRecovering
+                                ? _lineStatusFocus
+                                : _retryFocus,
+                            onChooseLines: () =>
+                                unawaited(showPlaybackLineDialog(context, c)),
+                          )
+                        : c.loading
                         ? SizedBox.square(
                             dimension: 44 * s,
                             child: CupertinoActivityIndicator(
@@ -1364,9 +1425,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                             ),
                           ],
                         ),
-                      if (c.playbackLineFailure != null)
+                      if (c.playbackLineFailure != null &&
+                          !playbackNeedsLineStatus(c))
                         Text(
-                          l.playbackLineFailed(c.playbackLineFailure!),
+                          c.playbackLineFailure!,
                           key: const Key('playback-line-failure'),
                         ),
                       if (c.trackFailure != null) Text(c.trackFailure!),
@@ -1374,7 +1436,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     ],
                   ),
                 ),
-                _timeline(c),
+                ExcludeFocus(
+                  excluding: playbackNeedsLineStatus(c),
+                  child: _timeline(c),
+                ),
                 SizedBox(height: 10 * s),
                 LayoutBuilder(
                   builder: (context, constraints) => SingleChildScrollView(
@@ -1427,9 +1492,12 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                         ? () => _panel(_TvPanel.quality)
                                         : null,
                                   ),
-                                SourceSwitchButton(
-                                  controller: c,
-                                  surface: PlaybackLineSurface.dialog,
+                                ExcludeFocus(
+                                  excluding: playbackNeedsLineStatus(c),
+                                  child: SourceSwitchButton(
+                                    controller: c,
+                                    surface: PlaybackLineSurface.dialog,
+                                  ),
                                 ),
                                 if (c.canSwitchMediaSource)
                                   _action(
@@ -1536,6 +1604,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   }
                   final visible =
                       c.controlsVisible ||
+                      playbackNeedsLineStatus(c) ||
                       c.loading ||
                       _failed ||
                       c.progressSyncFailed ||
@@ -1551,9 +1620,15 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       ? (c.sessionExpired
                             ? l.playbackSessionExpired
                             : c.disconnected
-                            ? l.playbackDisconnected
+                            ? playbackClassifiedFailureTitle(
+                                    c.loadFailure?.kind,
+                                    l,
+                                  ) ??
+                                  l.playbackDisconnected
                             : c.error == PlayerErrorKind.noStream
                             ? l.noPlayableStream
+                            : c.error == PlayerErrorKind.notPlayable
+                            ? l.itemUnavailable
                             : l.playbackFailed)
                       : c.playbackEnded
                       ? l.playbackEnded

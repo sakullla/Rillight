@@ -14,7 +14,6 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
-import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/routes.dart';
@@ -31,11 +30,10 @@ class MobileShell extends StatefulWidget {
   static const topBarKey = Key('mobile-shell-top-bar');
   static const titleKey = Key('mobile-shell-title');
 
-  /// 标签页顺序:首页、媒体库、聚合、搜索。
+  /// 标签页顺序:首页、聚合、搜索。
   static const homeTab = 0;
-  static const librariesTab = 1;
-  static const aggregationTab = 2;
-  static const searchTab = 3;
+  static const aggregationTab = 1;
+  static const searchTab = 2;
 
   /// 首页顶栏高;其它标签页顶栏放大号页面名,更高一些。
   static const homeBarHeight = 44.0;
@@ -46,7 +44,15 @@ class MobileShell extends StatefulWidget {
 }
 
 class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
-  int _index = 0;
+  PhoneDestination _destination = PhoneDestination.home;
+  int get _index => _destination.index;
+  set _index(int value) {
+    _destination = PhoneDestination.values[value];
+    PageStorage.maybeOf(
+      context,
+    )?.writeState(context, _destination.name, identifier: 'phone-destination');
+  }
+
   bool _homeCovered = false;
   bool? _pendingHomeCovered;
   bool _homeCoverScheduled = false;
@@ -66,6 +72,10 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
     super.didChangeDependencies();
     if (!_initialized) {
       _initialized = true;
+      _destination = PhoneDestination.restore(
+        PageStorage.maybeOf(context)
+            ?.readState(context, identifier: 'phone-destination'),
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _recover();
       });
@@ -145,7 +155,6 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         : MobileShell.titleBarHeight;
     final homeImmersive = _index == 0 && !_homeCovered;
     final tabTitle = switch (_index) {
-      MobileShell.librariesTab => l.libraries,
       MobileShell.aggregationTab => l.aggregation,
       MobileShell.searchTab => l.search,
       _ => '',
@@ -242,11 +251,6 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                     TickerMode(
                                       enabled: _index == MobileShell.homeTab,
                                       child: const PhoneHome(),
-                                    ),
-                                    TickerMode(
-                                      enabled:
-                                          _index == MobileShell.librariesTab,
-                                      child: const PhoneLibrariesTab(),
                                     ),
                                     TickerMode(
                                       enabled:

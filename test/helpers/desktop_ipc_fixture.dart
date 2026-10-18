@@ -133,7 +133,7 @@ void main() {
         }
         if (message['action'] == 'lock') {
           unawaited(
-            controller.lockPrivateRegion().then<void>(
+            controller.lockCurrentServer().then<void>(
               (_) {},
               onError: (_, _) {},
             ),

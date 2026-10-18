@@ -137,7 +137,7 @@ class _HeroLogoState extends State<HeroLogo> {
     int generation,
   ) async {
     final auth = AuthScope.of(context);
-    final client = auth.client;
+    final client = auth.imageClient;
     bool current() =>
         mounted &&
         generation == _generation &&

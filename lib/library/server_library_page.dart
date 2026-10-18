@@ -1,3 +1,5 @@
+import '../auth/server_content_entry.dart';
+
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
@@ -17,19 +19,24 @@ import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/search/search_action.dart';
 
-/// 用海报所在服务器的已有会话打开详情，不切换首页当前服务器。
+/// 先进入海报所属服务器，再带着原账号身份打开详情。
 Future<void> openServerItem(
   BuildContext context, {
   required SourceAccount account,
   required MediaItem item,
 }) async {
+  final auth = AuthScope.of(context);
+  if (!await enterServerContent(context, auth, account.configuredServerId) ||
+      !context.mounted) {
+    return;
+  }
   final overlay = SearchOverlayController.maybeOf(context);
   final registry = AuthScope.of(context).sources;
   final source = SourceReference(account: account, itemId: item.id);
   final location = _serverItemLocation(item.id);
   try {
     // Resume/search projections may carry a virtual or stale ParentId.
-    final sessionPermit = registry.permit(account, sessionOnly: true);
+    final sessionPermit = registry.permit(account);
     final concrete = await sessionPermit.dispatch((c) => c.getItem(item.id));
     sessionPermit.requireValid();
     if (!context.mounted) return;
@@ -44,14 +51,14 @@ Future<void> openServerItem(
         itemId: item.id,
         source: source,
         libraryId: libraryId,
-        regionGeneration: permit.regionGeneration,
+        accessGeneration: permit.accessGeneration,
       ),
     );
   } catch (_) {
     if (!context.mounted) return;
     int? generation;
     try {
-      generation = registry.permit(account, sessionOnly: true).regionGeneration;
+      generation = registry.permit(account).accessGeneration;
     } catch (_) {
       // No live session: the route gate keeps a sourced page from opening.
     }
@@ -62,15 +69,14 @@ Future<void> openServerItem(
       extra: PlayerHostOpenItemCommand(
         itemId: item.id,
         source: source,
-        regionGeneration: generation,
+        accessGeneration: generation,
       ),
     );
   }
 }
 
-/// 聚合和搜索打开的详情不进入同源比对。查询留在路由上，刷新后仍然生效。
-String _serverItemLocation(String itemId) =>
-    AppRoutes.item(itemId, showComparison: false);
+/// 聚合和搜索进入实际来源的详情；详情提供独立的手动来源选择。
+String _serverItemLocation(String itemId) => AppRoutes.item(itemId);
 
 OperationPermit _openPermit(
   SourceSessionRegistry registry,
@@ -80,14 +86,31 @@ OperationPermit _openPermit(
   try {
     return registry.permit(account, libraryId: libraryId);
   } on StateError {
-    return registry.permit(account, libraryId: libraryId, sessionOnly: true);
+    return registry.permit(account, libraryId: libraryId);
   }
 }
 
 /// 其他服务器的电影/剧集库。沿用现有片库网格，会话来自该服务器本身。
-class ServerLibraryPage extends StatefulWidget {
+class ServerLibraryPage extends StatelessWidget {
   const ServerLibraryPage({
     super.key,
+    required this.serverId,
+    required this.viewId,
+  });
+  final String serverId;
+  final String viewId;
+  @override
+  Widget build(BuildContext context) => ServerContentGate(
+    key: ValueKey((serverId, viewId)),
+    auth: AuthScope.of(context),
+    serverId: serverId,
+    builder: (_) =>
+        _AuthorizedServerLibraryPage(serverId: serverId, viewId: viewId),
+  );
+}
+
+class _AuthorizedServerLibraryPage extends StatefulWidget {
+  const _AuthorizedServerLibraryPage({
     required this.serverId,
     required this.viewId,
   });
@@ -96,10 +119,11 @@ class ServerLibraryPage extends StatefulWidget {
   final String viewId;
 
   @override
-  State<ServerLibraryPage> createState() => _ServerLibraryPageState();
+  State<_AuthorizedServerLibraryPage> createState() =>
+      _ServerLibraryPageState();
 }
 
-class _ServerLibraryPageState extends State<ServerLibraryPage> {
+class _ServerLibraryPageState extends State<_AuthorizedServerLibraryPage> {
   MediaServerClient? _client;
   SourceAccount? _account;
   String _title = '';
@@ -128,7 +152,8 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
       final session = await AuthScope.of(context).sources
           .authenticate(serverId);
       if (!mounted || attempt != _attempt) return;
-      final views = await session.client.getViews();
+      final permit = AuthScope.of(context).sources.permit(session.account);
+      final views = await permit.dispatch((client) => client.getViews());
       if (!mounted || attempt != _attempt) return;
       MediaItem? view;
       for (final item in views) {
@@ -138,7 +163,7 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
         }
       }
       setState(() {
-        _client = session.client;
+        _client = session.client.withRequestGuard(permit.requireValid);
         _account = session.account;
         _title = view?.name ?? '';
         _includeItemTypes = switch (view?.collectionTypeNormalized) {
@@ -192,6 +217,7 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
         child: TvShelfPage(
           key: ValueKey((widget.serverId, widget.viewId)),
           source: 'items',
+          recursive: true,
           title: _title,
           client: client,
           parentId: widget.viewId,
@@ -229,16 +255,38 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
 
 /// 某一台服务器的继续观看。网格、排序和「更多」之后的加载与首页货架相同，
 /// 会话用这台服务器自己的，不切换当前首页。
-class ServerResumePage extends StatefulWidget {
-  const ServerResumePage({super.key, required this.serverId});
-
+class ServerResumePage extends StatelessWidget {
+  const ServerResumePage({
+    super.key,
+    required this.serverId,
+    this.source = 'resume',
+  });
   final String serverId;
-
+  final String source;
   @override
-  State<ServerResumePage> createState() => _ServerResumePageState();
+  Widget build(BuildContext context) => ServerContentGate(
+    key: ValueKey((serverId, source)),
+    auth: AuthScope.of(context),
+    serverId: serverId,
+    builder: (_) =>
+        _AuthorizedServerResumePage(serverId: serverId, source: source),
+  );
 }
 
-class _ServerResumePageState extends State<ServerResumePage> {
+class _AuthorizedServerResumePage extends StatefulWidget {
+  const _AuthorizedServerResumePage({
+    required this.serverId,
+    required this.source,
+  });
+
+  final String serverId;
+  final String source;
+
+  @override
+  State<_AuthorizedServerResumePage> createState() => _ServerResumePageState();
+}
+
+class _ServerResumePageState extends State<_AuthorizedServerResumePage> {
   MediaServerClient? _client;
   SourceAccount? _account;
   MediaServerException? _error;
@@ -264,8 +312,9 @@ class _ServerResumePageState extends State<ServerResumePage> {
       final session = await AuthScope.of(context).sources
           .authenticate(widget.serverId);
       if (!mounted || attempt != _attempt) return;
+      final permit = AuthScope.of(context).sources.permit(session.account);
       setState(() {
-        _client = session.client;
+        _client = session.client.withRequestGuard(permit.requireValid);
         _account = session.account;
         _loading = false;
       });
@@ -292,7 +341,9 @@ class _ServerResumePageState extends State<ServerResumePage> {
       if (tv) {
         return _tvPending(
           context,
-          AppLocalizations.of(context).resumeRow,
+          widget.source == 'favorites'
+              ? AppLocalizations.of(context).filterFavorite
+              : AppLocalizations.of(context).resumeRow,
           _error,
           _load,
         );
@@ -317,7 +368,7 @@ class _ServerResumePageState extends State<ServerResumePage> {
         account: account,
         serverId: widget.serverId,
         child: TvShelfPage(
-          source: 'resume',
+          source: widget.source,
           client: client,
           onOpen: (item) =>
               openServerItem(context, account: account, item: item),
@@ -333,7 +384,7 @@ class _ServerResumePageState extends State<ServerResumePage> {
           child: ShelfItemOpen(
             onOpen: (item) =>
                 openServerItem(context, account: account, item: item),
-            child: const ShelfGridPage(source: 'resume'),
+            child: ShelfGridPage(source: widget.source),
           ),
         ),
       ),

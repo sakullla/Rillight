@@ -7,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/auth/server_selection_page.dart';
 
 import '../helpers/synthetic_source_fixture.dart';
 
@@ -166,11 +168,18 @@ void main() {
       expect(
         find.byWidgetPredicate(
           (widget) =>
-              (widget is ui.AppTooltip && widget.message == '灯川测试\n切换服务器') ||
-              (widget is AppTooltip && widget.message == '灯川测试\n切换服务器'),
+              (widget is ui.AppTooltip && widget.message == '灯川测试\n服务器') ||
+              (widget is AppTooltip && widget.message == '灯川测试\n服务器'),
         ),
         findsOneWidget,
       );
+      expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
+      await tester.tap(find.byKey(SessionActions.serverMenuKey));
+      await settle(tester);
+      expect(find.byType(ServerSelectionPage), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.byType(ServerSelectionPage), findsNothing);
       expect(
         find.byWidgetPredicate(
           (widget) => widget.runtimeType.toString() == 'NavigationRail',

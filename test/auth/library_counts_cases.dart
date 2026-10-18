@@ -384,10 +384,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await settle(tester);
 
-    expect(
-      find.byKey(ValueKey('tv-line-add-${auth.session!.server.id}')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('tv-settings-servers')), findsOneWidget);
     expect(find.byType(LibraryCountsPanel), findsNothing);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);

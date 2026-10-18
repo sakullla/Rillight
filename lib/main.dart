@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/android_bootstrap.dart';
+import 'package:rillight/app/startup_failure.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -29,13 +30,36 @@ Future<void> main(List<String> args) async {
     await runPlayerWindow(argumentFallback: args.length > 1 ? args[1] : '');
     return;
   }
+  await configureMainWindow();
+  await _startDesktop();
+}
+
+Future<void> _startDesktop() async {
+  try {
+    await _createDesktopApp();
+  } catch (error) {
+    runApp(
+      StartupFailureApp(
+        retry: _startDesktop,
+        upgrade: error is ConfigurationUpgradeFailure ? error : null,
+      ),
+    );
+  }
+}
+
+Future<void> _createDesktopApp() async {
   // Appearance preference IO is independent of credentials: overlap them.
   final appearance = AppearanceController();
   final appearanceReady = appearance.ready;
-  await configureMainWindow();
   final auth = await createProductionAuth();
+  late final PlaybackRuntime playback;
+  try {
+    playback = await PlaybackRuntime.production(auth);
+  } catch (_) {
+    auth.dispose();
+    rethrow;
+  }
   final router = createAppRouter(auth: auth);
-  final playback = await PlaybackRuntime.production(auth);
   final playerHost = DesktopPlayerWindowHost(auth: auth, runtime: playback);
   // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
   await appearanceReady;

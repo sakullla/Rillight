@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -9,7 +9,7 @@ import 'package:rillight/aggregation/query/aggregation_query.dart';
 import 'package:rillight/aggregation/query/same_source_query.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -42,6 +42,9 @@ class _HttpSource {
   Future<Object> Function(HttpRequest request) items = (_) async =>
       _page([], total: 0);
   int status = 200;
+  int viewsStatus = 200;
+  Future<void> Function()? viewsGate;
+  List<String> viewIds = ['library'];
   Future<void> Function()? authenticationGate;
   Future<void> open() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -52,6 +55,13 @@ class _HttpSource {
       if (request.uri.path.endsWith('/System/Info/Public')) {
         await authenticationGate?.call();
         data = {'Id': id, 'ServerName': id};
+      } else if (request.uri.path.endsWith('/Views')) {
+        await viewsGate?.call();
+        code = viewsStatus;
+        data = _page([
+          for (final viewId in viewIds)
+            {'Id': viewId, 'Name': viewId, 'Type': 'CollectionFolder'},
+        ]);
       } else if (request.uri.path.endsWith('/Items') ||
           request.uri.path.endsWith('/Shows/NextUp')) {
         data = await items(request);
@@ -78,7 +88,7 @@ class _HttpSource {
 class _Fixture {
   final a = _HttpSource('a');
   final b = _HttpSource('b');
-  late RegionAccessController access;
+  late ServerAccessController access;
   late SourceSessionRegistry registry;
   late HistoryWriter history;
   late AggregationQueryController query;
@@ -88,11 +98,7 @@ class _Fixture {
   }) async {
     await a.open();
     await b.open();
-    access = TestRegionAccessController();
-    if (privateB) {
-      await access.setPin('1234', '1234', (_) async {});
-      await access.unlock('1234');
-    }
+    access = TestServerAccessController(passwords: {if (privateB) 'b': '1234'});
     registry = SourceSessionRegistry(
       access: access,
       store: MemoryServerListStore(
@@ -103,12 +109,8 @@ class _Fixture {
                 id: source.id,
                 name: source.id,
                 username: 'user',
-                region: privateB && source == b
-                    ? AccessRegion.private
-                    : AccessRegion.ordinary,
+                protectionRef: privateB && source == b ? 'test:b' : null,
                 lines: [ServerLine(id: 'line', address: source.address)],
-                libraryIds: const ['library'],
-                scopeKnown: true,
               ),
           ],
         ),
@@ -131,6 +133,7 @@ class _Fixture {
       ),
     );
     await registry.load();
+    if (privateB) await access.unlock('b', '1234');
     history = await HistoryWriter.open(
       registry: registry,
       store: MemoryHistoryStore(),
@@ -160,6 +163,106 @@ Future<void> _until(bool Function() predicate) async {
 
 void main() {
   late _Fixture f;
+  for (final filtered in [false, true]) {
+    test(
+      'discovery retry rebuilds real libraries and preserves siblings filtered=$filtered',
+      () async {
+        await f.open();
+        f.a.viewsStatus = 503;
+        f.a.viewIds = ['library', 'excluded'];
+        f.a.items = (request) async {
+          final parent = request.uri.queryParameters['ParentId'];
+          expect(parent, isNotEmpty);
+          return _page([_movie('a-$parent')], total: 1);
+        };
+        f.b.items = (_) async => _page([_movie('b-result')], total: 1);
+        await f.query.start(
+          QueryScope(
+            libraries: {
+              if (filtered) 'a': {'library'},
+            },
+          ),
+        );
+        final failed = f.query.sources
+            .where((s) => s.key.serverId == 'a')
+            .single;
+        expect(failed.failed, isTrue);
+        expect(f.query.summary, QuerySummary.partialFailure);
+        expect(f.query.items.map((i) => i.item.id), ['b-result']);
+        expect(f.a.itemRequests, isEmpty);
+        final bRequests = f.b.requests.length;
+        final initialDiscoveries = f.a.requests
+            .where((r) => r.path.endsWith('/Views'))
+            .length;
+        await f.query.retry(failed.key);
+        expect(
+          f.query.sources.where((s) => s.key.serverId == 'a').single.failed,
+          isTrue,
+        );
+        expect(f.a.itemRequests, isEmpty);
+        f.a.viewsStatus = 200;
+        await f.query.retryServer('a');
+        expect(
+          f.a.requests.where((r) => r.path.endsWith('/Views')).length,
+          initialDiscoveries + 2,
+        );
+        expect(f.b.requests.length, bRequests);
+        expect(
+          f.query.sources.every((s) => s.key.libraryId.isNotEmpty),
+          isTrue,
+        );
+        expect(
+          f.query.items.every((item) => item.libraryId.isNotEmpty),
+          isTrue,
+        );
+        expect(
+          f.query.items.map((i) => i.item.id),
+          unorderedEquals([
+            'a-library',
+            if (!filtered) 'a-excluded',
+            'b-result',
+          ]),
+        );
+        expect(
+          f.a.itemRequests.map((r) => r.queryParameters['ParentId']).toSet(),
+          filtered ? {'library'} : {'library', 'excluded'},
+        );
+        expect(f.query.summary, QuerySummary.available);
+      },
+    );
+  }
+
+  test('late discovery retry cannot publish results after changing selected servers', () async {
+    await f.open();
+    f.a.viewsStatus = 503;
+    await f.query.start(
+      QueryScope(
+        serverIds: {'a'},
+        libraries: {
+          'a': {'library'},
+        },
+      ),
+    );
+    final failed = f.query.sources.single;
+    expect(failed.failed, isTrue);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    f.a.viewsStatus = 200;
+    f.a.viewsGate = () async {
+      entered.complete();
+      await release.future;
+    };
+    final retry = f.query.retry(failed.key);
+    await entered.future;
+    f.b.items = (_) async => _page([_movie('selected-b')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'b'}));
+    release.complete();
+    await retry;
+    expect(f.a.itemRequests, isEmpty);
+    expect(f.query.sources.map((s) => s.key.serverId), ['b']);
+    expect(f.query.items.map((i) => i.item.id), ['selected-b']);
+  });
+
   test('nextup uses allowed-library endpoint, keeps zero progress, pages and rejects late revoked response', () async {
     await f.open();
     f.a.items = (request) async {
@@ -173,12 +276,7 @@ void main() {
       ], total: 3);
     };
     await f.query.start(
-      QueryScope(
-        region: AccessRegion.ordinary,
-        serverIds: {'a'},
-        mode: QueryMode.nextUp,
-        pageSize: 1,
-      ),
+      QueryScope(serverIds: {'a'}, mode: QueryMode.nextUp, pageSize: 1),
     );
     expect(f.query.items.map((i) => i.item.id), ['episode-0']);
     await f.query.loadMoreServer('a');
@@ -195,9 +293,13 @@ void main() {
     };
     final pending = f.query.loadMoreServer('a');
     await arrived.future;
-    await f.access.setPin('1234', '1234', (_) async {});
-    await f.access.unlock('1234');
-    await f.registry.move('a', AccessRegion.private);
+    await f.access.setPassword(
+      'a',
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          f.registry.persistProtectionReference('a', ref),
+    );
     gate.complete();
     await pending;
     expect(f.query.items, isEmpty);
@@ -217,9 +319,7 @@ void main() {
       );
       return _page([_movie('film-$cursor', provider: '$cursor')], total: 2);
     };
-    await f.query.start(
-      QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}, pageSize: 1),
-    );
+    await f.query.start(QueryScope(serverIds: {'a'}, pageSize: 1));
     final first = f.query.works;
     expect(first, hasLength(1));
     for (var i = 0; i < 20; i++) {
@@ -236,9 +336,13 @@ void main() {
     final updated = f.query.works;
     expect(updated, hasLength(2));
     expect(updated, isNot(same(first)));
-    await f.access.setPin('1234', '1234', (_) async {});
-    await f.access.unlock('1234');
-    await f.registry.move('a', AccessRegion.private);
+    await f.access.setPassword(
+      'a',
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          f.registry.persistProtectionReference('a', ref),
+    );
     expect(f.query.works, isEmpty);
     expect(
       f.query.resolveAnchor(first.single.sources.single.reference),
@@ -260,10 +364,8 @@ void main() {
     );
     addTearDown(second.dispose);
     await Future.wait([
-      f.query.start(
-        QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-      ),
-      second.start(QueryScope(region: AccessRegion.ordinary, serverIds: {'a'})),
+      f.query.start(QueryScope(serverIds: {'a'})),
+      second.start(QueryScope(serverIds: {'a'})),
     ]);
     expect(playing.isValid, isTrue);
     expect(f.query.items.single.reference.account, account);
@@ -272,22 +374,8 @@ void main() {
       f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')).length,
       infoCount,
     );
-    expect(
-      f.registry.sessionAccount(
-        'a',
-        region: AccessRegion.ordinary,
-        libraryId: 'unknown',
-      ),
-      isNull,
-    );
-    await expectLater(
-      f.registry.acquireAccount(
-        'a',
-        region: AccessRegion.ordinary,
-        libraryId: 'unknown',
-      ),
-      throwsStateError,
-    );
+    expect(f.registry.sessionAccount('a', libraryId: 'unknown'), account);
+    expect(await f.registry.acquireAccount('a', libraryId: 'unknown'), account);
     expect(playing.isValid, isTrue);
   });
 
@@ -301,12 +389,8 @@ void main() {
       history: f.history,
     );
     addTearDown(second.dispose);
-    final firstRun = f.query.start(
-      QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-    );
-    final secondRun = second.start(
-      QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-    );
+    final firstRun = f.query.start(QueryScope(serverIds: {'a'}));
+    final secondRun = second.start(QueryScope(serverIds: {'a'}));
     await _until(() => f.a.requests.isNotEmpty);
     expect(
       f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')),
@@ -331,14 +415,10 @@ void main() {
     f.query.addListener(() {
       if (!replaced && f.query.scope?.serverIds?.contains('b') == true) {
         replaced = true;
-        replacement = f.query.start(
-          QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-        );
+        replacement = f.query.start(QueryScope(serverIds: {'a'}));
       }
     });
-    await f.query.start(
-      QueryScope(region: AccessRegion.ordinary, serverIds: {'b'}),
-    );
+    await f.query.start(QueryScope(serverIds: {'b'}));
     await replacement;
     expect(f.b.requests, isEmpty);
     expect(f.query.sources.single.key.serverId, 'a');
@@ -358,9 +438,7 @@ void main() {
           ? _page([_movie('two', provider: '2')], total: 2)
           : _page([_movie('edition')], total: 2);
     };
-    final run = f.query.start(
-      QueryScope(region: AccessRegion.ordinary, pageSize: 1),
-    );
+    final run = f.query.start(QueryScope(pageSize: 1));
     await _until(() => f.query.items.length == 1);
     expect(f.query.summary, QuerySummary.available);
     expect(f.query.totalWorks, isNull);
@@ -382,7 +460,7 @@ void main() {
     await f.open();
     f.a.items = (_) async => _page([_movie('one')], total: 1);
     f.b.status = 401;
-    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    await f.query.start(QueryScope());
     expect(f.query.items, hasLength(1));
     expect(f.query.summary, QuerySummary.partialFailure);
     expect(f.query.sources.last.status, SourceQueryStatus.needsLogin);
@@ -405,7 +483,7 @@ void main() {
         await gate.future;
         return _page([_movie('late', provider: '5')], total: 1);
       };
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
+      await f.query.start(QueryScope());
       expect(f.query.sources.last.status, SourceQueryStatus.timeout);
       expect(f.query.items, hasLength(1));
       f.b.items = (_) async => _page([_movie('retry')], total: 1);
@@ -423,30 +501,20 @@ void main() {
     await f.open();
     f.a.items = (_) async => _page([_movie('old')], total: 1);
     f.b.status = 403;
-    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    await f.query.start(QueryScope());
     final old = Completer<void>();
     f.a.items = (_) async {
       await old.future;
       return _page([_movie('stale')], total: 100);
     };
     final pending = f.query.start(
-      QueryScope(
-        region: AccessRegion.ordinary,
-        mode: QueryMode.search,
-        keyword: 'old',
-        serverIds: {'a'},
-      ),
+      QueryScope(mode: QueryMode.search, keyword: 'old', serverIds: {'a'}),
     );
     await _until(() => f.a.itemRequests.length == 2);
     final bCount = f.b.requests.length;
     f.a.items = (_) async => _page([_movie('fresh')]);
     final fresh = f.query.start(
-      QueryScope(
-        region: AccessRegion.ordinary,
-        mode: QueryMode.search,
-        keyword: 'new',
-        serverIds: {'a'},
-      ),
+      QueryScope(mode: QueryMode.search, keyword: 'new', serverIds: {'a'}),
     );
     expect(f.query.items, isEmpty);
     expect(f.query.totalWorks, isNull);
@@ -460,9 +528,7 @@ void main() {
     // Unknown server total stays unknown even when a short page exhausts it.
     expect(f.query.sources.single.total, isNull);
     expect(f.query.complete, isTrue);
-    await f.query.start(
-      QueryScope(region: AccessRegion.ordinary, serverIds: {}),
-    );
+    await f.query.start(QueryScope(serverIds: {}));
     expect(f.query.summary, QuerySummary.emptyScope);
   });
 
@@ -477,7 +543,6 @@ void main() {
       f.b.items = (_) async => _page([_movie('edition', year: 2024)], total: 1);
       await f.query.start(
         QueryScope(
-          region: AccessRegion.ordinary,
           years: {2025},
           genres: {'Drama'},
           libraries: {
@@ -488,10 +553,10 @@ void main() {
       );
       expect(f.query.items.single.reference.itemId, 'allowed');
       expect(f.query.works.single.sources, hasLength(1));
-      expect(f.b.requests, isEmpty);
+      expect(f.b.itemRequests, isEmpty);
       expect(f.a.itemRequests.single.queryParameters['ParentId'], 'library');
       expect(f.a.itemRequests.single.queryParameters['Years'], '2025');
-      await f.registry.configureScope('a', participates: true, libraryIds: {});
+      await f.registry.logoutSource('a');
       expect(f.query.items, isEmpty);
       expect(f.query.sources, isEmpty);
     },
@@ -501,51 +566,34 @@ void main() {
     'empty and all-failed differ; failure retry does not clear siblings',
     () async {
       await f.open();
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
+      await f.query.start(QueryScope());
       expect(f.query.summary, QuerySummary.empty);
       f.a.status = 403;
       f.b.status = 403;
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
+      await f.query.start(QueryScope());
       expect(f.query.summary, QuerySummary.allFailed);
       expect(f.query.totalWorks, isNull);
     },
   );
 
-  test('private lock rejects HTTP late data and ordinary projection excludes unlocked private membership', () async {
+  test('locked server rejects late HTTP while unlocked servers share one projection', () async {
     await f.open(privateB: true);
-    await f.query.start(QueryScope(region: AccessRegion.ordinary));
-    expect(f.b.requests, isEmpty);
+    await f.query.start(QueryScope());
+    expect(f.b.itemRequests, isNotEmpty);
+    f.b.requests.clear();
     final gate = Completer<void>();
     f.b.items = (_) async {
       await gate.future;
       return _page([_movie('secret')], total: 7);
     };
-    final run = f.query.start(QueryScope(region: AccessRegion.private));
+    final run = f.query.start(QueryScope(serverIds: {'b'}));
     await _until(() => f.b.itemRequests.isNotEmpty);
-    await f.access.lock();
+    await f.access.lock('b');
     final requestCount = f.b.requests.length;
-    expect(
-      f.registry.sessionAccount(
-        'b',
-        region: AccessRegion.private,
-        libraryId: 'library',
-      ),
-      isNull,
-    );
-    expect(
-      f.registry.sessionAccount(
-        'b',
-        region: AccessRegion.ordinary,
-        libraryId: 'library',
-      ),
-      isNull,
-    );
+    expect(f.registry.sessionAccount('b', libraryId: 'library'), isNull);
+    expect(f.registry.sessionAccount('b', libraryId: 'library'), isNull);
     await expectLater(
-      f.registry.acquireAccount(
-        'b',
-        region: AccessRegion.private,
-        libraryId: 'library',
-      ),
+      f.registry.acquireAccount('b', libraryId: 'library'),
       throwsStateError,
     );
     expect(f.b.requests.length, requestCount);
@@ -557,21 +605,30 @@ void main() {
     expect(f.query.totalWorks, isNull);
   });
 
-  test('membership migration evicts contributions before commit and rejects in-flight result', () async {
-    await f.open(privateB: true);
-    final gate = Completer<void>();
-    f.a.items = (_) async {
-      await gate.future;
-      return _page([_movie('moved')], total: 1);
-    };
-    final run = f.query.start(QueryScope(region: AccessRegion.ordinary));
-    await _until(() => f.a.itemRequests.isNotEmpty);
-    await f.registry.move('a', AccessRegion.private);
-    gate.complete();
-    await run;
-    expect(f.query.sources, isEmpty);
-    expect(f.query.items, isEmpty);
-  });
+  test(
+    'enabling entry password evicts contributions and rejects in-flight result',
+    () async {
+      await f.open(privateB: true);
+      final gate = Completer<void>();
+      f.a.items = (_) async {
+        await gate.future;
+        return _page([_movie('moved')], total: 1);
+      };
+      final run = f.query.start(QueryScope(serverIds: {'a'}));
+      await _until(() => f.a.itemRequests.isNotEmpty);
+      await f.access.setPassword(
+        'a',
+        '1234',
+        '1234',
+        persistReference: (ref) =>
+            f.registry.persistProtectionReference('a', ref),
+      );
+      gate.complete();
+      await run;
+      expect(f.query.sources, isEmpty);
+      expect(f.query.items, isEmpty);
+    },
+  );
 
   test('T3 records projected by actual source/selected scope; lock prevents stale history access', () async {
     await f.open(privateB: true);
@@ -593,16 +650,11 @@ void main() {
       actuallyPlaying: true,
       timeline: const WatchTimeline(durationTicks: 1000),
     );
-    await f.query.start(QueryScope(region: AccessRegion.ordinary));
-    expect(f.query.localContinueWatching, isEmpty);
-    await f.query.start(
-      QueryScope(
-        region: AccessRegion.private,
-        mode: QueryMode.continueWatching,
-      ),
-    );
+    await f.query.start(QueryScope());
     expect(f.query.localContinueWatching.single.source, version);
-    await f.access.lock();
+    await f.query.start(QueryScope(mode: QueryMode.continueWatching));
+    expect(f.query.localContinueWatching.single.source, version);
+    await f.access.lock('b');
     expect(f.query.localContinueWatching, isEmpty);
   });
 
@@ -616,13 +668,7 @@ void main() {
         final conflictRow = _movie('a-conflict', type: 'Series')
           ..['ProviderIds'] = {'Tmdb': '1', 'Tvdb': '3'};
         f.a.items = (_) async => _page([originRow], total: 1);
-        await f.query.start(
-          QueryScope(
-            region: AccessRegion.ordinary,
-            serverIds: {'a'},
-            types: {'Series'},
-          ),
-        );
+        await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
         final seed = f.query.items.single;
         f.a.items = (r) async => _page([
           r.uri.queryParameters['StartIndex'] == '0' ? originRow : conflictRow,
@@ -651,10 +697,7 @@ void main() {
           history: f.history,
         );
         addTearDown(detail.dispose);
-        await detail.start(
-          origin: seed,
-          scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
-        );
+        await detail.start(origin: seed, scope: QueryScope(pageSize: 1));
         final target = detail.comparisons.single.source;
         expect(detail.comparisons.single.decision.confirmed, isTrue);
         final episode = EpisodeSource(
@@ -715,10 +758,7 @@ void main() {
         expect(detail.episodes, isEmpty);
         // Once conflicts disappear, only a new lookup may restore confirmation.
         f.a.items = (_) async => _page([originRow], total: 1);
-        await detail.start(
-          origin: seed,
-          scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
-        );
+        await detail.start(origin: seed, scope: QueryScope(pageSize: 1));
         expect(detail.episodes, isEmpty);
         await detail.lookupEpisode(
           target: target,
@@ -740,7 +780,7 @@ void main() {
       _movie('valid-before-malformed'),
       _movie('bad')..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
     ], total: 2);
-    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    await f.query.start(QueryScope());
     expect(f.query.summary, QuerySummary.partialFailure);
     expect(
       f.query.sources.firstWhere((s) => s.key.serverId == 'b').status,
@@ -761,13 +801,7 @@ void main() {
     await f.open();
     f.a.items = (_) async =>
         _page([_movie('origin', type: 'Series')], total: 1);
-    await f.query.start(
-      QueryScope(
-        region: AccessRegion.ordinary,
-        serverIds: {'a'},
-        types: {'Series'},
-      ),
-    );
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
     final detail = SameSourceQueryController(
       registry: f.registry,
       history: f.history,
@@ -777,7 +811,7 @@ void main() {
         _page([_movie('cached', type: 'Series')], total: 2);
     await detail.start(
       origin: f.query.items.single,
-      scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
+      scope: QueryScope(pageSize: 1),
     );
     f.b.items = (_) async => _page([
       _movie('cached', type: 'Series', provider: '2'),
@@ -810,13 +844,7 @@ void main() {
       _movie('series-b', title: 'Localized', type: 'Series'),
       _movie('candidate', type: 'Series', provider: null),
     ], total: 2);
-    await f.query.start(
-      QueryScope(
-        region: AccessRegion.ordinary,
-        types: {'Series'},
-        serverIds: {'a'},
-      ),
-    );
+    await f.query.start(QueryScope(types: {'Series'}, serverIds: {'a'}));
     final seed = f.query.items.single;
     final detail = SameSourceQueryController(
       registry: f.registry,
@@ -825,7 +853,7 @@ void main() {
     addTearDown(detail.dispose);
     await detail.start(
       origin: seed,
-      scope: QueryScope(region: AccessRegion.ordinary, serverIds: {'a', 'b'}),
+      scope: QueryScope(serverIds: {'a', 'b'}),
     );
     expect(detail.comparisons.where((c) => c.decision.confirmed), hasLength(1));
     expect(
@@ -887,7 +915,7 @@ void main() {
     ], total: 1);
     await short.start(
       origin: seed,
-      scope: QueryScope(region: AccessRegion.ordinary, serverIds: {'b'}),
+      scope: QueryScope(serverIds: {'b'}),
     );
     f.b.items = (_) async {
       await failed.future;
@@ -939,12 +967,11 @@ void main() {
       ),
       throwsStateError,
     );
-    expect(
-      () => detail.start(
-        origin: seed,
-        scope: QueryScope(region: AccessRegion.private),
-      ),
-      throwsArgumentError,
+    await detail.start(
+      origin: seed,
+      scope: QueryScope(serverIds: {}),
     );
+    expect(detail.comparisons, isEmpty);
+    expect(detail.origin, seed);
   });
 }

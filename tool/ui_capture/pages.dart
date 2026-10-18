@@ -1,3 +1,9 @@
+import 'package:rillight/library/source_selection.dart';
+import 'package:rillight/app/startup_failure.dart';
+import 'package:rillight/app/android_bootstrap.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/auth/startup_recovery.dart';
+
 import '../../test/helpers/cupertino_test_app.dart';
 
 import 'dart:async';
@@ -20,8 +26,6 @@ import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/backup_import/backup_import_models.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/connect_page.dart';
-import 'package:rillight/auth/phone_server_manager.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -29,8 +33,6 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/search/search_overlay.dart';
-import 'package:rillight/player/player_host_command.dart';
-import 'package:rillight/aggregation/identity/media_identity.dart';
 
 import '../../test/auth/backup_import/backup_import_cases.dart';
 import '../../test/emby/fake_emby_server.dart';
@@ -38,6 +40,75 @@ import 'capture.dart';
 import 'fixtures.dart';
 
 extension PageCaptures on CaptureSession {
+  /// Startup failure owns a fresh root; do not replace an active detail app.
+  Future<void> entryRecovery() async {
+    const recovery = ConfigurationUpgradeFailure(
+      '/synthetic/rillight',
+      originalPath: '/synthetic/rillight/watch-history.json',
+      backupPath: '/synthetic/rillight/watch-history.json.pre-source-v2',
+      history: true,
+    );
+    tester.platformDispatcher.platformBrightnessTestValue = theme == 'dark'
+        ? Brightness.dark
+        : Brightness.light;
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: boundary,
+        child: platform == 'desktop'
+            ? StartupFailureApp(upgrade: recovery, retry: () async {})
+            : AndroidBootstrap(
+                resolveEnvironment: () async => platform == 'tv'
+                    ? PresentationEnvironment.tv
+                    : PresentationEnvironment.phone,
+                createAuth: () async => AuthController.memory(),
+                createRuntime: (_) async => throw recovery,
+              ),
+      ),
+    );
+    for (var i = 0; i < 40 && find.text('播放记录暂时无法读取').evaluate().isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await advance(100);
+    }
+    expect(find.text('播放记录暂时无法读取'), findsOneWidget);
+    await save(
+      'entry-history-recovery',
+      renderedTheme: platform == 'desktop' ? theme : 'dark',
+    );
+    tester.platformDispatcher.clearPlatformBrightnessTestValue();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await advance(100);
+  }
+
+  Future<void> _driveEntryCapture(Future<void> Function() action) async {
+    var done = false;
+    Object? failure;
+    await tester.runAsync(() async {
+      unawaited(
+        action().then(
+          (_) {
+            done = true;
+          },
+          onError: (Object error) {
+            failure = error;
+            done = true;
+          },
+        ),
+      );
+    });
+    for (var step = 0; step < 100 && !done; step++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await advance(100);
+    }
+    if (!done) {
+      throw TimeoutException('Entry capture fixture operation did not finish');
+    }
+    if (failure != null) throw failure!;
+  }
+
   Future<void> activate(Finder finder) async {
     expect(finder, findsOneWidget);
     await Scrollable.ensureVisible(tester.element(finder), alignment: .5);
@@ -99,6 +170,101 @@ extension PageCaptures on CaptureSession {
     FakeEmbyServer server,
     CaptureAdapter adapter,
   ) async {
+    if (wants('entry')) {
+      if ([
+        'entry-source-selection-locked',
+        'entry-source-selection-password',
+        'entry-source-selection-candidate',
+      ].any(shouldCapture)) {
+        final source = auth.savedServers.first;
+        final target = auth.savedServers.last;
+        await _driveEntryCapture(() async {
+          await auth.serverAccess.setPassword(
+            target.id,
+            'capture-entry',
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(target.id, ref),
+          );
+          await auth.refreshServers();
+        });
+        // Use the same ordinary detail route as a home-page poster.
+        app.router.go('/item/movie-up');
+        await advance(1200);
+        await activate(
+          find
+              .descendant(
+                of: find.byType(SourceSelectionAction),
+                matching: find.byType(AppButton),
+              )
+              .first,
+        );
+        await advance(800);
+        expect(
+          find.byKey(ValueKey('source-selection-verify-${target.id}')),
+          findsOneWidget,
+        );
+        await save('entry-source-selection-locked');
+        await activate(
+          find.byKey(ValueKey('source-selection-verify-${target.id}')),
+        );
+        await save('entry-source-selection-password');
+        if (platform == 'tv') {
+          await _editTvField(
+            const Key('server-unlock-password'),
+            'capture-entry',
+          );
+        } else {
+          await tester.enterText(
+            find.byKey(const Key('server-unlock-password')),
+            'capture-entry',
+          );
+        }
+        await activate(find.byKey(const Key('server-unlock-submit')));
+        for (
+          var i = 0;
+          i < 60 &&
+              find
+                  .byKey(
+                    ValueKey('source-selection-item-${target.id}-movie-up'),
+                  )
+                  .evaluate()
+                  .isEmpty;
+          i++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)),
+          );
+          await advance(100);
+        }
+        expect(
+          find.byKey(ValueKey('source-selection-item-${target.id}-movie-up')),
+          findsOneWidget,
+        );
+        expect(auth.session?.server.id, source.id);
+        expect(auth.serverAccess.allows(target.id), isFalse);
+        await Scrollable.ensureVisible(
+          tester.element(
+            find.byKey(ValueKey('source-selection-item-${target.id}-movie-up')),
+          ),
+          alignment: .2,
+        );
+        await advance(250);
+        await save('entry-source-selection-candidate');
+        await activate(find.byKey(const Key('source-selection-close')));
+        await _driveEntryCapture(() async {
+          await auth.serverAccess.disablePassword(
+            target.id,
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(target.id, ref),
+          );
+          await auth.refreshServers();
+        });
+      }
+      app.router.go('/');
+      await advance(500);
+    }
     if (wants('aggregation')) {
       app.router.go('/');
       await advance(700);
@@ -116,80 +282,84 @@ extension PageCaptures on CaptureSession {
       }
       await advance(1200);
       await save('aggregation-ready');
-      // TV 聚合页是分段 + 卡片行的新版本,没有来源管理与私密区入口。
-      if (platform != 'tv') {
-        await tap(const Key('aggregation-source-management'));
-        await save('aggregation-management');
-        await activate(find.widgetWithText(AppListTile, '私密区域'));
-        await save('aggregation-pin-setup');
-        await tester.enterText(find.byKey(const Key('private-pin')), '1234');
-        await tester.enterText(
-          find.byKey(const Key('private-pin-confirm')),
-          '5678',
-        );
-        await tap(const Key('private-unlock'));
-        await save('aggregation-pin-error');
-        await tap(const Key('private-pin-cancel'));
-        await tap(const Key('source-management-close'));
-        await tap(const Key('aggregation-segment-favorites'));
-        await save('aggregation-segment-favorites');
-        await tap(const Key('aggregation-segment-libraries'));
-        await save('aggregation-segment-libraries');
-        // 来源裁剪/同源比较只在旧版跨服务器聚合页上,从命令路由进入。
-        final sources = auth.sources.project(AccessRegion.ordinary);
-        final account = (await tester.runAsync(
-          () async =>
-              (await auth.sources.authenticate(sources.first.id)).account,
-        ))!;
-        app.router.go(
-          '/shelf/items',
-          extra: PlayerHostOpenItemCommand(
-            itemId: 'movie-up',
-            source: SourceReference(account: account, itemId: 'movie-up'),
-            libraryId: 'view-movies',
-            regionGeneration: auth.regionAccess.generation,
+      if (['aggregation-locked', 'aggregation-unlock'].any(shouldCapture)) {
+        final protected = auth.savedServers.last;
+        await tester.runAsync(() async {
+          await auth.serverAccess.setPassword(
+            protected.id,
+            'capture-entry',
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(protected.id, ref),
+          );
+          await auth.refreshServers();
+        });
+        await advance(600);
+        await save('aggregation-locked');
+        await activate(
+          find.descendant(
+            of: find.byKey(ValueKey('aggregation-server-${protected.id}')),
+            matching: find.text('进入服务器'),
           ),
         );
-        await advance(1200);
-        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
-        await advance(600);
-        await activate(
-          find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
-        );
-        await advance(600);
-        await save('aggregation-single-source');
-        await activate(
-          find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
-        );
-        await save('aggregation-empty-scope');
-        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
-        await advance(900);
-        await activate(find.widgetWithText(AppButton, '查找同源 · 2').first);
-        await advance(900);
-        await save('aggregation-comparison');
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await advance(400);
+        await save('aggregation-unlock');
+        Navigator.of(
+          tester.element(find.byKey(const Key('server-unlock-password'))),
+        ).pop();
         await advance(350);
-        adapter.failAggregationMirror = true;
-        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
-        await advance(1000);
-        await save('aggregation-partial-failure');
-        adapter.failAggregationMirror = false;
-        if (platform == 'phone') {
-          // /aggregation 只有桌面路由;先回首页再经底部导航进聚合页。
-          app.router.go('/');
-          await advance(900);
-          await activate(
-            find.descendant(
-              of: find.byType(CupertinoTabBar),
-              matching: find.text('聚合'),
-            ),
+        await tester.runAsync(() async {
+          await auth.serverAccess.disablePassword(
+            protected.id,
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(protected.id, ref),
           );
-        } else {
-          app.router.go('/aggregation');
-          await advance(900);
-        }
-        await tap(const Key('aggregation-segment-continue'));
+          await auth.refreshServers();
+        });
+        await advance(900);
       }
+      await tap(const Key('aggregation-segment-favorites'));
+      await save('aggregation-segment-favorites');
+      await tap(const Key('aggregation-segment-libraries'));
+      await save('aggregation-segment-libraries');
+      adapter.failAggregationMirror = true;
+      // Re-enter the content shell so the real row loader performs a fresh
+      // request; changing a segment alone only changes the visible slice.
+      app.router.go('/connect?add=1');
+      await advance(400);
+      app.router.go('/');
+      await advance(700);
+      if (platform == 'desktop') {
+        await tap(const Key('app-shell-aggregation'));
+      } else if (platform == 'phone') {
+        await activate(
+          find.descendant(
+            of: find.byType(CupertinoTabBar),
+            matching: find.text('聚合'),
+          ),
+        );
+      } else {
+        await tap(const ValueKey('tv-nav-1'));
+      }
+      await tap(const Key('aggregation-segment-favorites'));
+      await advance(1000);
+      expect(find.text('重试'), findsWidgets);
+      await tester.ensureVisible(find.text('重试').first);
+      await advance(200);
+      await save('aggregation-partial-failure');
+      adapter.failAggregationMirror = false;
+      adapter.emptyAggregationMirror = true;
+      await activate(find.text('重试').first);
+      await advance(700);
+      expect(find.text('重试'), findsNothing);
+      expect(find.text('暂无内容'), findsWidgets);
+      await tester.ensureVisible(find.text('暂无内容').last);
+      await advance(200);
+      await save('aggregation-empty');
+      adapter.emptyAggregationMirror = false;
+      await tap(const Key('aggregation-segment-continue'));
+      await advance(800);
       if (platform == 'desktop') {
         app.router.go('/search');
         await advance(700);
@@ -256,16 +426,23 @@ extension PageCaptures on CaptureSession {
         await save('home-customize');
         app.router.pop();
         await advance(400);
-        // 手机「媒体库」标签页:快速入口与全部媒体库磁贴。
-        await activate(
-          find.descendant(
-            of: find.byType(CupertinoTabBar),
-            matching: find.text('媒体库'),
-          ),
+        // 单库入口保留在首页的媒体库横排。
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('phone-home-library-view-movies')),
+          320,
+          scrollable: find.byType(Scrollable).first,
         );
+        await Scrollable.ensureVisible(
+          tester.element(
+            find.byKey(const Key('phone-home-library-view-movies')),
+          ),
+          alignment: .25,
+        );
+        await advance(300);
         await save('library-list');
       } else {
         await tap(const ValueKey('tv-nav-1'));
+        await tap(const Key('aggregation-segment-libraries'));
         await save('library-list');
       }
     }
@@ -520,7 +697,7 @@ extension PageCaptures on CaptureSession {
       }
     }
     if (wants('search')) await searchPages(app);
-    if (wants('servers')) await serverPages(app, auth);
+    if (wants('servers')) await serverPages(app, auth, adapter);
     if (platform != 'tv' && wants('settings')) await settingsPages(app);
     if (wants('person')) await personPages(app, server, adapter);
   }
@@ -657,68 +834,96 @@ extension PageCaptures on CaptureSession {
     if (platform == 'desktop') await tap(SearchOverlay.closeKey);
   }
 
-  Future<void> serverPages(RillightApp app, AuthController auth) async {
+  Future<void> serverPages(
+    RillightApp app,
+    AuthController auth,
+    CaptureAdapter adapter,
+  ) async {
     await route(app, '/', 'server-entry');
     final server = auth.session!.server;
     final id = server.id;
     final lineId = server.activeLineId!;
-    if (platform == 'desktop') {
-      await tap(SessionActions.serverMenuKey);
-      await save('server-manager');
-      await tap(ServerSwitcherDialog.addLineKey(id));
-      await save('server-add-line');
-      await dismiss();
-      await tap(SessionActions.serverMenuKey);
-      await tap(ServerSwitcherDialog.editLineKey(id, lineId));
-      await save('server-edit-line');
-      await dismiss();
-      await tap(SessionActions.serverMenuKey);
-      await tap(ServerSwitcherDialog.deleteKey(id));
-      await save('server-delete-confirm');
-      await tap(ServerSwitcherDialog.deleteCancelKey);
-      await dismiss();
-      await tap(SessionActions.serverMenuKey);
-      await tap(ServerSwitcherDialog.changePasswordKey);
-    } else if (platform == 'phone') {
-      await tap(const Key('mobile-shell-mine-entry'));
-      await save('account');
-      await tap(PhoneMinePage.lineKey);
-      await save('server-manager');
-      await modal(PhoneMinePage.lineAddKey(id), 'server-add-line');
-      await modal(PhoneMinePage.lineEditKey(id, lineId), 'server-edit-line');
-      final selectedServerCard = find.ancestor(
-        of: find.byKey(PhoneMinePage.serverDeleteKey(id)),
-        matching: find.byType(Column),
-      );
-      await activate(
-        find.descendant(
-          of: selectedServerCard.first,
-          matching: findAppTooltip('修改显示名称'),
-        ),
-      );
-      await save('server-rename');
-      await dismiss();
-      await tap(PhoneMinePage.serverDeleteKey(id));
-      await save('server-delete-confirm');
-      await tap(PhoneMinePage.serverDeleteCancelKey);
-      await tester.enterText(find.byKey(PhoneServerManager.searchKey), '不存在');
-      await advance(200);
-      await save('server-search-empty');
-      await dismiss();
-      await tap(PhoneMinePage.changePasswordKey);
-    } else {
-      await tap(const ValueKey('tv-nav-3'));
-      await save('server-manager');
-      await modal(ValueKey('tv-line-add-$id'), 'server-add-line');
-      await modal(ValueKey('tv-line-edit-$id-$lineId'), 'server-edit-line');
-      await tap(ValueKey('tv-server-delete-$id'));
-      await save('server-delete-confirm');
-      await tap(const Key('tv-server-delete-cancel'));
-      await tap(const Key('tv-change-password'));
+    await _modernServerPages(app, auth, id, lineId, adapter);
+    await _backupImportStates(app, auth);
+  }
+
+  Future<void> _modernServerPages(
+    RillightApp app,
+    AuthController auth,
+    String id,
+    String lineId,
+    CaptureAdapter adapter,
+  ) async {
+    Future<void> open() async {
+      if (platform == 'desktop') {
+        await tap(SessionActions.serverMenuKey);
+      } else if (platform == 'tv') {
+        await tap(const Key('tv-nav-user'));
+      } else {
+        app.router.go('/mine');
+        await advance(600);
+        await save('account');
+        await tap(PhoneMinePage.lineKey);
+      }
     }
+
+    Future<void> back() =>
+        tap(Key(platform == 'tv' ? 'tv-server-back' : 'server-flow-back'));
+    Future<void> edit() async {
+      await tap(Key('server-more-$id'));
+      await tap(
+        Key(platform == 'tv' ? 'server-more-edit' : 'server-action-edit-$id'),
+      );
+    }
+
+    await open();
+    await save('server-manager');
+    await tap(Key('server-lines-$id'));
+    await save('server-line-selector');
+    const checkStates = [
+      'server-check-certificate',
+      'server-check-permission',
+      'server-check-login',
+      'server-check-offline',
+    ];
+    if (checkStates.any(shouldCapture)) {
+      final remote = adapter.servers.firstWhere(
+        (s) => s.baseUrl.toString() == auth.session!.server.baseUrl,
+      );
+      for (final state in checkStates) {
+        if (!shouldCapture(state)) continue;
+        adapter.certificateError = state == 'server-check-certificate';
+        adapter.failLineCheck = state == 'server-check-offline';
+        remote.publicInfoStatus = state == 'server-check-permission'
+            ? 403
+            : state == 'server-check-login'
+            ? 401
+            : null;
+        await tap(Key('server-line-check-$lineId'));
+        await save(state);
+      }
+      adapter.certificateError = false;
+      adapter.failLineCheck = false;
+      remote.publicInfoStatus = null;
+      await tap(Key('server-line-check-$lineId'));
+    }
+    await back();
+    await edit();
+    await save('server-editor');
+    if (platform == 'tv') await save('account');
+    await save('server-rename');
+    await tap(const Key('server-editor-add-line'));
+    await save('server-add-line');
+    await back();
+    await tap(Key('server-editor-line-$lineId'));
+    await save('server-edit-line');
+    await back();
+    await tap(const Key('server-editor-password'));
+    await save('server-password-form');
+    await back();
+    await tap(const Key('server-editor-remote-password'));
     await save('account-change-password');
     if (platform == 'tv') {
-      // 电视密码行是 TvInput，文本框在点开后的编辑框里。
       await _editTvField(ChangePasswordDialog.newPasswordField, 'capture-only');
       await _editTvField(ChangePasswordDialog.confirmField, 'mismatch');
     } else {
@@ -734,16 +939,138 @@ extension PageCaptures on CaptureSession {
     await advance(150);
     await save('account-password-mismatch');
     await tap(ChangePasswordDialog.cancelKey);
-    await route(app, '/connect?add=1', 'server-add');
+    await back();
+    await tap(Key('server-more-$id'));
+    await tap(
+      Key(platform == 'tv' ? 'server-more-remove' : 'server-action-remove-$id'),
+    );
+    await save('server-delete-confirm');
+    await tap(const Key('server-remove-cancel'));
+    if (platform == 'tv') {
+      await _editTvField(const Key('server-search'), '不存在');
+    } else {
+      await tester.enterText(find.byKey(const Key('server-search')), '不存在');
+    }
+    await advance(200);
+    await save('server-search-empty');
+    if (platform == 'tv') {
+      await _editTvField(const Key('server-search'), '');
+    } else {
+      await tester.enterText(find.byKey(const Key('server-search')), '');
+    }
+    await tap(const Key('server-add'));
+    await save('server-add');
     if (platform != 'tv') {
-      await tap(
-        platform == 'desktop'
-            ? ConnectFormKeys.more
-            : const Key('android-connect-more'),
-      );
+      await tap(const Key('provider-advanced'));
       await save('server-add-advanced');
     }
-    await _backupImportStates(app, auth);
+    await tap(const Key('server-add-paste'));
+    const pasteSample =
+        '名称：家庭影院\n地址：https://home.example.com\n用户：alice\n密码：synthetic\n名称：朋友的影院\n线路1：https://friend.example.com\n线路2：https://backup.example.com/emby\n用户：bob';
+    if (platform == 'tv') {
+      await _editTvField(const Key('server-paste-text'), pasteSample);
+    } else {
+      await tester.enterText(
+        find.byKey(const Key('server-paste-text')),
+        pasteSample,
+      );
+    }
+    if (platform == 'tv') await save('server-paste-input');
+    await tap(const Key('server-paste-parse'));
+    await save('server-paste-groups');
+    await tap(const Key('server-paste-group-1'));
+    await save('server-paste-preview');
+    if (platform == 'tv') {
+      final lines = find.byKey(const Key('provider-extra-lines'));
+      tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: lines,
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode!
+          .requestFocus();
+      await advance(500);
+      await save('server-paste-lines');
+      await tap(const Key('provider-extra-lines'));
+      await save('server-paste-keyboard');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await advance(350);
+    }
+    await back();
+    await back();
+    if (shouldCapture('server-needs-login') ||
+        shouldCapture('server-account-needs-login')) {
+      final other = auth.savedServers.last;
+      await tap(Key('server-more-${other.id}'));
+      await tap(
+        Key(
+          platform == 'tv'
+              ? 'server-more-edit'
+              : 'server-action-edit-${other.id}',
+        ),
+      );
+      await tap(const Key('server-editor-logout'));
+      await tap(const Key('server-logout-confirm'));
+      await open();
+      await save('server-needs-login');
+      await tap(Key('server-more-${other.id}'));
+      await tap(
+        Key(
+          platform == 'tv'
+              ? 'server-more-edit'
+              : 'server-action-edit-${other.id}',
+        ),
+      );
+      await save('server-account-needs-login');
+      await back();
+    }
+    if ([
+      'server-locked-list',
+      'server-unlock',
+      'server-unlock-error',
+    ].any(shouldCapture)) {
+      final protected = auth.savedServers.last;
+      await tester.runAsync(() async {
+        await auth.serverAccess.register(protected);
+        await auth.serverAccess.setPassword(
+          protected.id,
+          'capture-entry',
+          'capture-entry',
+          persistReference: (ref) =>
+              auth.sources.persistProtectionReference(protected.id, ref),
+        );
+        await auth.refreshServers();
+      });
+      await advance(150);
+      await save('server-locked-list');
+      await tap(Key('server-enter-${protected.id}'));
+      await save('server-unlock');
+      if (platform == 'tv') {
+        await _editTvField(const Key('server-unlock-password'), 'wrong');
+      } else {
+        await tester.enterText(
+          find.byKey(const Key('server-unlock-password')),
+          'wrong',
+        );
+      }
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('server-unlock-submit')));
+        for (
+          var i = 0;
+          i < 500 && auth.serverAccess.retryAt(protected.id) == null;
+          i++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      await advance(150);
+      expect(find.text('密码不正确。'), findsOneWidget);
+      await save('server-unlock-error');
+      await back();
+    }
+    await back();
   }
 
   /// 备份导入:合成凭据样本走真实的解析与提交。入口、加载、部分成功、
@@ -800,13 +1127,15 @@ extension PageCaptures on CaptureSession {
           await advance(700);
           await tap(SessionActions.serverMenuKey);
           await advance(400);
-          return ServerSwitcherDialog.importBackupKey;
+          await tap(const Key('server-add'));
+          return const Key('server-add-import');
         case 'phone':
           app.router.go('/mine');
           await advance(700);
           await tap(PhoneMinePage.lineKey);
           await advance(600);
-          return PhoneServerManager.importKey;
+          await tap(const Key('server-add'));
+          return const Key('server-add-import');
         default:
           app.router.go('/connect?add=1');
           await advance(700);
@@ -872,8 +1201,8 @@ extension PageCaptures on CaptureSession {
 
     // 整体失败:未知格式零写入,失败面板给出安全分类原因。
     Key next = entry;
-    if (platform == 'desktop') {
-      // 切换面板在导入前已自行关闭;重新打开。手机底表与电视连接页仍在。
+    if (platform != 'tv') {
+      // 桌面与手机都先关闭服务器流程再导入；返回后重新打开。
       next = await openEntry();
     }
     await runImport(next, brokenBytes);
@@ -883,7 +1212,7 @@ extension PageCaptures on CaptureSession {
     await tap(BackupImportFlowKeys.close);
 
     // 私密锁定:备份中的私密记录按条跳过并说明原因。
-    if (platform == 'desktop') {
+    if (platform != 'tv') {
       next = await openEntry();
     }
     auth.backupImportKeys = hillsKeys();
@@ -892,12 +1221,6 @@ extension PageCaptures on CaptureSession {
     expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
     await save('server-import-private');
     await tap(BackupImportFlowKeys.close);
-    if (platform == 'phone') {
-      // 返回键关闭仍在的手机服务底表,避免遮挡后续页面捕获。
-      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
-      await tester.binding.handlePopRoute();
-      await advance(500);
-    }
     auth.backupImportKeys = const BackupImportKeys();
     auth.backupImportPicker = null;
   }

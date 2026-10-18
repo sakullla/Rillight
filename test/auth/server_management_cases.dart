@@ -1,5 +1,7 @@
-import '../helpers/cupertino_test_app.dart';
+import 'dart:async';
 
+import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -8,11 +10,17 @@ import 'configured_source.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
+
+import 'server_ui_harness.dart';
+import '../helpers/cupertino_test_app.dart';
+
+import 'package:rillight/auth/server_password_form.dart';
+import 'package:rillight/auth/server_ui.dart';
+import 'package:rillight/auth/server_access.dart';
+
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 
@@ -43,7 +51,101 @@ SavedServer _saved(
   );
 }
 
+class _EditorFailingStore extends MemoryServerListStore {
+  bool fail = false;
+  @override
+  Future<void> save(ServerListSnapshot value) async {
+    if (fail) throw StateError('synthetic disk failure');
+    await super.save(value);
+  }
+}
+
+// UI orchestration tests use a deterministic verifier; real KDF/password
+// storage boundaries are covered in server_access_cases.dart.
+class _LocalVerifier extends ServerPasswordVerifier {
+  _LocalVerifier() : super(salt: const [], hash: const []);
+  @override
+  Future<bool> matches(String password) async => password == 'local';
+}
+
+class _RevokingAccess extends ServerAccessController {
+  _RevokingAccess()
+    : super(
+        store: MemoryServerAccessStore(),
+        createVerifier: (_) async => _LocalVerifier(),
+      );
+  @override
+  Future<ServerUnlockCandidate?> prepareUnlock(
+    String id,
+    String password,
+  ) async {
+    final candidate = await super.prepareUnlock(id, password);
+    lock(id);
+    return candidate;
+  }
+}
+
+class _EntryGateAdapter extends FakeEmbyAdapter {
+  _EntryGateAdapter(super.servers);
+  String? host;
+  final started = Completer<void>(), release = Completer<void>();
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? stream,
+    Future<void>? cancelled,
+  ) async {
+    if (options.uri.host == host &&
+        options.path.endsWith('/System/Info/Public')) {
+      if (!started.isCompleted) started.complete();
+      await release.future;
+    }
+    return super.fetch(options, stream, cancelled);
+  }
+}
+
 void main() {
+  testWidgets(
+    'entry password cooldown blocks both submit actions and expires; leaving cancels its timer',
+    (tester) async {
+      var now = DateTime(2026, 10, 18);
+      final retryAt = now.add(const Duration(seconds: 2));
+      final submitted = <String>[];
+      Widget form(DateTime deadline) => CupertinoTestApp(
+        home: CupertinoPageScaffold(
+          child: ServerUnlockForm(
+            retryAt: deadline,
+            clock: () => now,
+            error: '密码不正确。',
+            onSubmit: submitted.add,
+          ),
+        ),
+      );
+      await tester.pumpWidget(form(retryAt));
+      await tester.enterText(
+        find.byKey(const Key('server-unlock-password')),
+        'correct',
+      );
+      expect(find.text('密码不正确。'), findsOneWidget);
+      expect(find.text('2 秒后可重试'), findsOneWidget);
+      final submit = find.byKey(const Key('server-unlock-submit'));
+      expect(tester.widget<AppButton>(submit).onPressed, isNull);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      expect(submitted, isEmpty);
+      now = retryAt;
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('2 秒后可重试'), findsNothing);
+      expect(tester.widget<AppButton>(submit).onPressed, isNotNull);
+      await tester.tap(submit);
+      expect(submitted, ['correct']);
+      await tester.pumpWidget(form(now.add(const Duration(seconds: 30))));
+      expect(tester.widget<AppButton>(submit).onPressed, isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 31));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
   late FakeEmbyServer second;
@@ -61,13 +163,266 @@ void main() {
   AuthController controller({
     CredentialStore? credentials,
     ServerListStore? servers,
+    ServerAccessController? access,
   }) {
     return AuthController(
       client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
       credentials: credentials ?? MemoryCredentialStore(),
       servers: servers ?? MemoryServerListStore(),
+      serverAccess: access,
     );
   }
+
+  test('revoked management candidate cannot reach a destination or publish content access', () async {
+    final access = _RevokingAccess();
+    final auth = controller(access: access);
+    addTearDown(auth.dispose);
+    final saved = _saved('protected', 'protected', ['https://protected.test']);
+    await access.register(saved);
+    await access.setPassword(saved.id, 'local', 'local');
+    var reached = false;
+    final accepted = await auth.serverEntry.authorizeManagement(
+      server: saved,
+      destination: 'edit',
+      requestPassword: () async => 'local',
+      navigate: (_) async {
+        reached = true;
+      },
+    );
+    expect(accepted, isFalse);
+    expect(reached, isFalse);
+    expect(access.allows(saved.id), isFalse);
+  });
+
+  for (final operation in ['edit', 'lines']) {
+    for (final offline in [false, true]) {
+      testWidgets(
+        'protected $operation management keeps current access and works offline=$offline',
+        (tester) async {
+          final access = ServerAccessController(
+            store: MemoryServerAccessStore(),
+            createVerifier: (_) async => _LocalVerifier(),
+          );
+          final auth = controller(access: access);
+          addTearDown(auth.dispose);
+          late String current;
+          await tester.runAsync(() async {
+            for (final remote in [second, server]) {
+              await auth.connect(
+                address: remote.baseUrl.toString(),
+                username: 'alice',
+                password: 'correct-horse',
+              );
+              final saved = auth.session!.server;
+              current = saved.id;
+              await access.register(saved);
+              await access.setPassword(
+                saved.id,
+                'local',
+                'local',
+                persistReference: (ref) =>
+                    auth.sources.persistProtectionReference(saved.id, ref),
+              );
+            }
+            await auth.refreshServers();
+            await access.unlock(current, 'local');
+            await auth.switchTo(current);
+          });
+          final other = auth.savedServers.firstWhere((s) => s.id != current);
+          final permit = access.permit(current)!;
+          if (offline) second.publicInfoStatus = 503;
+          final beforeRequests = second.requests.length;
+          await pumpServerSelection(tester, auth);
+          if (operation == 'edit') {
+            await openServerEditor(tester, other.id);
+          } else {
+            await serverUiTap(tester, Key('server-lines-${other.id}'));
+          }
+          await tester.enterText(
+            find.byKey(const Key('server-unlock-password')),
+            'local',
+          );
+          await serverUiTap(tester, const Key('server-unlock-submit'));
+          expect(
+            find.byKey(
+              Key(
+                operation == 'edit' ? 'server-editor-name' : 'server-line-auto',
+              ),
+            ),
+            findsOneWidget,
+          );
+          expect(auth.session!.server.id, current);
+          expect(permit.isValid, isTrue);
+          expect(access.allows(other.id), isFalse);
+          expect(
+            second.requests.length,
+            beforeRequests,
+            reason: 'Local management authorization must not require remote connectivity',
+          );
+          if (operation == 'edit') {
+            await tester.enterText(
+              find.byKey(const Key('server-editor-name')),
+              'discard me',
+            );
+          }
+          await serverUiTap(tester, const Key('server-flow-back'));
+          expect(auth.sources.server(other.id).displayName, other.displayName);
+          expect(auth.session!.server.id, current);
+          expect(permit.isValid, isTrue);
+          expect(access.allows(other.id), isFalse);
+        },
+        tags: ['integration'],
+      );
+    }
+  }
+
+  for (final operation in ['edit', 'lines', 'add', 'remove']) {
+    testWidgets(
+      'opening $operation supersedes a delayed server entry without discarding the new flow',
+      (tester) async {
+        final gate = _EntryGateAdapter([server, second]);
+        adapter = gate;
+        final auth = controller();
+        addTearDown(auth.dispose);
+        await tester.runAsync(() async {
+          for (final remote in [server, second]) {
+            await auth.connect(
+              address: remote.baseUrl.toString(),
+              username: 'alice',
+              password: 'correct-horse',
+            );
+          }
+        });
+        final current = auth.session!.server.id;
+        final oldTarget = auth.savedServers.firstWhere((s) => s.id != current);
+        await pumpServerSelection(tester, auth);
+        gate.host = server.baseUrl.host;
+        await tester.tap(find.byKey(Key('server-enter-${oldTarget.id}')));
+        for (var i = 0; i < 30 && !gate.started.isCompleted; i++) {
+          await tester.pump(const Duration(milliseconds: 10));
+        }
+        expect(gate.started.isCompleted, isTrue);
+        if (operation == 'edit') {
+          await openServerEditor(tester, current);
+          await tester.enterText(
+            find.byKey(const Key('server-editor-name')),
+            'my pending draft',
+          );
+        } else if (operation == 'lines') {
+          await serverUiTap(tester, Key('server-lines-$current'));
+        } else if (operation == 'add') {
+          await serverUiTap(tester, const Key('server-add'));
+        } else {
+          await serverUiTap(tester, Key('server-more-$current'));
+          await serverUiTap(tester, Key('server-action-remove-$current'));
+        }
+        await tester.runAsync(() async {
+          gate.release.complete();
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
+        await settle(tester);
+        final key = switch (operation) {
+          'edit' => 'server-editor-name',
+          'lines' => 'server-line-auto',
+          'add' => 'server-add-paste',
+          _ => 'server-remove-confirm',
+        };
+        expect(find.byKey(Key(key)), findsOneWidget);
+        if (operation == 'edit') {
+          expect(
+            tester.widget<AppTextField>(find.byKey(Key(key))).controller!.text,
+            'my pending draft',
+          );
+        }
+        expect(auth.session!.server.id, current);
+        expect(auth.failure, isNull);
+        expect(
+          auth.sources.server(current).displayName,
+          isNot('my pending draft'),
+        );
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+  }
+
+  testWidgets(
+    'logging out a noncurrent account shows login needed in list and editor',
+    (tester) async {
+      final auth = controller();
+      addTearDown(auth.dispose);
+      await tester.runAsync(() async {
+        for (final remote in [second, server]) {
+          await auth.connect(
+            address: remote.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+        }
+      });
+      final current = auth.session!.server.id;
+      final other = auth.savedServers.firstWhere((s) => s.id != current);
+      await pumpServerSelection(tester, auth);
+      expect(auth.hasSavedAuthorization(other.id), isTrue);
+      await openServerEditor(tester, other.id);
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
+      await tester.tap(find.text('open-servers'));
+      await settle(tester);
+      expect(auth.session!.server.id, current);
+      expect(auth.hasSavedAuthorization(current), isTrue);
+      expect(auth.hasSavedAuthorization(other.id), isFalse);
+      expect(find.text('尚未登录'), findsOneWidget);
+      await openServerEditor(tester, other.id);
+      expect(find.text('尚未登录'), findsOneWidget);
+      expect(find.byKey(const Key('server-editor-account')), findsOneWidget);
+      expect(find.byKey(const Key('server-editor-logout')), findsNothing);
+    },
+    tags: ['integration'],
+  );
+
+  test('password and editor configuration commit together and preserve the old state on save failure', () async {
+    final store = _EditorFailingStore();
+    final auth = controller(servers: store);
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final original = auth.session!.server, token = auth.session!.accessToken;
+    await auth.serverAccess.register(original);
+    Future<String> change() => auth.serverAccess.setPassword(
+      original.id,
+      'local',
+      'local',
+      persistReference: (reference) => auth.saveConfiguration(
+        original.id,
+        nickname: '新名字',
+        iconId: 'home',
+        userAgent: original.userAgent ?? '',
+        lines: original.lines,
+        protectionRef: reference,
+      ),
+    );
+    store.fail = true;
+    await expectLater(change(), throwsStateError);
+    expect(auth.savedServers.single.protectionRef, isNull);
+    expect(auth.savedServers.single.displayName, original.displayName);
+    expect(auth.serverAccess.isProtected(original.id), isFalse);
+    store.fail = false;
+    await change();
+    expect(auth.savedServers.single.displayName, '新名字');
+    expect(auth.savedServers.single.iconId, 'home');
+    expect(
+      auth.savedServers.single.protectionRef,
+      auth.serverAccess.protectionRef(original.id),
+    );
+    expect((await store.load()).servers.single.protectionRef, isNotNull);
+    expect(auth.session, isNull);
+    expect((await auth.credentials.read(original.id))?.accessToken, token);
+    expect(auth.serverAccess.allows(original.id), isFalse);
+  });
 
   test(
     'deleting a non-current server keeps the session, client and credentials',
@@ -178,6 +533,22 @@ void main() {
     revived.dispose();
   });
 
+  test('saved servers get distinct, rename-stable avatar colours', () {
+    final ids = [for (var i = 0; i < 12; i++) 'server-$i-${i * 7919}'];
+    final colours = {
+      for (final id in ids) ServerUi.gradientOf(id, among: ids).$1,
+    };
+    // Up to twelve servers never share a colour.
+    expect(colours, hasLength(ids.length));
+    // The colour depends on the id and the saved set, not on list order.
+    expect(
+      ServerUi.gradientOf(ids[3], among: ids.reversed),
+      ServerUi.gradientOf(ids[3], among: ids),
+    );
+    // Without the saved set the colour is still deterministic.
+    expect(ServerUi.gradientOf('abc'), ServerUi.gradientOf('abc'));
+  });
+
   test('deleting an unknown server id is a no-op', () async {
     final servers = MemoryServerListStore(
       const ServerListSnapshot(servers: [], lastServerId: null),
@@ -190,248 +561,179 @@ void main() {
   });
 
   testWidgets(
-    'switcher delete confirms first; cancel keeps the server untouched',
+    'server removal requires confirmation and only removes its own credentials',
     (tester) async {
-      final deleted = <String>[];
-      final initial = [
-        _saved('server-id-1', '家庭影院', ['http://emby.test:8096']),
-        _saved('server-id-2', '第二台', [
-          'http://emby-two.test:8096',
-          'http://emby-wan.test:8096',
-        ], activeLineId: 'line-2'),
-      ];
-
-      Future<void> pump(List<SavedServer> servers) {
-        return tester.pumpWidget(
-          CupertinoTestApp(
-            theme: AppUiTheme.dark(),
-            locale: const Locale('zh'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: [
-              ...[
-                AppLocalizations.delegate,
-                ...GlobalCupertinoLocalizations.delegates,
-              ],
-              ui.GlobalCupertinoLocalizations.delegate,
+      final auth = controller(
+        servers: MemoryServerListStore(
+          ServerListSnapshot(
+            servers: [
+              _saved('one', '家庭影院', ['http://emby.test:8096']),
+              _saved('two', '另一台', ['http://emby-two.test:8096']),
             ],
-            home: CupertinoPageScaffold(
-              child: ServerSwitcherDialog(
-                servers: servers,
-                activeServerId: 'server-id-1',
-                activeLineId: 'line-1',
-                onSelect: (_, _) {},
-                onAddServer: () {},
-                onLogout: () {},
-                onDelete: deleted.add,
-                onChangePassword: () {},
-                onAddLine: (_) {},
-                onEditLine: (_, _) {},
-                onDeleteLine: (_, _) {},
-              ),
-            ),
-            builder: (context, child) => ui.AppUiTheme(
-              data: AppUiTheme.of(context).brightness == Brightness.dark
-                  ? ui.AppUiTheme.dark()
-                  : ui.AppUiTheme.light(),
-              child: child ?? const SizedBox.shrink(),
-            ),
-          ),
-        );
-      }
-
-      await pump(initial);
-      await settle(tester);
-      expect(find.text('家庭影院'), findsOneWidget);
-      expect(find.text('第二台'), findsOneWidget);
-
-      // 取消确认:不删除任何内容。
-      await tester.tap(
-        find.byKey(ServerSwitcherDialog.deleteKey('server-id-2')),
-      );
-      await settle(tester);
-      expect(find.byType(ui.AppDialog), findsOneWidget);
-      expect(find.textContaining('第二台'), findsWidgets);
-      await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
-      await settle(tester);
-      expect(deleted, isEmpty);
-      expect(find.text('第二台'), findsOneWidget);
-
-      // 确认删除:回调拿到被删服务器 id。
-      await tester.tap(
-        find.byKey(ServerSwitcherDialog.deleteKey('server-id-2')),
-      );
-      await settle(tester);
-      await tester.tap(find.byKey(ServerSwitcherDialog.deleteConfirmKey));
-      await settle(tester);
-      expect(deleted, ['server-id-2']);
-
-      // 删除后列表不再出现,搜索也找不到。
-      final remaining = [
-        _saved('server-id-1', '家庭影院', ['http://emby.test:8096']),
-      ];
-      await pump(remaining);
-      await settle(tester);
-      expect(find.text('家庭影院'), findsOneWidget);
-      expect(find.text('第二台'), findsNothing);
-      // 服务器很少时一眼可见,不再提供空搜索框。
-      expect(find.byKey(ServerSwitcherDialog.searchField), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('switcher offers search only once the list grows long', (
-    tester,
-  ) async {
-    final servers = [
-      for (var i = 1; i <= 6; i++)
-        _saved('server-id-$i', '服务器 $i', ['http://emby-$i.test:8096']),
-    ];
-    await tester.pumpWidget(
-      CupertinoTestApp(
-        theme: AppUiTheme.dark(),
-        locale: const Locale('zh'),
-        supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: [
-          ...[
-            AppLocalizations.delegate,
-            ...GlobalCupertinoLocalizations.delegates,
-          ],
-          ui.GlobalCupertinoLocalizations.delegate,
-        ],
-        home: CupertinoPageScaffold(
-          child: ServerSwitcherDialog(
-            servers: servers,
-            activeServerId: 'server-id-1',
-            activeLineId: 'line-1',
-            onSelect: (_, _) {},
-            onAddServer: () {},
-            onLogout: () {},
-            onDelete: (_) {},
-            onChangePassword: () {},
-            onAddLine: (_) {},
-            onEditLine: (_, _) {},
-            onDeleteLine: (_, _) {},
           ),
         ),
-        builder: (context, child) => ui.AppUiTheme(
-          data: AppUiTheme.of(context).brightness == Brightness.dark
-              ? ui.AppUiTheme.dark()
-              : ui.AppUiTheme.light(),
-          child: child ?? const SizedBox.shrink(),
+        credentials: MemoryCredentialStore({
+          'two': const StoredCredentials(
+            accessToken: 'secret',
+            userId: 'u',
+            username: 'alice',
+          ),
+        }),
+      );
+      addTearDown(auth.dispose);
+      await auth.restore();
+      await pumpServerSelection(tester, auth);
+      await serverUiTap(tester, const Key('server-more-two'));
+      await serverUiTap(tester, const Key('server-action-remove-two'));
+      expect(find.textContaining('不会删除服务器上的内容'), findsOneWidget);
+      await serverUiTap(tester, const Key('server-remove-cancel'));
+      expect(auth.savedServers, hasLength(2));
+      await serverUiTap(tester, const Key('server-more-two'));
+      await serverUiTap(tester, const Key('server-action-remove-two'));
+      await serverUiTap(tester, const Key('server-remove-confirm'));
+      expect(auth.savedServers.single.id, 'one');
+      expect(await auth.credentials.read('two'), isNull);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('search matches address and an empty search can be recovered', (
+    tester,
+  ) async {
+    final auth = controller(
+      servers: MemoryServerListStore(
+        ServerListSnapshot(
+          servers: [
+            for (var i = 1; i <= 6; i++)
+              _saved('s$i', '家庭影院', ['https://emby-$i.test']),
+          ],
         ),
       ),
     );
+    addTearDown(auth.dispose);
+    await auth.restore();
+    await pumpServerSelection(tester, auth);
+    await tester.enterText(find.byKey(const Key('server-search')), 'emby-6');
+    await tester.pump();
+    expect(find.byKey(const Key('server-enter-s6')), findsOneWidget);
+    expect(find.byKey(const Key('server-enter-s1')), findsNothing);
+    await tester.enterText(find.byKey(const Key('server-search')), 'none');
+    await tester.pump();
+    expect(find.text('没有找到服务器'), findsOneWidget);
+    await tester.tap(find.text('清除搜索'));
     await settle(tester);
-    await tester.enterText(
-      find.byKey(ServerSwitcherDialog.searchField),
-      'emby-6',
-    );
-    await tester.pump();
-    expect(find.text('服务器 1'), findsNothing);
-    expect(find.text('服务器 6'), findsOneWidget);
-    await tester.enterText(find.byKey(ServerSwitcherDialog.searchField), '无');
-    await tester.pump();
-    expect(find.text('暂无已保存的服务器'), findsOneWidget);
-    // 筛选为空时搜索框仍保留,便于改词。
-    expect(find.byKey(ServerSwitcherDialog.searchField), findsOneWidget);
-  });
+    expect(find.byKey(const Key('server-enter-s1')), findsOneWidget);
+  }, tags: ['integration']);
 
   testWidgets(
-    'switcher panel paints an opaque surface above background content in both themes',
+    'metadata draft cancels without writes and saves without replacing the session',
     (tester) async {
-      Future<void> pump(AppUiThemeData theme) {
-        return tester.pumpWidget(
-          CupertinoTestApp(
-            theme: theme,
-            locale: const Locale('zh'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: [
-              ...[
-                AppLocalizations.delegate,
-                ...GlobalCupertinoLocalizations.delegates,
-              ],
-              ui.GlobalCupertinoLocalizations.delegate,
-            ],
-            home: CupertinoPageScaffold(
-              child: Stack(
-                children: [
-                  const Positioned.fill(
-                    child: ColoredBox(color: Color(0xFF29486B)),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('背景简介', key: Key('switcher-backdrop-overview')),
-                  ),
-                  Center(
-                    child: ServerSwitcherDialog(
-                      servers: [
-                        _saved('server-id-1', '家庭影院', [
-                          'http://emby.test:8096',
-                        ]),
-                      ],
-                      activeServerId: 'server-id-1',
-                      activeLineId: 'line-1',
-                      onSelect: (_, _) {},
-                      onAddServer: () {},
-                      onLogout: () {},
-                      onDelete: (_) {},
-                      onChangePassword: () {},
-                      onAddLine: (_) {},
-                      onEditLine: (_, _) {},
-                      onDeleteLine: (_, _) {},
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            builder: (context, child) => ui.AppUiTheme(
-              data: AppUiTheme.of(context).brightness == Brightness.dark
-                  ? ui.AppUiTheme.dark()
-                  : ui.AppUiTheme.light(),
-              child: child ?? const SizedBox.shrink(),
-            ),
-          ),
-        );
+      final auth = controller();
+      addTearDown(auth.dispose);
+      await tester.runAsync(
+        () => auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      final id = auth.session!.server.id, client = auth.client;
+      await pumpServerSelection(tester, auth);
+      bool focusedWithin(Key key) {
+        final targets = find.byKey(key).evaluate().toSet();
+        var found = false;
+        FocusManager.instance.primaryFocus?.context?.visitAncestorElements((
+          element,
+        ) {
+          if (targets.contains(element)) found = true;
+          return !found;
+        });
+        return found;
       }
 
-      for (final theme in [AppUiTheme.light(), AppUiTheme.dark()]) {
-        await pump(theme);
-        await settle(tester);
-        final scheme = theme.brightness == Brightness.dark
-            ? ui.AppUiTheme.dark().colorScheme
-            : ui.AppUiTheme.light().colorScheme;
-
-        // 面板底色来自 colorScheme 且完全不透明:背景海报/简介/播放控件
-        // 被面板完全隔开,不会透到服务器名/地址/搜索/添加/退出的文字层。
-        final panel = tester.widget<Container>(
-          find.byKey(ServerSwitcherDialog.panelKey),
-        );
-        final panelColor = (panel.decoration! as BoxDecoration).color!;
-        expect(panelColor, scheme.surface);
-        expect(panelColor.a, 1.0);
-
-        // 背景内容仍在面板之外可见,不与面板文字同层。
-        final backdropRect = tester.getRect(
-          find.byKey(const Key('switcher-backdrop-overview')),
-        );
-        final panelRect = tester.getRect(
-          find.byKey(ServerSwitcherDialog.panelKey),
-        );
-        expect(backdropRect.overlaps(panelRect), isFalse);
-
-        // 面板文字与底色满足 R12 的 3:1 对比要求。
-        final nameContext = tester.element(find.text('家庭影院'));
-        final nameColor = DefaultTextStyle.of(nameContext).style.color!;
-        final lighter =
-            nameColor.computeLuminance() > panelColor.computeLuminance()
-            ? nameColor
-            : panelColor;
-        final darker = lighter == nameColor ? panelColor : nameColor;
-        final contrast =
-            (lighter.computeLuminance() + 0.05) /
-            (darker.computeLuminance() + 0.05);
-        expect(contrast, greaterThan(3));
+      final linesKey = Key('server-lines-$id');
+      for (var i = 0; i < 24 && !focusedWithin(linesKey); i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
       }
+      expect(focusedWithin(linesKey), isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      expect(find.byKey(const Key('server-line-auto')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      expect(focusedWithin(Key('server-enter-$id')), isTrue);
+      await openServerEditor(tester, id);
+      expect(find.byKey(const Key('server-editor-user-agent')), findsNothing);
+      await tester.enterText(
+        find.byKey(const Key('server-editor-name')),
+        '取消的名字',
+      );
+      await serverUiTap(tester, const Key('server-flow-back'));
+      expect(auth.savedServers.single.displayName, isNot('取消的名字'));
+      await openServerEditor(tester, id);
+      await tester.enterText(
+        find.byKey(const Key('server-editor-name')),
+        '我的影院',
+      );
+      await serverUiTap(tester, const Key('server-editor-save'));
+      expect(auth.savedServers.single.displayName, '我的影院');
+      expect(identical(client, auth.client), isTrue);
+      await serverUiTap(tester, Key('server-enter-$id'));
+      expect(auth.savedServers.single.lineSelection.isAutomatic, isTrue);
+      expect(find.byKey(const Key('server-search')), findsNothing);
+      expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'explicit paste chooses a group and keeps editable partial fields without writes',
+    (tester) async {
+      final auth = controller();
+      addTearDown(auth.dispose);
+      await auth.restore();
+      await pumpServerSelection(tester, auth);
+      await serverUiTap(tester, const Key('server-add'));
+      await serverUiTap(tester, const Key('server-add-paste'));
+      await tester.enterText(
+        find.byKey(const Key('server-paste-text')),
+        '名称：第一台\n地址：https://first.test\n用户：alice\n密码：private-one\n名称：第二台\n地址：https://second.test\n用户：bob',
+      );
+      await serverUiTap(tester, const Key('server-paste-parse'));
+      expect(find.byKey(const Key('provider-username')), findsNothing);
+      expect(find.byKey(const Key('server-paste-group-0')), findsOneWidget);
+      await serverUiTap(tester, const Key('server-paste-group-1'));
+      expect(
+        tester
+            .widget<ui.AppTextField>(find.byKey(const Key('provider-address')))
+            .controller!
+            .text,
+        'https://second.test',
+      );
+      expect(
+        tester
+            .widget<ui.AppTextField>(find.byKey(const Key('provider-username')))
+            .controller!
+            .text,
+        'bob',
+      );
+      expect(
+        tester
+            .widget<ui.AppTextField>(find.byKey(const Key('provider-password')))
+            .controller!
+            .text,
+        isEmpty,
+      );
+      await tester.enterText(
+        find.byKey(const Key('provider-password')),
+        'filled-later',
+      );
+      expect(auth.savedServers, isEmpty);
+      await serverUiTap(tester, const Key('server-flow-back'));
+      expect(auth.savedServers, isEmpty);
+    },
+    tags: ['integration'],
   );
 }

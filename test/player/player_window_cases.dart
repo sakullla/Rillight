@@ -1,5 +1,5 @@
 import '../helpers/widget_harness.dart';
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 import '../helpers/image_cache_fixture.dart';
 
 import 'package:rillight/auth/source_sessions.dart';
@@ -119,7 +119,7 @@ void main() {
     MediaServerClient client() =>
         EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final sources = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: store,
       credentials: credentials,
       createClient: client,
@@ -139,11 +139,6 @@ void main() {
     });
     expect(auth.isLoggedIn, isTrue);
     final runtime = await tester.runAsync(() async {
-      await sources.configureScope(
-        auth.session!.server.id,
-        participates: true,
-        libraryIds: {'view-movies', 'view-tv'},
-      );
       return PlaybackRuntime(
         auth: auth,
         history: await HistoryWriter.open(
@@ -300,10 +295,11 @@ void main() {
       expect(backCenter.dy, lessThan(bar.bottom));
       await tester.tap(back);
       await settle(tester);
-      final inception = find.text('Inception');
-      await tester.ensureVisible(inception.first);
+      final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
+      await Scrollable.ensureVisible(tester.element(inception), alignment: .5);
       await settle(tester);
-      await tester.tap(inception.first);
+      expect(inception.hitTestable(), findsOneWidget);
+      await tester.tap(inception);
       await settle(tester);
       await tester.tap(find.byKey(PlayerKeys.open));
       await tester.pump();

@@ -1,6 +1,148 @@
 [
+{ "id": "player-line-certificate", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{ "id": "player-line-forbidden", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{ "id": "player-line-rate-limited", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{
+  "id": "player-lines-auto-landscape",
+  "feature": "player",
+  "platforms": [
+    "phone"
+  ]
+},
+{
+  "id": "player-line-reconnecting-landscape",
+  "feature": "player",
+  "platforms": [
+    "phone"
+  ]
+},
+{
+  "id": "player-line-confirmation-landscape",
+  "feature": "player",
+  "platforms": [
+    "phone"
+  ]
+},
+{ "id": "player-line-confirmation", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{
+  "id": "player-lines-auto",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-lines-fixed",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-lines-pending",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-reconnecting",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-recovery-cancelled",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-recovered",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-recovery-failed",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-source-selection-locked",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-source-selection-password",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-source-selection-candidate",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-history-recovery",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
   {
     "id": "aggregation-ready",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "aggregation-locked",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "aggregation-unlock",
     "feature": "aggregation",
     "platforms": [
       "desktop",
@@ -13,7 +155,8 @@
     "feature": "aggregation",
     "platforms": [
       "desktop",
-      "phone"
+        "phone",
+        "tv"
     ]
   },
   {
@@ -21,55 +164,8 @@
     "feature": "aggregation",
     "platforms": [
       "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-management",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-pin-setup",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-pin-error",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-single-source",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-empty-scope",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-comparison",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
+        "phone",
+        "tv"
     ]
   },
   {
@@ -82,18 +178,25 @@
     ]
   },
   {
+    "id": "aggregation-empty",
+    "feature": "aggregation",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
     "id": "aggregation-partial-failure",
     "feature": "aggregation",
     "platforms": [
       "desktop",
-      "phone"
+      "phone",
+      "tv"
     ]
   },
   {
     "id": "account",
     "feature": "servers",
     "platforms": [
-      "phone"
+      "phone",
+      "tv"
     ]
   },
   {
@@ -1183,14 +1286,18 @@
     "id": "server-rename",
     "feature": "servers",
     "platforms": [
-      "phone"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
     "id": "server-search-empty",
     "feature": "servers",
     "platforms": [
-      "phone"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
@@ -1595,7 +1702,7 @@
     ]
   },
   {
-    "id": "provider-emby-libraries",
+    "id": "provider-emby-connected",
     "feature": "login",
     "platforms": [
       "desktop",
@@ -1640,7 +1747,7 @@
     ]
   },
   {
-    "id": "provider-jellyfin-libraries",
+    "id": "provider-jellyfin-connected",
     "feature": "login",
     "platforms": [
       "desktop",
@@ -1685,7 +1792,7 @@
     ]
   },
   {
-    "id": "provider-plex-libraries",
+    "id": "provider-plex-connected",
     "feature": "login",
     "platforms": [
       "desktop",
@@ -1985,6 +2092,153 @@
     "platforms": [
       "desktop",
       "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-editor",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-line-selector",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-password-form",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-groups",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-preview",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-locked-list",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-unlock",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-unlock-error",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-check-certificate",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-check-permission",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-check-login",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-check-offline",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-needs-login",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-account-needs-login",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-lines",
+    "feature": "servers",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-input",
+    "feature": "servers",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-keyboard",
+    "feature": "servers",
+    "platforms": [
       "tv"
     ]
   }

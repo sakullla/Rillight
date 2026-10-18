@@ -647,6 +647,15 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         : _sort.sortOrder;
     final trimmedSearch = _searchTerm.trim();
     switch (widget.source) {
+      case 'favorites':
+        return catalogItemsRequest(
+          userId: userId,
+          includeItemTypes: 'Movie,Series',
+          recursive: true,
+          limit: limit,
+          startIndex: startIndex,
+          filters: const ['IsFavorite'],
+        );
       case 'resume':
         return catalogResumeRequest(
           userId: userId,
@@ -729,6 +738,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       return widget.title;
     }
     switch (widget.source) {
+      case 'favorites':
+        return l10n.filterFavorite;
       case 'resume':
         return l10n.resumeRow;
       case 'nextup':

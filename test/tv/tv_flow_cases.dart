@@ -18,6 +18,8 @@ import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/tv_home_page.dart';
+import 'package:rillight/home/tv_shelf_page.dart';
+import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -210,7 +212,9 @@ void main() {
     expect(
       focusedWithin(target),
       isTrue,
-      reason: 'Focused ${focusedLabel(tester)}, not concrete title $title',
+      reason:
+          'Focused ${focusedLabel(tester)}, not concrete title $title; '
+          '${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}',
     );
   }
 
@@ -371,7 +375,7 @@ void main() {
   );
 
   testWidgets(
-    'remote aggregation type popup keeps focus during catalog refresh and pagination restores a target',
+    'remote sourced shelf paginates and library filter retains focus during refresh',
     (tester) async {
       final server = FakeEmbyServer(
         items: [
@@ -391,78 +395,56 @@ void main() {
       final account = (await tester.runAsync(
         () => registry.acquireAccount(
           app.auth.session!.server.id,
-          region: AccessRegion.ordinary,
           libraryId: 'view-movies',
         ),
       ))!;
       final permit = registry.permit(account, libraryId: 'view-movies');
-      // The ordinary aggregation tab now shows server shelves. Query filters
-      // and pagination remain on the source-scoped shelf route.
       app.router.push(
-        '/shelf/library?parentId=view-movies',
+        '/shelf/items?parentId=view-movies&includeItemTypes=Movie&recursive=1',
         extra: PlayerHostOpenItemCommand(
           itemId: 'view-movies',
           source: SourceReference(account: account, itemId: 'view-movies'),
           libraryId: 'view-movies',
-          regionGeneration: permit.regionGeneration,
+          accessGeneration: permit.accessGeneration,
         ),
       );
       await settle(tester);
-      expect(find.byType(AggregationPage), findsOneWidget);
-      final types = find.widgetWithText(AppDropdown<String>, '全部类型');
-      await focusTarget(tester, types, '全部类型');
+      expect(find.byType(TvShelfPage), findsOneWidget);
+      final more = find.widgetWithText(TvAction, '加载更多');
+      await focusTarget(tester, more, '加载更多');
       await key(tester, LogicalKeyboardKey.select);
-      expect(find.text('电影'), findsWidgets);
+      expect(more, findsNothing);
       expect(focusedAction(), findsOneWidget);
+      await focusTitle(tester, 'Catalog 60');
+      final lastFocus = FocusManager.instance.primaryFocus;
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.byType(TvDetailPage), findsOneWidget);
+      expect(app.router.state.uri.path, '/item/catalog-60');
+      expect(
+        (app.router.state.extra as PlayerHostOpenItemCommand).source?.account,
+        account,
+      );
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.byType(TvShelfPage), findsOneWidget);
+      expect(FocusManager.instance.primaryFocus, same(lastFocus));
+      expect(focusedLabel(tester), contains('Catalog 60'));
+      app.router.push('/library/view-movies');
+      await settle(tester);
+      expect(find.byType(TvLibraryPage), findsOneWidget);
+      final filter = find.byKey(const Key('tv-library-filter'));
+      await focusTarget(tester, filter, '筛选');
+      final filterFocus = FocusManager.instance.primaryFocus;
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.byType(LibraryFilterPanel), findsOneWidget);
       final dialogFocus = FocusManager.instance.primaryFocus;
       unawaited(catalog.reload(showCachedFirst: false));
       await settle(tester);
       expect(FocusManager.instance.primaryFocus, same(dialogFocus));
       await tester.binding.handlePopRoute();
       await settle(tester);
-      expect(find.byType(AggregationPage), findsOneWidget);
-      final more = find.widgetWithText(AppButton, '加载此来源更多');
-      // Catalogue/source reload also performs real asynchronous history IO.
-      for (var frame = 0; frame < 60 && more.evaluate().isEmpty; frame++) {
-        await tester.pump(const Duration(milliseconds: 50));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-      }
-      expect(more, findsOneWidget);
-      // Approach the source's pagination action from the sort column;
-      // directly below the leftmost genre field is the first poster.
-      for (var step = 0; step < 3; step++) {
-        await key(tester, LogicalKeyboardKey.arrowRight);
-      }
-      await focusTarget(tester, more, '加载此来源更多');
-      expect(focusedLabel(tester), '加载此来源更多');
-      await key(tester, LogicalKeyboardKey.select);
-      for (var frame = 0; frame < 60 && more.evaluate().isNotEmpty; frame++) {
-        await tester.pump(const Duration(milliseconds: 50));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-      }
-      expect(find.textContaining('已加载作品: 61'), findsOneWidget);
-      expect(more, findsNothing);
-      expect(focusedAction(), findsOneWidget);
-      expect(focusedLabel(tester), isNot('加载此来源更多'));
-      // Sliver cards are lazy; remote traversal must bring the new final row
-      // into view, rather than asserting an off-screen card was built eagerly.
-      for (
-        var step = 0;
-        step < 80 && find.textContaining('Catalog 60').evaluate().isEmpty;
-        step++
-      ) {
-        await key(tester, LogicalKeyboardKey.arrowDown);
-        // New lazy cards validate their complete source through real async IO.
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)),
-        );
-        await settle(tester);
-      }
-      expect(find.textContaining('Catalog 60'), findsOneWidget);
+      expect(find.byType(LibraryFilterPanel), findsNothing);
+      expect(FocusManager.instance.primaryFocus, same(filterFocus));
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

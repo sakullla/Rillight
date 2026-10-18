@@ -1,32 +1,27 @@
-import '../helpers/cupertino_test_app.dart';
-
-import 'package:rillight/app/ui/ui.dart' as ui;
-
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/provider_connect_controller.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/source_management.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 
 import '../emby/fake_emby_server.dart';
+import 'server_ui_harness.dart';
 
 void main() {
   testWidgets(
-    'private management adds and removes lines then logs out and deletes only its source',
+    'protected server editor changes lines and signs out only that account without entering its content',
     (tester) async {
       const device = ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'test',
-        deviceId: 'private-management',
+        deviceId: 'server-management',
         version: 'test',
       );
       final primary = FakeEmbyServer();
@@ -36,25 +31,32 @@ void main() {
       final third = FakeEmbyServer(
         baseUrl: Uri.parse('http://line-three.test'),
       );
-      final adapter = FakeEmbyAdapter([primary, secondary, third]);
+      final other = FakeEmbyServer(
+        serverId: 'other-server',
+        baseUrl: Uri.parse('http://other.test'),
+      );
+      final adapter = FakeEmbyAdapter([primary, secondary, third, other]);
       EmbyClient client() =>
           EmbyClient(device: device, dio: dioForFakeEmby(adapter));
       final credentials = MemoryCredentialStore();
       final auth = AuthController(
-        regionAccess: TestRegionAccessController(),
+        serverAccess: TestServerAccessController(),
         client: client(),
         credentials: credentials,
         servers: MemoryServerListStore(),
         providerClientFactory: (_) => client(),
       );
-      late String id;
+      late String id, otherId;
       await tester.runAsync(() async {
-        await auth.setPrivatePin('1234', '1234');
-        await auth.regionAccess.unlock('1234');
+        await auth.connect(
+          address: other.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        otherId = auth.session!.server.id;
         final login = ProviderConnectController(
           pollInterval: const Duration(milliseconds: 10),
           auth: auth,
-          region: AccessRegion.private,
         );
         await login.password(
           primary.baseUrl.toString(),
@@ -65,126 +67,81 @@ void main() {
         id = login.sourceId!;
         await login.finish();
         login.dispose();
+        await auth.switchTo(otherId);
+        await auth.serverAccess.setPassword(
+          id,
+          '1234',
+          '1234',
+          persistReference: (ref) =>
+              auth.sources.persistProtectionReference(id, ref),
+        );
       });
-      await tester.pumpWidget(
-        CupertinoTestApp(
-          localizationsDelegates: [
-            ...[
-              AppLocalizations.delegate,
-              ...GlobalCupertinoLocalizations.delegates,
-            ],
-            ui.GlobalCupertinoLocalizations.delegate,
-          ],
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: SourceManagement(auth: auth, region: AccessRegion.private),
-          builder: (context, child) => ui.AppUiTheme(
-            data: AppUiTheme.of(context).brightness == Brightness.dark
-                ? ui.AppUiTheme.dark()
-                : ui.AppUiTheme.light(),
-            child: child ?? const SizedBox.shrink(),
-          ),
-        ),
-      );
-      await settle(tester);
-      Future<void> reveal(Finder finder) async {
-        final scroll = find.byType(Scrollable).first;
-        tester.state<ScrollableState>(scroll).position.jumpTo(0);
-        await settle(tester);
-        await tester.scrollUntilVisible(finder, 150, scrollable: scroll);
-        await settle(tester);
+      secondary.issuedTokens.addAll(primary.issuedTokens);
+      third.issuedTokens.addAll(primary.issuedTokens);
+      addTearDown(auth.dispose);
+      await pumpServerSelection(tester, auth);
+      Future<void> edit() async {
+        await openServerEditor(tester, id);
+        await tester.enterText(
+          find.byKey(const Key('server-unlock-password')),
+          '1234',
+        );
+        await serverUiTap(tester, const Key('server-unlock-submit'));
+        expect(auth.serverAccess.allows(id), isFalse);
+        expect(auth.session!.server.id, otherId);
       }
 
-      await reveal(find.byKey(Key('source-add-line-$id')));
-      await tester.tap(find.byKey(Key('source-add-line-$id')));
-      await settle(tester);
+      await edit();
+      await serverUiTap(tester, const Key('server-editor-add-line'));
       await tester.enterText(
-        find.byKey(const Key('source-text-value')),
+        find.byKey(const Key('server-line-address')),
         secondary.baseUrl.toString(),
       );
-      await tester.tap(find.widgetWithText(ui.AppButton, '保存'));
-      await settle(tester);
-      var source = auth.sources.project(AccessRegion.private).single;
+      await serverUiTap(tester, const Key('server-line-done'));
+      expect(auth.sources.server(id).lines, hasLength(1));
+      await serverUiTap(tester, const Key('server-editor-save'));
+      var source = auth.sources.server(id);
       expect(source.lines, hasLength(2));
-      expect(auth.session, isNull);
       final added = source.lines.last.id;
-      await reveal(find.byKey(Key('source-edit-line-$id-$added')));
-      await tester.tap(find.byKey(Key('source-edit-line-$id-$added')));
-      await settle(tester);
+      await edit();
+      await serverUiTap(tester, Key('server-editor-line-$added'));
       await tester.enterText(
-        find.byKey(const Key('source-text-value')),
+        find.byKey(const Key('server-line-address')),
         third.baseUrl.toString(),
       );
-      await tester.tap(find.widgetWithText(ui.AppButton, '保存'));
-      await settle(tester);
+      await serverUiTap(tester, const Key('server-line-done'));
+      await serverUiTap(tester, const Key('server-editor-save'));
       expect(
-        auth.sources.project(AccessRegion.private).single.lines.last.address,
+        auth.sources.server(id).lines.last.address,
         third.baseUrl.toString(),
       );
-      expect(auth.session, isNull);
-
-      await reveal(find.byKey(Key('source-delete-line-$id-$added')));
-      await tester.tap(find.byKey(Key('source-delete-line-$id-$added')));
+      expect(auth.session!.server.id, otherId);
+      await edit();
+      await serverUiTap(tester, Key('server-editor-line-more-$added'));
+      await tester.tap(find.text('移除这条线路'));
       await settle(tester);
-      final l = AppLocalizations.of(
-        tester.element(find.byType(SourceManagement)),
-      );
-      await tester.tap(
-        find.descendant(
-          of: find.byType(ui.AppDialog),
-          matching: find.ancestor(
-            of: find.text(l.deleteLine),
-            matching: find.byWidgetPredicate(
-              (widget) =>
-                  widget is ui.AppButton &&
-                  widget.variant == ui.AppButtonVariant.filled,
-            ),
-          ),
-        ),
-      );
-      await settle(tester);
-      source = auth.sources.project(AccessRegion.private).single;
+      expect(auth.sources.server(id).lines, hasLength(2));
+      await serverUiTap(tester, const Key('server-editor-save'));
+      source = auth.sources.server(id);
       expect(source.lines, hasLength(1));
-      await reveal(find.byKey(Key('source-logout-$id')));
-      await tester.tap(find.byKey(Key('source-logout-$id')));
-      await settle(tester);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(ui.AppDialog),
-          matching: find.ancestor(
-            of: find.text(l.logout),
-            matching: find.byWidgetPredicate(
-              (widget) =>
-                  widget is ui.AppButton &&
-                  widget.variant == ui.AppButtonVariant.filled,
-            ),
-          ),
-        ),
-      );
-      await settle(tester);
+      await edit();
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
       expect(await credentials.read(id), isNull);
-      expect(auth.sources.project(AccessRegion.private), hasLength(1));
-      await reveal(find.byKey(Key('source-delete-$id')));
-      await tester.tap(find.byKey(Key('source-delete-$id')));
+      expect(await credentials.read(otherId), isNotNull);
+      expect(auth.sources.project(), hasLength(2));
+      expect(auth.session!.server.id, otherId);
+      await tester.tap(find.text('open-servers'));
       await settle(tester);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(ui.AppDialog),
-          matching: find.ancestor(
-            of: find.text(l.deleteServer),
-            matching: find.byWidgetPredicate(
-              (widget) =>
-                  widget is ui.AppButton &&
-                  widget.variant == ui.AppButtonVariant.filled,
-            ),
-          ),
-        ),
-      );
-      await settle(tester);
-      expect(auth.sources.project(AccessRegion.private), isEmpty);
-      expect(auth.savedServers, isEmpty);
+      await serverUiTap(tester, Key('server-more-$id'));
+      await serverUiTap(tester, Key('server-action-remove-$id'));
+      // Removing a configuration has a distinct explicit confirmation.
+      await serverUiTap(tester, const Key('server-remove-confirm'));
+      expect(auth.sources.project().map((s) => s.id), [otherId]);
+      expect(auth.savedServers.map((s) => s.id), [otherId]);
+      expect(auth.session!.server.id, otherId);
       expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      auth.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 }

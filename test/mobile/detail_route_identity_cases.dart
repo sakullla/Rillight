@@ -1,5 +1,5 @@
 import '../helpers/widget_harness.dart';
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -59,7 +59,6 @@ void main() {
           password: 'correct-horse',
         ),
       );
-      await tester.runAsync(() => _allowLibraries(auth));
       final app = RillightApp(
         auth: auth,
         environment: PresentationEnvironment.phone,
@@ -199,7 +198,6 @@ void main() {
             password: 'correct-horse',
           ),
         );
-        await tester.runAsync(() => _allowLibraries(auth));
         final app = RillightApp(auth: auth, environment: environment);
         addTearDown(() async {
           await tester.pumpWidget(const SizedBox.shrink());
@@ -242,20 +240,13 @@ AuthController _authFor(FakeEmbyServer server) {
     credentials: credentials,
     servers: servers,
     sources: SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: servers,
       credentials: credentials,
       createClient: client,
     ),
   );
 }
-
-Future<void> _allowLibraries(AuthController auth) =>
-    auth.sources.configureScope(
-      auth.session!.server.id,
-      participates: true,
-      libraryIds: {'view-tv', 'view-movies'},
-    );
 
 Future<void> _artworkFrames(WidgetTester tester) async {
   for (var i = 0; i < 12; i++) {

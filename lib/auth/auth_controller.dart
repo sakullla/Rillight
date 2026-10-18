@@ -1,6 +1,10 @@
 import '../media_server/provider_registry.dart';
 import '../plex/plex_authentication.dart';
 import 'cloud_credentials.dart';
+import 'connection_failure.dart';
+import 'server_access.dart';
+import 'server_access_credentials.dart';
+import 'server_entry_coordinator.dart';
 import 'provider_identity.dart';
 import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
@@ -17,7 +21,6 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/auth/server_import_models.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -50,11 +53,22 @@ class AuthController extends ChangeNotifier {
     required this.credentials,
     required ServerListStore servers,
     SourceSessionRegistry? sources,
-    RegionAccessController? regionAccess,
-    this.persistPin,
+    ServerAccessController? serverAccess,
     MediaServerClient Function(MediaServerType)? providerClientFactory,
     PlexAuthentication? plexAuthentication,
   }) : _client = client {
+    this.serverAccess =
+        serverAccess ??
+        sources?.access ??
+        ServerAccessController(store: CredentialServerAccessStore(credentials));
+    serverEntry = ServerEntryCoordinator(
+      this.serverAccess,
+      publishConnection: _publishEntry,
+      cancelConnection: _cancelEntry,
+      preparePublication: (id, guard) =>
+          this.sources.rememberSelection(id, guard: guard),
+    );
+    this.serverAccess.addListener(_accessChanged);
     _providerClientFactory =
         providerClientFactory ??
         (type) => type == client.serviceType
@@ -64,7 +78,7 @@ class AuthController extends ChangeNotifier {
     this.sources =
         sources ??
         SourceSessionRegistry(
-          access: regionAccess ?? RegionAccessController(),
+          access: this.serverAccess,
           store: servers,
           credentials: credentials,
           createClient: client.createDetached,
@@ -80,15 +94,12 @@ class AuthController extends ChangeNotifier {
             }
           },
         );
-    this.servers = this.sources.ordinaryStore;
+    this.servers = this.sources.configurationStore;
     this.sources.addMembershipCleanup(_clearSourceContribution);
     this.sources.addSourceRevocation(_sourceChanged);
   }
 
-  factory AuthController.memory({
-    MediaServerClient? client,
-    RegionAccessController? regionAccess,
-  }) {
+  factory AuthController.memory({MediaServerClient? client}) {
     return AuthController(
       client:
           client ??
@@ -102,12 +113,43 @@ class AuthController extends ChangeNotifier {
           ),
       credentials: MemoryCredentialStore(),
       servers: MemoryServerListStore(),
-      regionAccess: regionAccess,
     );
   }
 
+  /// The independent playback process receives an already authorized launch,
+  /// not a persisted local login. Its owner must revoke image access alongside
+  /// that launch; ordinary attached clients never acquire this permission.
+  factory AuthController.forPlayback({
+    required MediaServerClient client,
+    required bool Function() isAuthorized,
+    SourceAccount? account,
+  }) {
+    final auth = AuthController.memory(client: client);
+    auth._playbackImageAccess = isAuthorized;
+    auth._playbackImageAccount = account;
+    return auth;
+  }
+
+  bool Function()? _playbackImageAccess;
+  SourceAccount? _playbackImageAccount;
+  MediaServerClient? _playbackImageClient;
+  bool get hasImageAccess =>
+      !_disposed &&
+      _client.hasSession &&
+      (session != null || _playbackImageAccess?.call() == true);
+  SourceAccount? get playbackImageAccount =>
+      hasImageAccess ? _playbackImageAccount : null;
+  MediaServerClient get imageClient => _playbackImageAccess == null
+      ? client
+      : _playbackImageClient ??= _client.withRequestGuard(() {
+          if (!hasImageAccess) {
+            throw StateError('Playback image access revoked');
+          }
+        });
+
   MediaServerClient _client;
   MediaServerClient? _guardedClient;
+  Object _contentOwner = Object();
   MediaServerClient get client => _guardedClient ?? _client;
   late final MediaServerClient Function(MediaServerType) _providerClientFactory;
   PlexAuthentication? _plexAuthentication;
@@ -134,11 +176,33 @@ class AuthController extends ChangeNotifier {
 
   String? _revokedSelectionId;
   bool _refreshingSelection = false;
+  final Map<String, bool> _savedAuthorization = {};
+  final Map<String, int> _authorizationReads = {};
+  bool? hasSavedAuthorization(String id) => _savedAuthorization[id];
+  Future<void> refreshAuthorization(String id) async {
+    final revision = (_authorizationReads[id] ?? 0) + 1;
+    _authorizationReads[id] = revision;
+    bool? available;
+    try {
+      available = await sources.hasStoredAuthorization(id);
+    } catch (_) {
+      // An unreadable credential store is unknown, not proof of logout.
+    }
+    if (_disposed || _authorizationReads[id] != revision) return;
+    if (available == null) {
+      _savedAuthorization.remove(id);
+    } else {
+      _savedAuthorization[id] = available;
+    }
+    notifyListeners();
+  }
 
   Future<void> refreshServers() async {
     final snapshot = await servers.load();
     if (_disposed) return;
     _savedServers = snapshot.servers;
+    await Future.wait(snapshot.servers.map((s) => refreshAuthorization(s.id)));
+    if (_disposed) return;
     final selected = _session;
     if (selected != null) {
       final current = _serverById(selected.server.id);
@@ -155,9 +219,11 @@ class AuthController extends ChangeNotifier {
   }
 
   void _sourceChanged(String id) {
+    if (!_disposed) unawaited(refreshAuthorization(id));
     if (_session?.server.id != id || _busy || _refreshingSelection) return;
     try {
       _selectionGuard?.call();
+      sources.requireContentAccess(id);
     } on StateError {
       _revokedSelectionId = id;
       _prefill = _session?.server;
@@ -173,10 +239,60 @@ class AuthController extends ChangeNotifier {
   final CredentialStore credentials;
   late final ServerListStore servers;
   late final SourceSessionRegistry sources;
-  RegionAccessController get regionAccess => sources.access;
-  final Future<void> Function(PinVerifier)? persistPin;
-  Future<void> setPrivatePin(String pin, String confirmation) =>
-      regionAccess.setPin(pin, confirmation, persistPin ?? (_) async {});
+  late final ServerAccessController serverAccess;
+  late final ServerEntryCoordinator serverEntry;
+
+  /// Playback installs its transaction here. Opening a selector or editing
+  /// metadata never closes a player. Null means an ordinary browsing switch.
+  Future<void> Function(
+    String serverId,
+    LineSelection selection,
+    void Function() guard,
+  )?
+  playbackLineSelection;
+  Future<void> chooseConnection(
+    String id,
+    LineSelection selection, {
+    void Function()? guard,
+  }) async {
+    final current = guard ?? () {};
+    current();
+    final playback = playbackLineSelection;
+    if (playback != null) {
+      await playback(id, selection, current);
+    } else {
+      await selectLine(id, selection, guard: current);
+    }
+  }
+
+  /// Registry has committed the same account's verified live playback line.
+  /// Publishing this projection performs no additional fallible persistence IO.
+  void publishPlaybackConnection(String id, MediaServerClient connected) {
+    _savedServers = sources.project();
+    final selected = _session;
+    if (selected?.server.id == id) {
+      final server = sources.server(id);
+      _client.attachSession(
+        baseUrl: connected.baseUrl!,
+        accessToken: connected.accessToken!,
+        userId: connected.userId!,
+        userAgent: connected.customUserAgent,
+      );
+      _guardedClient?.attachSession(
+        baseUrl: connected.baseUrl!,
+        accessToken: connected.accessToken!,
+        userId: connected.userId!,
+        userAgent: connected.customUserAgent,
+      );
+      _session = AuthSession(
+        server: server,
+        userId: selected!.userId,
+        username: selected.username,
+        accessToken: selected.accessToken,
+      );
+    }
+    if (!_disposed) notifyListeners();
+  }
 
   Future<void> _clearSourceContribution(
     SourceAccount? account,
@@ -218,13 +334,16 @@ class AuthController extends ChangeNotifier {
   int _libraryCountsSeq = 0;
   bool _disposed = false;
 
-  AuthSession? get session => _session;
+  AuthSession? get session =>
+      _session != null && serverAccess.allows(_session!.server.id)
+      ? _session
+      : null;
   List<SavedServer> get savedServers => _savedServers;
   SavedServer? get prefill => _prefill;
   MediaServerException? get failure => _failure;
   LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
-  bool get isLoggedIn => _session != null;
+  bool get isLoggedIn => session != null;
 
   int _authorizationPresentations = 0;
   bool get presentingAuthorization => _authorizationPresentations > 0;
@@ -331,6 +450,11 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (!serverAccess.allows(last.id)) {
+      _prefill = last;
+      notifyListeners();
+      return;
+    }
     final stored = await credentials.read(last.id);
     if (!_ownsActivation(generation)) return;
     if (stored == null || stored.accessToken.isEmpty) {
@@ -368,141 +492,105 @@ class AuthController extends ChangeNotifier {
       return false;
     }
     final generation = ++_activationGeneration;
-    // 只有电视辅助确认会要求失败后留在原会话。手机和桌面的失败结果保持原样。
-    final previous = preserveSessionOnFailure ? _session : null;
     _busy = true;
     _failure = null;
     notifyListeners();
+    final candidate = sources.createCandidate(serviceType);
+    SourceAuthorization? authorization;
     try {
-      _guardedClient?.clearSession();
-      _guardedClient = null;
-      if (_client.serviceType != serviceType) {
-        _client.clearSession();
-        _client = createProviderClient(serviceType);
-      }
-      client.setUserAgent(userAgent);
+      candidate.setUserAgent(userAgent);
       final baseUrl = normalizeServerAddress(address);
-      final publicInfo = await client.getPublicInfo(baseUrl);
+      final info = await candidate.getPublicInfo(baseUrl);
       _requireActivation(generation);
-      // Preserve legacy configuration IDs. New entries have a local identity
-      // independent from remote IDs and other service protocols.
-      await sources.requireOrdinaryIdentity(client.serviceType, publicInfo.id);
-      _requireActivation(generation);
+      await sources.requireConfiguredIdentity(serviceType, info.id);
       final existing = _savedServers
           .where(
-            (server) =>
-                server.serviceType == client.serviceType &&
-                server.username == username &&
-                (server.expectedServerId == publicInfo.id ||
-                    server.lines.any(
-                      (line) => normalizeServerAddress(line.address) == baseUrl,
+            (s) =>
+                s.serviceType == serviceType &&
+                s.username == username &&
+                (s.expectedServerId == info.id ||
+                    s.lines.any(
+                      (l) => normalizeServerAddress(l.address) == baseUrl,
                     )),
           )
           .firstOrNull;
-      if (existing?.expectedServerId != null &&
-          existing!.expectedServerId != publicInfo.id) {
-        throw StateError('Server identity mismatch');
+      // An address already belonging to another saved identity must stay
+      // anonymous, even when the user entered a different account name.
+      for (final known in _savedServers.where(
+        (s) =>
+            s.serviceType == serviceType &&
+            s.lines.any((l) => normalizeServerAddress(l.address) == baseUrl),
+      )) {
+        if (known.expectedServerId != null &&
+            known.expectedServerId != info.id) {
+          throw const MediaServerException(
+            MediaServerFailureKind.incompatibleServer,
+          );
+        }
       }
-      final configuredId = existing?.id ?? 'source-${generateDeviceId()}';
-      final credentialCommit = await sources.beginOrdinaryCredentials(
-        configuredId,
+      authorization = await sources.beginAuthorization(
+        serviceType: serviceType,
+        configuredServerId: existing?.id,
       );
-      _requireActivation(generation);
-      final auth = await client.authenticateByName(
+      authorization.requireServerIdentity(info.id);
+      final result = await candidate.authenticateByName(
         baseUrl: baseUrl,
         username: username,
         password: password,
-        serverId: publicInfo.id,
+        serverId: info.id,
       );
       _requireActivation(generation);
+      authorization.requireValid();
+      if (result.serverId != info.id) {
+        throw const MediaServerException(
+          MediaServerFailureKind.incompatibleServer,
+        );
+      }
       final server = _serverWithLine(
         existing: existing,
-        serverId: configuredId,
-        verifiedServerId: publicInfo.id,
-        name: publicInfo.serverName,
+        serverId: authorization.id,
+        verifiedServerId: info.id,
+        name: info.serverName,
         username: username,
         address: baseUrl.toString(),
         userAgent: userAgent,
         lineId: lineId,
+        serviceType: serviceType,
       );
       final stored = StoredCredentials(
-        serviceType: client.serviceType,
-        accessToken: auth.accessToken,
-        userId: auth.user.id,
+        serviceType: serviceType,
+        accessToken: result.accessToken,
+        userId: result.user.id,
         username: username,
         password: password.isEmpty ? null : password,
       );
-      await sources.commitOrdinaryCredentials(
-        credentialCommit,
-        stored,
-        verifiedServerId: publicInfo.id,
+      await sources.commitAuthorization(
+        authorization,
+        server: server,
+        value: stored,
+        remember: true,
       );
       _requireActivation(generation);
-      await _upsertServer(server);
-      _requireActivation(generation);
-      await sources.requireOrdinaryServer(server.id);
-      _requireActivation(generation);
-      await _activate(server, stored, generation: generation);
+      await refreshServers();
+      await sources.rememberSelection(server.id);
+      await _activate(
+        sources.server(server.id),
+        stored,
+        generation: generation,
+        usePrepared: true,
+      );
       _prefill = null;
       connectDraft = null;
       return true;
-    } on MediaServerException catch (error) {
-      if (!_ownsActivation(generation)) return false;
-      _failure = error;
-      await _dropOrRestore(previous);
-      return false;
     } catch (error) {
       if (!_ownsActivation(generation)) return false;
-      _failure = MediaServerException(
-        MediaServerFailureKind.unknown,
-        detail: error.toString(),
-        cause: error,
-      );
-      await _dropOrRestore(previous);
+      _failure = connectionFailure(error);
       return false;
     } finally {
+      authorization?.cancel();
+      candidate.clearSession();
       _busy = false;
-      notifyListeners();
-    }
-  }
-
-  /// 登录失败时清掉尝试。若调用方留下了原会话，则重新挂上原来的令牌。
-  Future<void> _dropOrRestore(AuthSession? previous) async {
-    if (previous != null) {
-      if (!_isSameSession(previous)) {
-        previous = null;
-      } else {
-        try {
-          await sources.requireOrdinaryServer(previous.server.id);
-        } on StateError {
-          previous = null;
-        }
-      }
-    }
-    if (previous == null) {
-      _session = null;
-      client.clearSession();
-      _resetLibraryCounts();
-      return;
-    }
-    try {
-      await _activate(
-        previous.server,
-        StoredCredentials(
-          serviceType: previous.server.serviceType,
-          accessToken: previous.accessToken,
-          userId: previous.userId,
-          username: previous.username,
-          cloudCredentialRef: previous.server.cloudCredentialRef,
-          cloudAccountId: previous.server.cloudAccountId,
-          homeUserId: previous.server.homeUserId,
-          resourceCredentialRef: previous.server.resourceCredentialRef,
-        ),
-      );
-    } catch (_) {
-      _session = null;
-      client.clearSession();
-      _resetLibraryCounts();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -518,7 +606,7 @@ class AuthController extends ChangeNotifier {
     CredentialCommit? credentialCommit;
     try {
       if (currentId != null) {
-        credentialCommit = await sources.beginOrdinaryCredentials(currentId);
+        credentialCommit = await sources.beginCredentials(currentId);
       }
       await selectedClient.logout();
     } on MediaServerException {
@@ -527,7 +615,11 @@ class AuthController extends ChangeNotifier {
       // The member may have moved before logout could capture authority.
     } finally {
       if (_ownsActivation(generation)) {
-        client.clearSession();
+        _client.clearSession();
+        _guardedClient?.clearSession();
+        _guardedClient = null;
+        _selectionGuard = null;
+        _contentOwner = Object();
         _session = null;
         _sessionOwner = null;
         _failure = null;
@@ -536,7 +628,7 @@ class AuthController extends ChangeNotifier {
       }
       if (credentialCommit != null) {
         try {
-          await sources.commitOrdinaryCredentials(credentialCommit, null);
+          await sources.commitCredentials(credentialCommit, null);
         } on CredentialRevocationException catch (error) {
           if (_ownsActivation(generation)) {
             _failure = MediaServerException(
@@ -554,128 +646,125 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  (String, void Function(), void Function())? _preparedEntry;
+  bool hasPreparedEntry(String id) => _preparedEntry?.$1 == id;
+  void _cancelEntry() {
+    _preparedEntry?.$3();
+    _preparedEntry = null;
+  }
+
+  void _publishEntry(String id) {
+    final candidate = _preparedEntry;
+    if (candidate == null || candidate.$1 != id) return;
+    _preparedEntry = null;
+    candidate.$2();
+    notifyListeners();
+  }
+
+  void _accessChanged() {
+    if (_disposed) return;
+    if (_session != null && !serverAccess.allows(_session!.server.id)) {
+      _sourceChanged(_session!.server.id);
+    }
+    notifyListeners();
+  }
+
+  Future<bool> prepareServerEntry(
+    String id, {
+    required void Function() guard,
+  }) async {
+    _cancelEntry();
+    await _switchTo(id, guard: guard, deferPublication: true);
+    return hasPreparedEntry(id) && failure == null;
+  }
+
   Future<void> switchTo(
     String serverId, {
     String? lineId,
     void Function()? guard,
+  }) => _switchTo(serverId, lineId: lineId, guard: guard);
+
+  /// Used only immediately after registry authorization commits its proof.
+  Future<void> activateCommittedSource(
+    String serverId, {
+    void Function()? guard,
+  }) => _switchTo(serverId, guard: guard, prepared: true);
+
+  Future<void> _switchTo(
+    String serverId, {
+    String? lineId,
+    void Function()? guard,
+    bool prepared = false,
+    bool deferPublication = false,
   }) async {
     guard?.call();
     final found = _serverById(serverId);
-    if (found == null) {
-      return;
-    }
+    if (found == null) return;
     final generation = ++_activationGeneration;
-    final currentLineId = found.activeLine?.id;
-    final requestedLineId = (lineId == null || lineId.isEmpty)
-        ? currentLineId
-        : lineId;
-    if (requestedLineId != null && requestedLineId != found.activeLineId) {
-      var hasLine = false;
-      for (final line in found.lines) {
-        if (line.id == requestedLineId) {
-          hasLine = true;
-          break;
-        }
-      }
-      if (!hasLine) {
-        return;
-      }
+    void current() {
+      _requireActivation(generation);
+      guard?.call();
     }
-    var server =
-        (requestedLineId != null && requestedLineId != found.activeLineId)
-        ? found.copyWith(activeLineId: requestedLineId)
-        : found;
-    var stored = await credentials.read(serverId);
-    if (!_ownsActivation(generation)) return;
-    guard?.call();
-    if (server.identityPending) {
-      try {
-        await sources.authenticate(serverId, lineId: requestedLineId);
-        if (!_ownsActivation(generation)) return;
-        guard?.call();
-        await reloadSavedServers();
-        if (!_ownsActivation(generation)) return;
-        server = _serverById(serverId)!.copyWith(activeLineId: requestedLineId);
-        stored = await credentials.read(serverId);
-      } catch (_) {
-        if (!_ownsActivation(generation)) return;
-        _prefill = server;
+
+    _refreshingSelection = true;
+    try {
+      if (found.identityPending) {
+        await sources.prepareAuthentication(serverId, lineId: lineId);
+      }
+      current();
+      final stored = await credentials.read(serverId);
+      current();
+      if (stored == null || stored.accessToken.isEmpty) {
+        _prefill = found;
         _failure = const MediaServerException(
-          MediaServerFailureKind.invalidCredentials,
+          MediaServerFailureKind.sessionExpired,
         );
-        notifyListeners();
         return;
       }
-    }
-    if (!_ownsActivation(generation)) return;
-    guard?.call();
-    final sameServer = _session?.server.id == serverId;
-    final changingLine = sameServer && requestedLineId != currentLineId;
-    if (stored != null && stored.accessToken.isNotEmpty) {
-      if (changingLine) {
-        // User-Agent is server-level: switching lines keeps the server's UA.
-        // The current line and session stay active unless the target line is
-        // reachable and proves it belongs to the same server.
-        _lineSwitchFailure = null;
-        String detail;
-        try {
-          final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
-          if (info.id != server.expectedServerId) {
-            detail = '线路返回的服务器身份与当前服务器不一致';
-          } else {
-            detail = '';
-          }
-        } on MediaServerException catch (error) {
-          detail = error.detail ?? error.toString();
-        } catch (error) {
-          detail = error.toString();
-        }
-        if (!_ownsActivation(generation)) return;
-        if (detail.isEmpty && server.serviceType == MediaServerType.plex) {
-          detail = await _targetLineFailure(server, stored) ?? '';
-        }
-        guard?.call();
-        if (!_ownsActivation(generation)) return;
-        if (detail.isNotEmpty) {
-          _lineSwitchFailure = LineSwitchFailure(
-            address: server.baseUrl,
-            detail: detail,
-          );
-          notifyListeners();
-          return;
-        }
+      if (lineId != null && lineId.isNotEmpty) {
+        await sources.selectLine(
+          serverId,
+          LineSelection.fixed(lineId),
+          guard: current,
+        );
       }
+      current();
+      final server = sources.server(serverId);
+      await _activate(
+        server,
+        stored,
+        generation: generation,
+        guard: guard,
+        usePrepared: prepared || lineId != null,
+        deferPublication: deferPublication,
+        remember: !deferPublication,
+      );
+      await refreshServers();
       _lineSwitchFailure = null;
       _failure = null;
-      guard?.call();
-      try {
-        await _upsertServer(server);
-        if (!_ownsActivation(generation)) return;
-        guard?.call();
-        await _activate(server, stored, guard: guard, generation: generation);
-      } catch (error) {
-        if (!_ownsActivation(generation)) return;
-        guard?.call();
-        _session = null;
-        _revokedSelectionId = null;
-        client.clearSession();
-        _prefill = server;
-        _failure = error is MediaServerException
-            ? error
-            : const MediaServerException(MediaServerFailureKind.sessionExpired);
-      }
-      if (!_ownsActivation(generation)) return;
       connectDraft = null;
-      notifyListeners();
-      return;
+    } catch (error) {
+      if (!_ownsActivation(generation)) return;
+      try {
+        guard?.call();
+      } on StateError {
+        return;
+      }
+      _failure = connectionFailure(error);
+      if (lineId != null) {
+        _lineSwitchFailure = LineSwitchFailure(
+          address:
+              found.lines.where((l) => l.id == lineId).firstOrNull?.address ??
+              '',
+          detail: _failure?.kind == MediaServerFailureKind.incompatibleServer
+              ? '线路返回的服务器身份与当前服务器不一致'
+              : '无法连接该线路，请检查连接或重新登录',
+        );
+      }
+    } finally {
+      _refreshingSelection = false;
+      if (!_disposed) notifyListeners();
     }
-    _session = null;
-    client.clearSession();
-    _prefill = server;
-    _failure = null;
-    _lineSwitchFailure = null;
-    _resetLibraryCounts();
-    notifyListeners();
   }
 
   Future<void> selectSavedServer(String serverId) async {
@@ -697,334 +786,160 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<ServerImportResult> importServers(
-    Iterable<ServerImportDraft> drafts, {
-    AccessRegion region = AccessRegion.ordinary,
-  }) async {
-    final result = await sources.importServers(drafts, region: region);
+    Iterable<ServerImportDraft> drafts,
+  ) async {
+    final result = await sources.importServers(drafts);
     await reloadSavedServers();
     return result;
   }
 
-  /// 给当前已登录服务器追加备用线路,不切换正在使用的地址。
+  /// Every address uses the registry's anonymous identity/account preflight.
+  /// A rejected address remains in the caller's draft rather than disappearing.
   Future<void> appendLines(Iterable<String> addresses) async {
-    final current = _session?.server;
-    if (current == null) {
-      return;
+    final id = _session?.server.id;
+    if (id == null) return;
+    for (final address in addresses) {
+      await addLine(id, address);
     }
-    var server = current;
-    var changed = false;
-    for (final raw in addresses) {
-      final trimmed = raw.trim();
-      if (trimmed.isEmpty) {
-        continue;
-      }
-      try {
-        final url = normalizeServerAddress(trimmed).toString();
-        if (server.lines.any((line) => line.address == url)) {
-          continue;
-        }
-        server = _serverWithLine(
-          existing: server,
-          serverId: server.id,
-          name: server.name,
-          username: server.username,
-          address: url,
-        ).copyWith(activeLineId: current.activeLineId);
-        changed = true;
-      } on MediaServerException {
-        continue;
-      }
-    }
-    if (!changed) {
-      return;
-    }
-    await _upsertServer(server);
-    final session = _session;
-    if (session != null && session.server.id == server.id) {
-      _session = AuthSession(
-        server: server,
-        userId: session.userId,
-        username: session.username,
-        accessToken: session.accessToken,
-      );
-    }
-    notifyListeners();
   }
 
-  /// 给已保存服务器添加一条线路:只录入地址,不改变当前线路、用户名与
-  /// 服务器 User-Agent,浏览与播放继续走原地址。返回是否实际写入。
+  Future<void> _lineMutation(
+    String id,
+    Future<void> Function() mutation,
+  ) async {
+    final previous = _session;
+    final generation = _activationGeneration;
+    _refreshingSelection = true;
+    try {
+      await mutation();
+      await refreshServers();
+      final next = sources.server(id);
+      if (_ownsActivation(generation) &&
+          _session?.server.id == id &&
+          previous?.server.id == id &&
+          (previous!.server.baseUrl != next.baseUrl ||
+              previous.server.normalizedUserAgent !=
+                  next.normalizedUserAgent)) {
+        final stored = await credentials.read(id);
+        if (stored != null &&
+            _ownsActivation(generation) &&
+            _session?.server.id == id) {
+          await _activate(
+            next,
+            stored,
+            generation: generation,
+            usePrepared: true,
+          );
+        }
+      }
+      if (_prefill?.id == id) _prefill = next;
+      _lineSwitchFailure = null;
+    } finally {
+      _refreshingSelection = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> saveConfiguration(
+    String id, {
+    required String nickname,
+    String? iconId,
+    required String userAgent,
+    required List<ServerLine> lines,
+    LineSelection? lineSelection,
+    String? protectionRef,
+  }) => _lineMutation(
+    id,
+    () => sources.saveConfiguration(
+      id,
+      nickname: nickname,
+      iconId: iconId,
+      userAgent: userAgent,
+      lines: lines,
+      lineSelection: lineSelection,
+      protectionRef: protectionRef,
+    ),
+  );
+
+  Future<void> reorderServers(List<String> ids) async {
+    await sources.reorderServers(ids);
+    await refreshServers();
+  }
+
+  Future<void> reorderLines(String id, List<String> lineIds) async {
+    await sources.reorderLines(id, lineIds);
+    await refreshServers();
+  }
+
   Future<bool> addLine(String serverId, String address) async {
     final server = _serverById(serverId);
-    if (server == null) {
-      return false;
-    }
+    if (server == null) return false;
     final url = _normalizeLineAddress(address);
-    if (url == null || server.lines.any((line) => line.address == url)) {
+    if (url == null ||
+        server.lines.any(
+          (l) => normalizeServerAddress(l.address).toString() == url,
+        )) {
       return false;
     }
-    final next = server.copyWith(
-      lines: [
-        ...server.lines,
-        ServerLine(id: generateLineId(), address: url),
-      ],
-    );
-    await _persistLineEdit(next, remountSession: false);
+    await _lineMutation(serverId, () => sources.setLineAddress(serverId, url));
     return true;
   }
 
-  /// 修改一条线路的地址:线路 id、当前线路选择、用户名与服务器
-  /// User-Agent 都不变;改的是当前会话的活跃线路时,客户端改挂新地址,
-  /// 之后浏览与播放走新地址。返回是否实际写入。
   Future<bool> updateLineAddress(
     String serverId,
     String lineId,
     String address,
   ) async {
     final server = _serverById(serverId);
-    if (server == null) {
-      return false;
-    }
+    final line = server?.lines.where((l) => l.id == lineId).firstOrNull;
     final url = _normalizeLineAddress(address);
-    if (url == null) {
-      return false;
-    }
-    final lines = <ServerLine>[...server.lines];
-    var found = false;
-    var active = false;
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].id != lineId) {
-        continue;
-      }
-      if (lines[i].address == url) {
-        return false;
-      }
-      lines[i] = lines[i].copyWith(address: url);
-      found = true;
-      active = server.activeLineId == lineId;
-      break;
-    }
-    if (!found) {
-      return false;
-    }
-    final next = server.copyWith(lines: lines);
-    await _persistLineEdit(
-      next,
-      remountSession: active && _session?.server.id == serverId,
+    if (line == null || url == null || line.address == url) return false;
+    await _lineMutation(
+      serverId,
+      () => sources.setLineAddress(serverId, url, lineId: lineId),
     );
     return true;
   }
 
-  /// 管理界面录入的线路地址:空白或非法地址返回 null,不写入。
-  String? _normalizeLineAddress(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) {
-      return null;
-    }
+  String? _normalizeLineAddress(String address) {
     try {
-      return normalizeServerAddress(trimmed).toString();
+      return normalizeServerAddress(address).toString();
     } on MediaServerException {
       return null;
     }
   }
 
-  /// 线路增删改后的共同落盘路径:走与登录一致的 server_list_store 保存,
-  /// 并同步 prefill 与当前会话引用;[remountSession] 为真时按已存凭据把
-  /// 客户端挂到(可能已变化的)新地址,用户名与服务器 UA 保持不变。
-  Future<String?> _targetLineFailure(
-    SavedServer server,
-    StoredCredentials stored,
-  ) async {
-    final useSelected =
-        server.serviceType != MediaServerType.plex &&
-        _client.serviceType == server.serviceType;
-    final probe = useSelected
-        ? _client
-        : _client.serviceType == server.serviceType
-        ? _client.withRequestGuard(() {})
-        : createProviderClient(server.serviceType);
-    try {
-      if (!useSelected) probe.setUserAgent(server.userAgent);
-      final info = await probe.getPublicInfo(Uri.parse(server.baseUrl));
-      if (info.id != (server.verifiedServerId ?? server.id)) {
-        return '线路返回的服务器身份与当前服务器不一致';
-      }
-      if (server.serviceType == MediaServerType.plex) {
-        probe.attachSession(
-          baseUrl: Uri.parse(server.baseUrl),
-          accessToken: stored.accessToken,
-          userId: stored.userId,
-          userAgent: server.userAgent,
-        );
-        await verifyProviderIdentity(plexAuthentication, server, stored, probe);
-        await probe.getUser();
-      }
-      return null;
-    } catch (_) {
-      return '无法核验线路，请检查地址和授权';
-    } finally {
-      if (!useSelected) probe.clearSession();
-    }
-  }
-
-  Future<void> _persistLineEdit(
-    SavedServer next, {
-    required bool remountSession,
-  }) async {
-    if (remountSession) {
-      final stored = await credentials.read(next.id);
-      if (stored != null) {
-        final failure = await _targetLineFailure(next, stored);
-        if (failure != null) {
-          _lineSwitchFailure = LineSwitchFailure(
-            address: next.baseUrl,
-            detail: failure,
-          );
-          notifyListeners();
-          throw MediaServerException(
-            MediaServerFailureKind.invalidResponse,
-            detail: failure,
-          );
-        }
-      }
-    }
-    await _upsertServer(next, remember: false);
-    if (_prefill?.id == next.id) {
-      _prefill = next;
-    }
-    final session = _session;
-    if (session != null && session.server.id == next.id) {
-      if (remountSession) {
-        final stored = await credentials.read(next.id);
-        if (stored != null && stored.accessToken.isNotEmpty) {
-          await _activate(next, stored);
-          notifyListeners();
-          return;
-        }
-      }
-      _session = AuthSession(
-        server: next,
-        userId: session.userId,
-        username: session.username,
-        accessToken: session.accessToken,
-      );
-    }
-    notifyListeners();
-  }
-
   Future<void> deleteLine(String serverId, String lineId) async {
     final server = _serverById(serverId);
-    if (server == null || server.lines.length <= 1) {
+    if (server == null ||
+        server.lines.length <= 1 ||
+        !server.lines.any((l) => l.id == lineId)) {
       return;
     }
-    final nextLines = [
-      for (final line in server.lines)
-        if (line.id != lineId) line,
-    ];
-    if (nextLines.length == server.lines.length) {
-      return;
-    }
-    final activeChanged = server.activeLineId == lineId;
-    final nextActive = activeChanged ? nextLines.first.id : server.activeLineId;
-    final next = server.copyWith(lines: nextLines, activeLineId: nextActive);
-    if (activeChanged && _session?.server.id == serverId) {
-      final stored = await credentials.read(serverId);
-      if (stored != null) {
-        final failure = await _targetLineFailure(next, stored);
-        if (failure != null) {
-          _lineSwitchFailure = LineSwitchFailure(
-            address: next.baseUrl,
-            detail: failure,
-          );
-          notifyListeners();
-          return;
-        }
-      }
-    }
-    await _upsertServer(next, remember: false);
-    if (_prefill?.id == serverId) {
-      _prefill = next;
-    }
-    final session = _session;
-    if (session != null && session.server.id == serverId) {
-      if (activeChanged) {
-        final stored = await credentials.read(serverId);
-        if (stored != null && stored.accessToken.isNotEmpty) {
-          await _activate(next, stored);
-        } else {
-          _session = AuthSession(
-            server: next,
-            userId: session.userId,
-            username: session.username,
-            accessToken: session.accessToken,
-          );
-        }
-      } else {
-        _session = AuthSession(
-          server: next,
-          userId: session.userId,
-          username: session.username,
-          accessToken: session.accessToken,
-        );
-      }
-    }
-    notifyListeners();
+    await _lineMutation(serverId, () => sources.removeLine(serverId, lineId));
   }
 
-  /// 删除已保存的服务器与本机凭据。删除当前登录的服务器时结束本地会话,
-  /// 路由会随之回到登录页;删除其它服务器不影响当前会话与播放。
-  /// 服务器端账号不会被删除,之后可重新登录。
+  Future<void> selectLine(
+    String serverId,
+    LineSelection selection, {
+    void Function()? guard,
+  }) => _lineMutation(
+    serverId,
+    () => sources.selectLine(serverId, selection, guard: guard),
+  );
+
   Future<void> deleteServer(String serverId) async {
-    final target = _serverById(serverId);
-    if (target == null) {
-      return;
-    }
-    final current = _session?.server.id;
-    final next = <SavedServer>[
-      for (final item in _savedServers)
-        if (item.id != serverId) item,
-    ];
-    final credentialCommit = await sources.beginOrdinaryCredentials(serverId);
     try {
-      await sources.commitOrdinaryCredentials(credentialCommit, null);
-    } on CredentialRevocationException catch (error) {
-      // The durable credential is already revoked even when old-key cleanup
-      // failed. Do not leave the selected client authenticated or restore it.
-      // Check the live selection: another source may have been selected during IO.
-      if (_session?.server.id == serverId ||
-          (_session == null && current == serverId)) {
-        _session = null;
-        client.clearSession();
-        _failure = MediaServerException(
-          MediaServerFailureKind.unknown,
-          detail: error.toString(),
-          cause: error,
-        );
-        _lineSwitchFailure = null;
-        connectDraft = null;
-        _resetLibraryCounts();
-      }
-      if (_prefill?.id == serverId) _prefill = null;
-      if (_rememberedServerId == serverId) _rememberedServerId = null;
+      await sources.logoutSource(serverId, remove: true);
+    } on CredentialRevocationException {
+      _failure = const MediaServerException(MediaServerFailureKind.unknown);
       if (!_disposed) notifyListeners();
       rethrow;
     }
-    _savedServers = next;
-    // 删除的是当前服务器时不再保留 lastServerId,避免下次启动凭空预选。
-    final lastId = (current != null && current != serverId) ? current : null;
-    await servers.save(ServerListSnapshot(servers: next, lastServerId: lastId));
-    _rememberedServerId = lastId;
-    if (_prefill?.id == serverId) {
-      _prefill = null;
-    }
-    if (current == serverId) {
-      _session = null;
-      client.clearSession();
-      _failure = null;
-      _lineSwitchFailure = null;
-      connectDraft = null;
-      _resetLibraryCounts();
-    }
-    notifyListeners();
+    await refreshServers();
+    if (_prefill?.id == serverId) _prefill = null;
+    if (_rememberedServerId == serverId) _rememberedServerId = null;
+    if (!_disposed) notifyListeners();
   }
 
   Future<String?> savedPassword(String serverId) async {
@@ -1032,12 +947,8 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> renameServer(String serverId, String nickname) async {
-    final server = _serverById(serverId);
-    if (server == null) return;
-    await _persistLineEdit(
-      server.copyWith(nickname: nickname.trim()),
-      remountSession: false,
-    );
+    await sources.rename(serverId, nickname.trim());
+    await refreshServers();
   }
 
   /// Undo a local removal without switching accounts or reviving a session.
@@ -1046,12 +957,9 @@ class AuthController extends ChangeNotifier {
     StoredCredentials? stored,
   ) async {
     if (_serverById(server.id) != null) return;
-    if (server.region != AccessRegion.ordinary) {
-      throw StateError('Cannot restore a private member in ordinary context');
-    }
-    final credentialCommit = await sources.beginOrdinaryCredentials(server.id);
+    final credentialCommit = await sources.beginCredentials(server.id);
     if (stored != null) {
-      await sources.commitOrdinaryCredentials(credentialCommit, stored);
+      await sources.commitCredentials(credentialCommit, stored);
     }
     await _upsertServer(server, remember: false);
     notifyListeners();
@@ -1065,7 +973,7 @@ class AuthController extends ChangeNotifier {
   /// 修改当前登录用户的密码;旧密码留空照常提交,客户端不做拦截。
   ///
   /// 成功:本机凭据换成新密码,会话保持可用。
-  /// 失败:本机保留旧密码,用户仍处于登录态,原因经
+  /// 失败:本机尝试恢复旧密码,仍有效的会话保持可用,原因经
   /// [passwordChangeFailure] 暴露。服务器改密后吊销当前会话时,
   /// 复用会话过期路径回到登录页,本机已存的新密码可直接重新进入。
   Future<bool> changePassword({
@@ -1076,21 +984,38 @@ class AuthController extends ChangeNotifier {
     if (_busy || session == null || newPassword.isEmpty) {
       return false;
     }
+    final sessionOwner = _sessionOwner;
+    final accessGeneration = serverAccess.generation(session.server.id);
+    final activationGeneration = _activationGeneration;
+    bool ownsSession() =>
+        !_disposed &&
+        identical(_sessionOwner, sessionOwner) &&
+        _isSameSession(session);
+    bool entryCurrent() =>
+        ownsSession() &&
+        _activationGeneration == activationGeneration &&
+        serverAccess.allows(session.server.id) &&
+        serverAccess.generation(session.server.id) == accessGeneration;
+    CredentialCommit? credentialCommit;
+    var remoteChanged = false;
     _busy = true;
     _passwordChangeFailure = null;
     notifyListeners();
     try {
-      final credentialCommit = await sources.beginOrdinaryCredentials(
-        session.server.id,
-      );
+      credentialCommit = await sources.beginCredentials(session.server.id);
+      if (!entryCurrent()) throw StateError('Password change superseded');
+      _selectionGuard?.call();
       await client.changePassword(
         currentPassword: (currentPassword == null || currentPassword.isEmpty)
             ? null
             : currentPassword,
         newPassword: newPassword,
       );
+      remoteChanged = true;
       final stored = await credentials.read(session.server.id);
-      await sources.commitOrdinaryCredentials(
+      if (!entryCurrent()) throw StateError('Password change superseded');
+      _selectionGuard?.call();
+      await sources.commitCredentials(
         credentialCommit,
         StoredCredentials(
           accessToken: stored?.accessToken ?? session.accessToken,
@@ -1106,7 +1031,6 @@ class AuthController extends ChangeNotifier {
           authMaterial: stored?.authMaterial ?? const {},
         ),
       );
-      await _verifySessionAfterPasswordChange();
       return true;
     } on MediaServerException catch (error) {
       _passwordChangeFailure = error;
@@ -1119,8 +1043,28 @@ class AuthController extends ChangeNotifier {
       );
       return false;
     } finally {
+      if (remoteChanged && entryCurrent()) {
+        try {
+          try {
+            _selectionGuard?.call();
+          } on StateError {
+            // The registry retires the lease before secure-store IO. Both a
+            // successful write and a confirmed rollback can preserve this
+            // account's live token, but a failed rollback cannot do so.
+            _selectionGuard = sources.settledCredentialsGuard(
+              credentialCommit!,
+            );
+          }
+          await _verifySessionAfterPasswordChange();
+        } catch (_) {
+          if (ownsSession()) _onSessionExpired();
+        }
+      }
       _busy = false;
-      notifyListeners();
+      if (!_disposed) {
+        _sourceChanged(session.server.id);
+        notifyListeners();
+      }
     }
   }
 
@@ -1128,14 +1072,15 @@ class AuthController extends ChangeNotifier {
   /// 会话已失效时走 [_onSessionExpired] 回到登录页;其它探测失败
   /// (如瞬时网络错误)不影响已完成的改密结果。
   Future<void> _verifySessionAfterPasswordChange() async {
-    final refresh = client.onRefreshSession;
-    client.onRefreshSession = null;
+    final selectedClient = client;
+    final refresh = selectedClient.onRefreshSession;
+    selectedClient.onRefreshSession = null;
     try {
-      await client.getUser();
+      await selectedClient.getUser();
     } on MediaServerException {
       // 会话过期时回调已把用户带回登录页,这里只需吞掉探测异常。
     } finally {
-      client.onRefreshSession = refresh;
+      selectedClient.onRefreshSession = refresh;
     }
   }
 
@@ -1156,6 +1101,7 @@ class AuthController extends ChangeNotifier {
     required String address,
     String? userAgent,
     String? lineId,
+    MediaServerType? serviceType,
   }) {
     // The form's User-Agent belongs to the server, not to a single line.
     final normalizedUa = userAgent != null
@@ -1184,7 +1130,7 @@ class AuthController extends ChangeNotifier {
     }
     return SavedServer(
       id: serverId,
-      serviceType: existing?.serviceType ?? client.serviceType,
+      serviceType: existing?.serviceType ?? serviceType ?? client.serviceType,
       authorizationMethod:
           existing?.authorizationMethod ?? AuthorizationMethod.password,
       cloudCredentialRef: existing?.cloudCredentialRef,
@@ -1196,11 +1142,14 @@ class AuthController extends ChangeNotifier {
       username: username,
       lines: lines,
       activeLineId: line.id,
+      lineSelection: existing?.lineSelection.isAutomatic == false
+          ? LineSelection.fixed(line.id)
+          : const LineSelection.auto(),
+      lastSuccessfulLineId: line.id,
+      iconId: existing?.iconId,
+      credentialRef: existing?.credentialRef,
+      protectionRef: existing?.protectionRef,
       userAgent: normalizedUa,
-      region: existing?.region ?? AccessRegion.ordinary,
-      participates: existing?.participates ?? true,
-      libraryIds: existing?.libraryIds ?? const [],
-      scopeKnown: existing?.scopeKnown ?? false,
       verifiedServerId:
           verifiedServerId ?? existing?.verifiedServerId ?? serverId,
       checkedAt: existing?.checkedAt,
@@ -1213,6 +1162,10 @@ class AuthController extends ChangeNotifier {
     StoredCredentials stored, {
     void Function()? guard,
     int? generation,
+    bool usePrepared = false,
+    bool deferPublication = false,
+    bool remember = false,
+    bool preserveContentOwner = false,
   }) async {
     guard?.call();
     final operation = generation ?? ++_activationGeneration;
@@ -1222,16 +1175,13 @@ class AuthController extends ChangeNotifier {
         server.cloudAccountId != stored.cloudAccountId) {
       throw StateError('Source credential identity mismatch');
     }
-    // Verification may await the network. A candidate must not share mutable
-    // session fields with the published client or another pending activation.
-    // Legacy Emby activation is synchronous and retains injected subclasses.
-    final attached =
-        server.serviceType == MediaServerType.emby &&
-            _client.serviceType == server.serviceType
-        ? _client
-        : createProviderClient(server.serviceType);
-    if (server.serviceType != MediaServerType.emby &&
-        identical(attached, _client)) {
+    // Never attach a token to an unverified endpoint or mutate the published
+    // client while a candidate is awaiting anonymous identity verification.
+    final prepared = usePrepared
+        ? sources.verifiedClient(server.id, stored)
+        : null;
+    var attached = prepared ?? sources.createCandidate(server.serviceType);
+    if (identical(attached, _client)) {
       throw StateError('Provider factory must return an independent client');
     }
     attached.onSessionExpired = null;
@@ -1239,73 +1189,162 @@ class AuthController extends ChangeNotifier {
     late final void Function() sourceGuard;
     MediaServerClient? guarded;
     try {
-      attached.attachSession(
-        baseUrl: Uri.parse(server.baseUrl),
-        accessToken: stored.accessToken,
-        userId: stored.userId,
-        userAgent: server.normalizedUserAgent,
-      );
       sourceGuard = sources.selectedSessionGuard(server.id);
-      if (server.serviceType != MediaServerType.emby) {
+      void current() {
+        _requireActivation(operation);
+        sourceGuard();
+        guard?.call();
+      }
+
+      if (prepared == null) {
+        attached.setUserAgent(server.normalizedUserAgent);
         final info = await attached.getPublicInfo(Uri.parse(server.baseUrl));
-        _requireActivation(operation);
-        sourceGuard();
-        guard?.call();
-        if (info.id != (server.verifiedServerId ?? server.id)) {
-          throw const MediaServerException(MediaServerFailureKind.forbidden);
+        current();
+        if (info.id != server.expectedServerId) {
+          throw const MediaServerException(
+            MediaServerFailureKind.incompatibleServer,
+          );
         }
+        attached.attachSession(
+          baseUrl: Uri.parse(server.baseUrl),
+          accessToken: stored.accessToken,
+          userId: stored.userId,
+          userAgent: server.normalizedUserAgent,
+        );
         await sources.verifyAttachedSession(server.id, stored, attached);
-        _requireActivation(operation);
-        sourceGuard();
-        guard?.call();
+        current();
+      }
+      if (server.serviceType != MediaServerType.emby) {
         guarded = attached.withRequestGuard(sourceGuard);
       }
-      guard?.call();
-      _requireActivation(operation);
-      sourceGuard();
+      current();
+      if (remember) await sources.rememberSelection(server.id, guard: current);
+      current();
     } catch (_) {
       attached.clearSession();
       guarded?.clearSession();
       rethrow;
     }
-    final retired = _client;
-    final retiredGuarded = _guardedClient;
-    if (!identical(retired, attached)) {
-      retired.onSessionExpired = null;
-      retired.onRefreshSession = null;
-      retired.clearSession();
-    }
-    retiredGuarded?.clearSession();
-    _client = attached;
-    _guardedClient = guarded;
-    _selectionGuard = sourceGuard;
-    _revokedSelectionId = null;
-    final session = AuthSession(
-      server: server,
-      userId: stored.userId,
-      username: stored.username,
-      accessToken: stored.accessToken,
-    );
-    _session = session;
-    final owner = Object();
-    _sessionOwner = owner;
-    bool ownsSession() =>
-        !_disposed &&
-        identical(_sessionOwner, owner) &&
-        identical(_client, attached) &&
-        _isSameSession(session);
-    void expired() {
-      if (ownsSession()) _onSessionExpired();
+    void publish() {
+      if (server.serviceType == MediaServerType.emby) {
+        // Keep Emby's refresh/retry owner and injected behavior, but only attach
+        // after the independent candidate and durable selection have succeeded.
+        final candidate = attached;
+        attached = _client.serviceType == MediaServerType.emby
+            ? _client
+            : sources.createCandidate(MediaServerType.emby);
+        attached.attachSession(
+          baseUrl: Uri.parse(server.baseUrl),
+          accessToken: stored.accessToken,
+          userId: stored.userId,
+          userAgent: server.normalizedUserAgent,
+        );
+        candidate.clearSession();
+      }
+      final retired = _client;
+      final retiredGuarded = _guardedClient;
+      if (!identical(retired, attached)) {
+        retired.onSessionExpired = null;
+        retired.onRefreshSession = null;
+        retired.clearSession();
+      }
+      retiredGuarded?.clearSession();
+      _client = attached;
+      if (!preserveContentOwner ||
+          _session?.server.id != server.id ||
+          _session?.userId != stored.userId) {
+        _contentOwner = Object();
+      }
+      final contentOwner = _contentOwner;
+      final accessGeneration = serverAccess.generation(server.id);
+      _guardedClient = attached.withRequestGuard(() {
+        if (!identical(_contentOwner, contentOwner) ||
+            _session?.server.id != server.id ||
+            _session?.userId != stored.userId ||
+            accessGeneration != serverAccess.generation(server.id)) {
+          throw StateError('Selected content session revoked');
+        }
+        _selectionGuard?.call();
+        sources.requireContentAccess(server.id);
+      });
+      _selectionGuard = sourceGuard;
+      _revokedSelectionId = null;
+      final session = AuthSession(
+        server: server,
+        userId: stored.userId,
+        username: stored.username,
+        accessToken: stored.accessToken,
+      );
+      _session = session;
+      final owner = Object();
+      _sessionOwner = owner;
+      bool ownsSession() =>
+          !_disposed &&
+          identical(_sessionOwner, owner) &&
+          identical(_client, attached) &&
+          _isSameSession(session);
+      void expired() {
+        if (ownsSession()) _onSessionExpired();
+      }
+
+      Future<bool> refresh() => ownsSession()
+          ? _refreshSession(session, attached, ownsSession)
+          : Future.value(false);
+      attached.onSessionExpired = expired;
+      attached.onRefreshSession = refresh;
+      final published = _guardedClient!;
+      bool ownsContent() =>
+          identical(_contentOwner, contentOwner) &&
+          _session?.server.id == server.id &&
+          _session?.userId == stored.userId &&
+          accessGeneration == serverAccess.generation(server.id) &&
+          serverAccess.allows(server.id);
+      published.onSessionExpired = () {
+        if (ownsContent()) _client.onSessionExpired?.call();
+      };
+      published.onRefreshSession = () async {
+        // Long-lived consumers may retain this facade after token renewal.
+        // Delegate to the current session owner, while retaining its original
+        // account and entry lease, so a second renewal is still authorized.
+        if (!ownsContent()) return false;
+        final renew = _client.onRefreshSession;
+        if (renew == null || !await renew()) return false;
+        final renewed = _session;
+        if (!identical(_contentOwner, contentOwner) ||
+            renewed == null ||
+            renewed.server.id != server.id ||
+            renewed.userId != stored.userId ||
+            !serverAccess.allows(server.id)) {
+          return false;
+        }
+        // The request that triggered renewal retries on its original facade.
+        // Its guard still checks the active selection and local entry lease.
+        published.attachSession(
+          baseUrl: Uri.parse(renewed.server.baseUrl),
+          accessToken: renewed.accessToken,
+          userId: renewed.userId,
+          userAgent: renewed.server.normalizedUserAgent,
+        );
+        return true;
+      };
+      guarded?.onSessionExpired = expired;
+      guarded?.onRefreshSession = refresh;
+      if (serverAccess.allows(server.id)) unawaited(loadLibraryCounts());
     }
 
-    Future<bool> refresh() => ownsSession()
-        ? _refreshSession(session, attached, ownsSession)
-        : Future.value(false);
-    attached.onSessionExpired = expired;
-    attached.onRefreshSession = refresh;
-    guarded?.onSessionExpired = expired;
-    guarded?.onRefreshSession = refresh;
-    unawaited(loadLibraryCounts());
+    if (deferPublication) {
+      _preparedEntry = (
+        server.id,
+        publish,
+        () {
+          attached.clearSession();
+          guarded?.clearSession();
+        },
+      );
+    } else {
+      sources.requireContentAccess(server.id);
+      serverAccess.commitEntry(server.id, null, publishConnection: publish);
+    }
   }
 
   SavedServer? _serverById(String id) {
@@ -1340,7 +1379,7 @@ class AuthController extends ChangeNotifier {
     bool current() => ownsSession() && _ownsActivation(generation);
     if (!current()) return false;
     try {
-      final credentialCommit = await sources.beginOrdinaryCredentials(
+      final credentialCommit = await sources.beginCredentials(
         session.server.id,
       );
       final stored = await credentials.read(session.server.id);
@@ -1352,6 +1391,10 @@ class AuthController extends ChangeNotifier {
       selectedClient.setUserAgent(session.server.normalizedUserAgent);
       final verifiedServerId = session.server.expectedServerId;
       if (verifiedServerId == null) return false;
+      final info = await selectedClient.getPublicInfo(
+        Uri.parse(session.server.baseUrl),
+      );
+      if (!current() || info.id != verifiedServerId) return false;
       final auth = await selectedClient.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
@@ -1376,12 +1419,13 @@ class AuthController extends ChangeNotifier {
       }
       _refreshingSelection = true;
       try {
-        await sources.commitOrdinaryCredentials(credentialCommit, next);
+        await sources.commitCredentials(credentialCommit, next);
         if (!current()) return false;
         await _activate(
           session.server,
           next,
           generation: generation,
+          preserveContentOwner: true,
           guard: () {
             if (!current()) throw StateError('Refresh superseded');
           },
@@ -1425,12 +1469,17 @@ class AuthController extends ChangeNotifier {
 
   @override
   void dispose() {
+    serverEntry.cancel();
+    serverAccess.dispose();
     _disposed = true;
+    serverAccess.removeListener(_accessChanged);
+    _cancelEntry();
     _activationGeneration++;
     _client.clearSession();
     _guardedClient?.clearSession();
     _resetLibraryCounts();
     connectDraft = null;
+    _playbackImageClient?.clearSession();
     sources.removeMembershipCleanup(_clearSourceContribution);
     sources.removeSourceRevocation(_sourceChanged);
     sources.dispose();

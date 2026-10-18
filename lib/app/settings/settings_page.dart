@@ -2,8 +2,17 @@ import '../updates/update_check.dart';
 import '../product.dart';
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/credential_store.dart';
+import 'package:rillight/webdav/webdav_backup.dart';
+import 'package:rillight/webdav/webdav_client.dart';
+import 'package:rillight/webdav/webdav_config.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/phone_nav_style.dart';
@@ -33,6 +42,12 @@ class SettingsPage extends StatefulWidget {
     this.platform,
     this.appearance,
     this.showTitle = true,
+    this.auth,
+    this.webdavStore,
+    this.webdavDirectory,
+    this.webdavClientFactory,
+    this.webdavBundleCollector,
+    this.webdavBundleApplier,
   });
 
   /// 测试注入;运行时留空用当前平台。
@@ -43,6 +58,34 @@ class SettingsPage extends StatefulWidget {
   /// 测试注入的外观控制器;运行时留空走 [AppearanceScope]。
   final AppearanceController? appearance;
 
+  /// 测试注入的鉴权控制器;运行时留空走 [AuthScope]。
+  /// WebDAV 恢复后经它触发凭据与服务器列表的原位重载。
+  final AuthController? auth;
+
+  /// 测试注入的 WebDAV 配置存储;运行时按应用支持目录落 webdav.json。
+  final WebDavConfigStore? webdavStore;
+
+  /// 测试注入的备份根目录;采集与应用 bundle 都在这里。
+  final Directory? webdavDirectory;
+
+  /// 测试注入的客户端工厂;运行时直接按配置构造真实客户端。
+  final WebDavClient Function(WebDavConfig config)? webdavClientFactory;
+
+  /// 测试注入的 bundle 采集器;运行时直接采集本地文件。
+  final Future<Map<String, dynamic>> Function(
+    Directory directory,
+    CredentialStore credentials,
+  )?
+  webdavBundleCollector;
+
+  /// 测试注入的 bundle 应用器;运行时直接应用下载字节。
+  final Future<WebDavApplyResult> Function(
+    List<int> bytes,
+    Directory directory,
+    CredentialStore credentials,
+  )?
+  webdavBundleApplier;
+
   static const diskCacheLimitKey = Key('settings-disk-cache-limit');
   static const hardwareDecodingKey = Key('settings-hardware-decoding');
   static const decoderBackendKey = Key('settings-decoder-backend');
@@ -52,6 +95,16 @@ class SettingsPage extends StatefulWidget {
   static const danmakuTokenFieldKey = Key('settings-danmaku-token');
   static const restoreDefaultsKey = Key('settings-restore-defaults');
   static const tokenVisibilityKey = Key('settings-token-visibility');
+  static const webDavAddressFieldKey = Key('settings-webdav-address');
+  static const webDavUsernameFieldKey = Key('settings-webdav-username');
+  static const webDavPasswordFieldKey = Key('settings-webdav-password');
+  static const webDavDirectoryFieldKey = Key('settings-webdav-directory');
+  static const webDavPasswordVisibilityKey = Key(
+    'settings-webdav-password-visibility',
+  );
+  static const webDavTestConnectionKey = Key('settings-webdav-test-connection');
+  static const webDavBackupKey = Key('settings-webdav-backup');
+  static const webDavRestoreKey = Key('settings-webdav-restore');
   static const columnKey = Key('settings-column');
   static const navKey = Key('settings-nav');
 
@@ -77,11 +130,26 @@ class _SettingsPageState extends State<SettingsPage> {
   final _danmakuServerFocus = FocusNode();
   final _danmakuAppIdFocus = FocusNode();
   final _danmakuTokenFocus = FocusNode();
+  final _webdavAddressController = TextEditingController();
+  final _webdavUsernameController = TextEditingController();
+  final _webdavPasswordController = TextEditingController();
+  final _webdavDirectoryController = TextEditingController();
+  final _webdavAddressFocus = FocusNode();
+  final _webdavUsernameFocus = FocusNode();
+  final _webdavPasswordFocus = FocusNode();
+  final _webdavDirectoryFocus = FocusNode();
 
   PlayerSettingsStore? _store;
   PlayerSettings _settings = const PlayerSettings();
   var _loaded = false;
   var _tokenVisible = false;
+
+  WebDavConfigStore? _webdavStore;
+  Directory? _webdavDirectory;
+  WebDavConfig _webdavConfig = const WebDavConfig();
+  var _webdavLoaded = false;
+  var _webdavPasswordVisible = false;
+  _WebDavAction? _webdavAction;
 
   /// 宽窗口两栏布局里当前打开的分类标题;null 表示默认分类。
   String? _selectedSection;
@@ -94,7 +162,11 @@ class _SettingsPageState extends State<SettingsPage> {
     _danmakuServerFocus.addListener(_handleDanmakuServerFocusChange);
     _danmakuAppIdFocus.addListener(_handleDanmakuAppIdFocusChange);
     _danmakuTokenFocus.addListener(_handleDanmakuTokenFocusChange);
+    for (final node in _webDavFocusNodes) {
+      node.addListener(_handleWebDavFocusChange);
+    }
     _load();
+    _loadWebDav();
   }
 
   @override
@@ -102,14 +174,32 @@ class _SettingsPageState extends State<SettingsPage> {
     _danmakuServerFocus.removeListener(_handleDanmakuServerFocusChange);
     _danmakuAppIdFocus.removeListener(_handleDanmakuAppIdFocusChange);
     _danmakuTokenFocus.removeListener(_handleDanmakuTokenFocusChange);
+    for (final node in _webDavFocusNodes) {
+      node.removeListener(_handleWebDavFocusChange);
+    }
     _danmakuServerFocus.dispose();
     _danmakuAppIdFocus.dispose();
     _danmakuTokenFocus.dispose();
     _danmakuServerController.dispose();
     _danmakuAppIdController.dispose();
     _danmakuTokenController.dispose();
+    _webdavAddressFocus.dispose();
+    _webdavUsernameFocus.dispose();
+    _webdavPasswordFocus.dispose();
+    _webdavDirectoryFocus.dispose();
+    _webdavAddressController.dispose();
+    _webdavUsernameController.dispose();
+    _webdavPasswordController.dispose();
+    _webdavDirectoryController.dispose();
     super.dispose();
   }
+
+  List<FocusNode> get _webDavFocusNodes => [
+    _webdavAddressFocus,
+    _webdavUsernameFocus,
+    _webdavPasswordFocus,
+    _webdavDirectoryFocus,
+  ];
 
   Future<void> _load() async {
     try {
@@ -171,6 +261,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   TargetPlatform get _platform => widget.platform ?? defaultTargetPlatform;
+
+  /// WebDAV 动作可用:配置已加载且没有动作进行中。
+  bool get _webDavIdle => _webdavLoaded && _webdavAction == null;
 
   void _handleDanmakuServerFocusChange() {
     // 失焦即提交,点击页面其他区域也能保存输入。
@@ -253,6 +346,335 @@ class _SettingsPageState extends State<SettingsPage> {
       if (_danmakuTokenController.text != token) {
         _danmakuTokenController.text = token;
       }
+    }
+  }
+
+  AuthController? get _authController =>
+      widget.auth ?? AuthScope.maybeOf(context);
+
+  /// 生产备份根目录:与 [createProductionAuth] 同一应用支持目录,
+  /// 校验环境可用环境变量隔离到一次性目录。
+  Future<Directory> _defaultWebDavDirectory() async {
+    final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];
+    if (validation != null && validation.isNotEmpty) {
+      if (!Directory(validation).isAbsolute) {
+        throw ArgumentError('Validation directory must be absolute');
+      }
+      return Directory(validation);
+    }
+    final support = await getApplicationSupportDirectory();
+    return Directory('${support.path}/rillight');
+  }
+
+  Future<void> _loadWebDav() async {
+    try {
+      final directory =
+          widget.webdavDirectory ?? await _defaultWebDavDirectory();
+      final store =
+          widget.webdavStore ??
+          WebDavConfigStore(File('${directory.path}/webdav.json'));
+      final config = await store.load();
+      if (!mounted) {
+        return;
+      }
+      _webdavDirectory = directory;
+      _webdavStore = store;
+      _webdavConfig = config;
+      _syncWebDavControllers();
+      setState(() => _webdavLoaded = true);
+    } on FormatException {
+      // 配置损坏时保留原文件;空表单重新保存即可修复。
+      if (!mounted) {
+        return;
+      }
+      setState(() => _webdavLoaded = true);
+      AppNoticeHost.of(context)
+          .show(AppLocalizations.of(context).settingsWebDavLocalConfigCorrupt);
+    } on Object {
+      if (mounted) {
+        setState(() => _webdavLoaded = true);
+      }
+    }
+  }
+
+  void _handleWebDavFocusChange() {
+    for (final node in _webDavFocusNodes) {
+      if (node.hasFocus) {
+        return;
+      }
+    }
+    unawaited(_commitWebDavConfig());
+  }
+
+  WebDavConfig get _currentWebDavConfig => WebDavConfig(
+    address: _webdavAddressController.text.trim(),
+    username: _webdavUsernameController.text.trim(),
+    password: _webdavPasswordController.text,
+    directory: _webdavDirectoryController.text.trim(),
+  );
+
+  bool _webDavConfigEquals(WebDavConfig a, WebDavConfig b) =>
+      a.address == b.address &&
+      a.username == b.username &&
+      a.password == b.password &&
+      a.directory == b.directory;
+
+  /// 提交表单到 webdav.json;与已存值一致时不写。失败给出可重试提示。
+  Future<bool> _commitWebDavConfig() async {
+    final store = _webdavStore;
+    if (store == null || !_webdavLoaded) {
+      return false;
+    }
+    final config = _currentWebDavConfig;
+    if (_webDavConfigEquals(config, _webdavConfig)) {
+      return true;
+    }
+    try {
+      await store.save(config);
+      _webdavConfig = config;
+      return true;
+    } on Object {
+      if (mounted) {
+        AppNoticeHost.of(context)
+            .show(AppLocalizations.of(context).settingsWebDavSaveFailed);
+      }
+      return false;
+    }
+  }
+
+  void _syncWebDavControllers() {
+    void sync(TextEditingController controller, FocusNode focus, String value) {
+      if (!focus.hasFocus && controller.text != value) {
+        controller.text = value;
+      }
+    }
+
+    sync(_webdavAddressController, _webdavAddressFocus, _webdavConfig.address);
+    sync(
+      _webdavUsernameController,
+      _webdavUsernameFocus,
+      _webdavConfig.username,
+    );
+    sync(
+      _webdavPasswordController,
+      _webdavPasswordFocus,
+      _webdavConfig.password,
+    );
+    sync(
+      _webdavDirectoryController,
+      _webdavDirectoryFocus,
+      _webdavConfig.directory,
+    );
+  }
+
+  WebDavClient _webDavClientFor(WebDavConfig config) =>
+      widget.webdavClientFactory?.call(config) ??
+      WebDavClient.fromConfig(config);
+
+  /// 动作前置:先落盘表单,未配置地址时给出指引而不是静默失败。
+  Future<bool> _beginWebDavAction(_WebDavAction action) async {
+    if (_webdavAction != null) {
+      return false;
+    }
+    if (!await _commitWebDavConfig()) {
+      return false;
+    }
+    if (_webdavConfig.address.isEmpty) {
+      if (mounted) {
+        AppNoticeHost.of(context)
+            .show(AppLocalizations.of(context).settingsWebDavNotConfigured);
+      }
+      return false;
+    }
+    setState(() => _webdavAction = action);
+    return true;
+  }
+
+  void _finishWebDavAction() {
+    if (mounted) {
+      setState(() => _webdavAction = null);
+    }
+  }
+
+  String _webDavFailureMessage(
+    AppLocalizations l10n,
+    WebDavFailureKind kind,
+    int? statusCode, {
+    required String fallback,
+  }) => switch (kind) {
+    WebDavFailureKind.credentialError => l10n.settingsWebDavCredentialError,
+    WebDavFailureKind.unreachable => l10n.settingsWebDavUnreachable,
+    WebDavFailureKind.httpError =>
+      statusCode != null ? l10n.settingsWebDavHttpError(statusCode) : fallback,
+  };
+
+  Future<void> _testWebDavConnection() async {
+    final l10n = AppLocalizations.of(context);
+    if (!await _beginWebDavAction(_WebDavAction.testing)) {
+      return;
+    }
+    try {
+      final result = await _webDavClientFor(_webdavConfig).testConnection();
+      if (!mounted) {
+        return;
+      }
+      AppNoticeHost.of(context).show(switch (result) {
+        WebDavConnectionSuccess() => l10n.settingsWebDavConnectionOk,
+        WebDavConnectionCredentialError() => l10n.settingsWebDavCredentialError,
+        WebDavConnectionDirectoryMissing() =>
+          l10n.settingsWebDavDirectoryMissing,
+        WebDavConnectionHttpError(:final statusCode) =>
+          l10n.settingsWebDavHttpError(statusCode),
+        WebDavConnectionUnreachable() => l10n.settingsWebDavUnreachable,
+      });
+    } finally {
+      _finishWebDavAction();
+    }
+  }
+
+  String _webDavTimestamp() {
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${now.year}-${two(now.month)}-${two(now.day)} '
+        '${two(now.hour)}:${two(now.minute)}';
+  }
+
+  Future<void> _backupToWebDav() async {
+    final l10n = AppLocalizations.of(context);
+    final auth = _authController;
+    final directory = _webdavDirectory;
+    if (!await _beginWebDavAction(_WebDavAction.backingUp)) {
+      return;
+    }
+    try {
+      if (auth == null || directory == null) {
+        if (mounted) {
+          AppNoticeHost.of(context).show(l10n.settingsWebDavBackupFailed);
+        }
+        return;
+      }
+      Map<String, dynamic> bundle;
+      try {
+        final collect = widget.webdavBundleCollector ?? collectBackupBundle;
+        bundle = await collect(directory, auth.credentials);
+      } on FormatException {
+        if (mounted) {
+          AppNoticeHost.of(context).show(l10n.settingsWebDavLocalConfigCorrupt);
+        }
+        return;
+      } on Object {
+        if (mounted) {
+          AppNoticeHost.of(context).show(l10n.settingsWebDavBackupFailed);
+        }
+        return;
+      }
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(bundle)));
+      final result = await _webDavClientFor(_webdavConfig).upload(bytes);
+      if (!mounted) {
+        return;
+      }
+      AppNoticeHost.of(context).show(switch (result) {
+        WebDavUploadSuccess() => l10n.settingsWebDavBackupDone(
+          _webDavTimestamp(),
+        ),
+        WebDavUploadFailure(:final kind, :final statusCode) =>
+          _webDavFailureMessage(
+            l10n,
+            kind,
+            statusCode,
+            fallback: l10n.settingsWebDavBackupFailed,
+          ),
+      });
+    } finally {
+      _finishWebDavAction();
+    }
+  }
+
+  Future<void> _restoreFromWebDav() async {
+    final l10n = AppLocalizations.of(context);
+    final auth = _authController;
+    final directory = _webdavDirectory;
+    if (!await _beginWebDavAction(_WebDavAction.restoring)) {
+      return;
+    }
+    try {
+      if (auth == null || directory == null) {
+        if (mounted) {
+          AppNoticeHost.of(context).show(l10n.settingsWebDavRestoreFailed);
+        }
+        return;
+      }
+      final download = await _webDavClientFor(_webdavConfig).download();
+      if (!mounted) {
+        return;
+      }
+      if (download is WebDavDownloadNoBackup) {
+        AppNoticeHost.of(context).show(l10n.settingsWebDavNoBackup);
+        return;
+      }
+      if (download is WebDavDownloadFailure) {
+        AppNoticeHost.of(context).show(
+          _webDavFailureMessage(
+            l10n,
+            download.kind,
+            download.statusCode,
+            fallback: l10n.settingsWebDavRestoreFailed,
+          ),
+        );
+        return;
+      }
+      final apply = widget.webdavBundleApplier ?? applyBackupBundleBytes;
+      final applied = await apply(
+        (download as WebDavDownloadSuccess).bytes,
+        directory,
+        auth.credentials,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (applied is WebDavApplyRejected) {
+        // 校验拒绝时零写入,本地数据保持原样。
+        AppNoticeHost.of(context).show(l10n.settingsWebDavRestoreRejected);
+        return;
+      }
+      await _reloadAfterRestore();
+      if (mounted) {
+        AppNoticeHost.of(context).show(l10n.settingsWebDavRestored);
+      }
+    } on Object {
+      if (mounted) {
+        AppNoticeHost.of(context).show(l10n.settingsWebDavRestoreFailed);
+      }
+    } finally {
+      _finishWebDavAction();
+    }
+  }
+
+  /// 恢复成功后的原位重载:bundle 可能改写了 webdav.json 与服务器列表,
+  /// 先回填表单,再经 [AuthController.restore] 重建服务器列表与登录态。
+  Future<void> _reloadAfterRestore() async {
+    final store = _webdavStore;
+    if (store != null) {
+      try {
+        _webdavConfig = await store.load();
+        _syncWebDavControllers();
+      } on Object {
+        // 表单保持旧值即可,不影响已完成的恢复。
+      }
+    }
+    final auth = _authController;
+    if (auth == null) {
+      return;
+    }
+    try {
+      await auth.sources.load();
+    } on Object {
+      // 注册表加载失败时仍尝试控制器恢复。
+    }
+    try {
+      await auth.restore();
+    } on Object {
+      // 恢复动作本身不弹失败:文件已应用,重载失败由界面各自呈现。
     }
   }
 
@@ -581,6 +1003,123 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+      _SettingsSectionSpec(
+        icon: AppIcons.cloud,
+        title: l10n.settingsWebDavSection,
+        subtitle: l10n.settingsWebDavSectionSummary,
+        children: [
+          _SettingsField(
+            label: l10n.settingsWebDavAddress,
+            child: AppTextField(
+              key: SettingsPage.webDavAddressFieldKey,
+              controller: _webdavAddressController,
+              focusNode: _webdavAddressFocus,
+              enabled: _webdavLoaded,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) {
+                unawaited(_commitWebDavConfig());
+                _webdavUsernameFocus.requestFocus();
+              },
+              placeholder: l10n.settingsWebDavAddressHint,
+            ),
+          ),
+          _SettingsField(
+            label: l10n.settingsWebDavUsername,
+            child: AppTextField(
+              key: SettingsPage.webDavUsernameFieldKey,
+              controller: _webdavUsernameController,
+              focusNode: _webdavUsernameFocus,
+              enabled: _webdavLoaded,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) {
+                unawaited(_commitWebDavConfig());
+                _webdavPasswordFocus.requestFocus();
+              },
+            ),
+          ),
+          _SettingsField(
+            label: l10n.settingsWebDavPassword,
+            child: AppTextField(
+              key: SettingsPage.webDavPasswordFieldKey,
+              controller: _webdavPasswordController,
+              focusNode: _webdavPasswordFocus,
+              enabled: _webdavLoaded,
+              obscureText: !_webdavPasswordVisible,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) {
+                unawaited(_commitWebDavConfig());
+                _webdavDirectoryFocus.requestFocus();
+              },
+              suffix: AppIconButton(
+                key: SettingsPage.webDavPasswordVisibilityKey,
+                tooltip: _webdavPasswordVisible
+                    ? l10n.settingsWebDavPasswordHide
+                    : l10n.settingsWebDavPasswordShow,
+                onPressed: () {
+                  setState(
+                    () => _webdavPasswordVisible = !_webdavPasswordVisible,
+                  );
+                },
+                icon: Icon(
+                  AppIcons.visibility,
+                  fill: _webdavPasswordVisible
+                      ? AppIcons.filled
+                      : AppIcons.outline,
+                ),
+              ),
+            ),
+          ),
+          _SettingsField(
+            label: l10n.settingsWebDavDirectory,
+            child: AppTextField(
+              key: SettingsPage.webDavDirectoryFieldKey,
+              controller: _webdavDirectoryController,
+              focusNode: _webdavDirectoryFocus,
+              enabled: _webdavLoaded,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => unawaited(_commitWebDavConfig()),
+              placeholder: l10n.settingsWebDavDirectoryHint,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                AppButton.icon(
+                  key: SettingsPage.webDavTestConnectionKey,
+                  onPressed: _webDavIdle
+                      ? () => unawaited(_testWebDavConnection())
+                      : null,
+                  icon: const Icon(AppIcons.lan, fill: AppIcons.filled),
+                  label: Text(l10n.settingsWebDavTestConnection),
+                  variant: AppButtonVariant.tinted,
+                ),
+                AppButton.icon(
+                  key: SettingsPage.webDavBackupKey,
+                  onPressed: _webDavIdle
+                      ? () => unawaited(_backupToWebDav())
+                      : null,
+                  icon: const Icon(AppIcons.cloud, fill: AppIcons.filled),
+                  label: Text(l10n.settingsWebDavBackup),
+                  variant: AppButtonVariant.outlined,
+                ),
+                AppButton.icon(
+                  key: SettingsPage.webDavRestoreKey,
+                  onPressed: _webDavIdle
+                      ? () => unawaited(_restoreFromWebDav())
+                      : null,
+                  icon: const Icon(AppIcons.download, fill: AppIcons.filled),
+                  label: Text(l10n.settingsWebDavRestore),
+                  variant: AppButtonVariant.outlined,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     ];
 
     return LayoutBuilder(
@@ -803,6 +1342,9 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 }
+
+/// WebDAV 分节动作的进行中状态;任一动作进行时三个按钮全部禁用。
+enum _WebDavAction { testing, backingUp, restoring }
 
 /// 页面内存态合并:补丁未携带的字段保持当前值,避免稀疏写把下拉框与服务输入清空。
 PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {

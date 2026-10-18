@@ -1327,10 +1327,34 @@ class _AppDisclosureState extends State<AppDisclosure> {
 
 /// Pull-to-refresh for existing list and grid scroll trees. Keeps their scroll
 /// controller and viewport mounted while a Cupertino activity indicator runs.
+///
+/// The indicator is a floating disc that follows the finger, shows how far
+/// the pull is from the trigger point and spins while [onRefresh] runs.
+/// Android uses clamping physics, so the content itself does not move; the
+/// disc is the only feedback and therefore must never hide under a
+/// transparent status bar or top bar. Full-bleed pages pass [edgeOffset]
+/// (status bar plus any overlaid bar) so it appears below them.
 class AppRefresh extends StatefulWidget {
-  const AppRefresh({super.key, required this.onRefresh, required this.child});
+  const AppRefresh({
+    super.key,
+    required this.onRefresh,
+    required this.child,
+    this.edgeOffset = 0,
+  });
   final Future<void> Function() onRefresh;
   final Widget child;
+
+  /// Distance from the top of this widget to the first visible content row.
+  final double edgeOffset;
+
+  /// Pull distance that triggers a refresh on release.
+  static const triggerDistance = 72.0;
+  static const _maxPull = 132.0;
+  static const _discSize = 40.0;
+
+  /// Floating indicator disc, for tests and captures.
+  static const indicatorKey = Key('app-refresh-indicator');
+
   @override
   State<AppRefresh> createState() => _AppRefreshState();
 }
@@ -1338,6 +1362,18 @@ class AppRefresh extends StatefulWidget {
 class _AppRefreshState extends State<AppRefresh> {
   double _pull = 0;
   bool _busy = false;
+  bool _armed = false;
+
+  void _setPull(double value) {
+    final next = value.clamp(0.0, AppRefresh._maxPull);
+    final armed = next >= AppRefresh.triggerDistance;
+    if (armed && !_armed) HapticFeedback.selectionClick();
+    setState(() {
+      _pull = next;
+      _armed = armed;
+    });
+  }
+
   Future<void> _refresh() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -1348,6 +1384,7 @@ class _AppRefreshState extends State<AppRefresh> {
         setState(() {
           _busy = false;
           _pull = 0;
+          _armed = false;
         });
       }
     }
@@ -1358,47 +1395,173 @@ class _AppRefreshState extends State<AppRefresh> {
     if (n is OverscrollNotification &&
         n.dragDetails != null &&
         n.overscroll < 0) {
-      setState(() => _pull = (_pull - n.overscroll).clamp(0, 120));
+      // Clamping physics: resist a little so the disc trails the finger.
+      _setPull(_pull - n.overscroll * .7);
     } else if (n is ScrollUpdateNotification &&
         n.dragDetails != null &&
         n.metrics.pixels < n.metrics.minScrollExtent) {
-      setState(
-        () => _pull = (n.metrics.minScrollExtent - n.metrics.pixels).clamp(
-          0,
-          120,
-        ),
-      );
+      _setPull(n.metrics.minScrollExtent - n.metrics.pixels);
     } else if (n is ScrollUpdateNotification &&
         n.dragDetails != null &&
         _pull > 0 &&
         (n.scrollDelta ?? 0) > 0) {
-      setState(() => _pull = (_pull - n.scrollDelta!).clamp(0, 120));
+      _setPull(_pull - n.scrollDelta!);
     } else if (n is ScrollEndNotification) {
-      if (_pull >= 64) {
+      if (_pull >= AppRefresh.triggerDistance) {
         _refresh();
       } else if (_pull != 0) {
-        setState(() => _pull = 0);
+        setState(() {
+          _pull = 0;
+          _armed = false;
+        });
       }
     }
     return false;
   }
 
   @override
-  Widget build(BuildContext context) => Stack(
-    children: [
-      NotificationListener<ScrollNotification>(
-        onNotification: _notify,
-        child: widget.child,
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final progress = _busy
+        ? 1.0
+        : (_pull / AppRefresh.triggerDistance).clamp(0.0, 1.0);
+    // Busy: rest just below the content edge. Pulling: slide in with the
+    // finger from above the edge.
+    final travel = _busy
+        ? AppSpacing.md
+        : _pull * .55 - AppRefresh._discSize * .5;
+    final visible = _busy || _pull > 0;
+    return Stack(
+      children: [
+        NotificationListener<ScrollNotification>(
+          onNotification: _notify,
+          child: widget.child,
+        ),
+        if (visible)
+          Positioned(
+            top: widget.edgeOffset + travel,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Opacity(
+                  opacity: _busy ? 1 : (.35 + progress * .65),
+                  child: Container(
+                    key: AppRefresh.indicatorKey,
+                    width: AppRefresh._discSize,
+                    height: AppRefresh._discSize,
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: scheme.outlineVariant.withValues(alpha: .6),
+                        width: .5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF000000).withValues(alpha: .22),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: _busy
+                        ? CupertinoActivityIndicator(
+                            color: scheme.primary,
+                            radius: 9,
+                          )
+                        : _RefreshDial(
+                            progress: progress,
+                            armed: _armed,
+                            color: scheme.primary,
+                            track: scheme.outlineVariant,
+                          ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Arc that fills toward the trigger point, with an arrow that flips once the
+/// release would refresh.
+class _RefreshDial extends StatelessWidget {
+  const _RefreshDial({
+    required this.progress,
+    required this.armed,
+    required this.color,
+    required this.track,
+  });
+  final double progress;
+  final bool armed;
+  final Color color;
+  final Color track;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 24,
+    child: CustomPaint(
+      painter: _RefreshArcPainter(
+        progress: progress,
+        color: color,
+        track: track,
       ),
-      if (_busy || _pull > 0)
-        Positioned(
-          top: 12,
-          left: 0,
-          right: 0,
-          child: IgnorePointer(
-            child: Center(child: CupertinoActivityIndicator(animating: _busy)),
+      child: Center(
+        child: AnimatedRotation(
+          turns: armed ? .5 : 0,
+          duration: AppMotion.durationOf(context, AppMotion.fast),
+          child: Icon(
+            CupertinoIcons.arrow_down,
+            size: 12,
+            color: armed ? color : track,
           ),
         ),
-    ],
+      ),
+    ),
   );
+}
+
+class _RefreshArcPainter extends CustomPainter {
+  const _RefreshArcPainter({
+    required this.progress,
+    required this.color,
+    required this.track,
+  });
+  final double progress;
+  final Color color;
+  final Color track;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(
+      rect.deflate(1.1),
+      0,
+      6.2832,
+      false,
+      stroke..color = track.withValues(alpha: .45),
+    );
+    if (progress > 0) {
+      canvas.drawArc(
+        rect.deflate(1.1),
+        -1.5708,
+        6.2832 * progress,
+        false,
+        stroke..color = color,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RefreshArcPainter old) =>
+      old.progress != progress || old.color != color || old.track != track;
 }

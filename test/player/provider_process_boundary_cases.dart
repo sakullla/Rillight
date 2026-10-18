@@ -72,6 +72,51 @@ void main() {
       isNull,
     );
   });
+  for (final legacyField in ['source-region', 'region-generation']) {
+    for (final pending in [false, true]) {
+      test(
+        'legacy $legacyField in ${pending ? 'pending cleanup' : 'snapshot'} cannot regain playback authority',
+        () {
+          const ref = SourceReference(
+            account: SourceAccount(
+              configuredServerId: 'configured',
+              verifiedServerId: 'server',
+              userId: 'user',
+            ),
+            itemId: 'item',
+          );
+          final snapshot = PlaybackSessionSnapshot(
+            itemId: 'item',
+            mediaSourceId: 'version',
+            playSessionId: 'session',
+            position: const Duration(seconds: 10),
+            baseUrl: 'https://source.test',
+            userId: 'user',
+            timestamp: DateTime.utc(2026),
+            source: ref,
+            accessGeneration: 1,
+            cleanupOnly: pending,
+          );
+          final old = snapshot.toJson();
+          if (legacyField == 'source-region') {
+            (old['source'] as Map)['region'] = 'private';
+          } else {
+            old.remove('accessGeneration');
+            old['regionGeneration'] = 1;
+          }
+          final wire = pending
+              ? <String, dynamic>{
+                  ...snapshot.toJson(),
+                  'cleanupOnly': false,
+                  'pendingCleanups': [old],
+                }
+              : old;
+          expect(PlaybackSessionSnapshot.fromJson(wire), isNull);
+        },
+      );
+    }
+  }
+
   for (final type in MediaServerType.values) {
     test(
       '${type.name} standalone factory and launch preserve provider identity',
@@ -82,7 +127,6 @@ void main() {
         final source = SourceReference(
           account: SourceAccount(
             serviceType: type,
-            region: AccessRegion.ordinary,
             configuredServerId: 'configured',
             verifiedServerId: 'server',
             userId: 'user',
@@ -118,7 +162,6 @@ void main() {
     final source = SourceReference(
       account: const SourceAccount(
         serviceType: MediaServerType.plex,
-        region: AccessRegion.ordinary,
         configuredServerId: 'configured',
         verifiedServerId: 'server',
         userId: 'child',

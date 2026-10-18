@@ -137,7 +137,13 @@ class PlaybackSwitchPlan {
       if (old == null) return null;
       if (sameVersion) {
         for (final stream in tracks) {
-          if (stream.index == old.index) return stream.index;
+          if (stream.index == old.index &&
+              stream.language?.trim().toLowerCase() ==
+                  old.language?.trim().toLowerCase() &&
+              stream.displayTitle?.trim().toLowerCase() ==
+                  old.displayTitle?.trim().toLowerCase()) {
+            return stream.index;
+          }
         }
         return null;
       }

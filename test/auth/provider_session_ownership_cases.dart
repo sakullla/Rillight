@@ -92,6 +92,7 @@ void main() {
           pollInterval: const Duration(milliseconds: 10),
           auth: auth,
         )..reset(MediaServerType.plex);
+        final gate = Completer<void>();
         try {
           fake.authorized = true;
           await connect.authorize('');
@@ -110,7 +111,6 @@ void main() {
           final old = auth.client;
           final expired = old.onSessionExpired!;
           final refresh = old.onRefreshSession!;
-          final gate = Completer<void>();
           final entered = Completer<void>();
           dio.interceptors.add(
             InterceptorsWrapper(
@@ -156,6 +156,7 @@ void main() {
           auth.client.onSessionExpired!();
           expect(auth.session, isNull, reason: 'current owner still expires');
         } finally {
+          if (!gate.isCompleted) gate.complete();
           connect.dispose();
           auth.dispose();
           dio.close(force: true);
@@ -236,6 +237,36 @@ void main() {
       }
     });
   }
+
+  test(
+    'failed explicit same-server activation preserves current facade',
+    () async {
+      final fake = JellyfinFakeServer();
+      await fake.start();
+      final auth = AuthController(
+        client: JellyfinClient(device: _device),
+        credentials: MemoryCredentialStore(),
+        servers: MemoryServerListStore(),
+      );
+      try {
+        final id = await _login(auth, fake);
+        await auth.loadLibraryCounts();
+        final selected = auth.session;
+        final retained = auth.client;
+        fake.nextStatus = 500;
+        await auth.switchTo(id);
+        expect(auth.failure, isNotNull);
+        expect(auth.session, same(selected));
+        expect(auth.client, same(retained));
+        expect((await retained.getItem('movie-1')).id, 'movie-1');
+        retained.onSessionExpired!();
+        expect(auth.session, isNull);
+      } finally {
+        auth.dispose();
+        await fake.close();
+      }
+    },
+  );
 
   for (final operation in ['restore', 'refresh']) {
     test(

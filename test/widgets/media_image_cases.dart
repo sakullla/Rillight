@@ -1,3 +1,5 @@
+import '../helpers/authenticated_image_fixture.dart';
+import '../helpers/settle.dart';
 import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 
@@ -108,12 +110,12 @@ void main() {
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
-    await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump(const Duration(milliseconds: 1));
   }
 
   Iterable<String> imageRequests() {
@@ -127,6 +129,52 @@ void main() {
     primaryImageTag: 'tag-img',
   );
 
+  test('attached clients need explicit playback image authority and revoke before dispatch', () async {
+    final dio = dioForFakeEmby(adapter);
+    final client = EmbyClient(device: _device, dio: dio);
+    server.issuedTokens.add('synthetic');
+    client.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: 'synthetic',
+      userId: 'user-alice',
+    );
+    final ordinary = AuthController.memory(client: client);
+    expect(mediaImageAccountScope(ordinary), isNull);
+    var authorized = true;
+    final playback = AuthController.forPlayback(
+      client: client,
+      isAuthorized: () => authorized,
+    );
+    expect(playback.session, isNull);
+    expect(playback.isLoggedIn, isFalse);
+    expect(mediaImageAccountScope(playback), isNotNull);
+    final images = playback.imageClient;
+    expect(await images.getItemImage('img-movie'), kTinyPng);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    fakeEmbyTransport(dio).interceptors.add(
+      InterceptorsWrapper(
+        onResponse: (response, handler) async {
+          entered.complete();
+          await release.future;
+          handler.next(response);
+        },
+      ),
+    );
+    final pending = images.getItemImage('img-movie');
+    final rejected = expectLater(pending, throwsA(anything));
+    await entered.future;
+    authorized = false;
+    release.complete();
+    await rejected;
+    final before = server.requests.length;
+    expect(mediaImageAccountScope(playback), isNull);
+    await expectLater(images.getItemImage('img-movie'), throwsA(anything));
+    expect(server.requests.length, before);
+    playback.dispose();
+    ordinary.dispose();
+  });
+
   testWidgets('warm posters stop observing every scroll pixel', (tester) async {
     const warmPoster = MediaItem(
       id: 'warm-scroll-poster',
@@ -135,11 +183,7 @@ void main() {
       primaryImageTag: 'warm-scroll-tag',
     );
     final client = _ControlledImageClient();
-    final auth = AuthController(
-      client: client,
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
-    );
+    final auth = await authenticatedImageFixture(tester, client);
     addTearDown(auth.dispose);
     final scroll = _ListenerCountingController();
     addTearDown(scroll.dispose);
@@ -165,7 +209,7 @@ void main() {
     final position = scroll.position as _ListenerCountingPosition;
     final baseline = position.listenerCount;
     show.value = true;
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     await pumpUntilImage(tester);
     expect(find.byType(Image), findsOneWidget);
     expect(
@@ -175,7 +219,7 @@ void main() {
     );
     final requests = client.requested.length;
     scroll.jumpTo(50);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(client.requested, hasLength(requests));
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -197,7 +241,7 @@ void main() {
         return data!.buffer.asUint8List();
       }))!;
       final client = _CorruptBackdropClient(good);
-      final auth = AuthController.memory(client: client);
+      final auth = await authenticatedImageFixture(tester, client);
       addTearDown(auth.dispose);
       final disk = _FakeDiskStore();
       MediaImageCache.instance.debugSetDiskStore(disk);
@@ -330,7 +374,7 @@ void main() {
     await tester.runAsync(() async {
       await tester.pumpWidget(buildSubject(auth, withTag));
       for (var i = 0; i < 30 && imageRequests().isEmpty; i++) {
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1));
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
     });
@@ -346,7 +390,7 @@ void main() {
     });
     await tester.runAsync(() async {
       for (var i = 0; i < 30 && imageRequests().length < 2; i++) {
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1));
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
     });
@@ -388,17 +432,11 @@ void main() {
     );
   }
 
-  AuthController detachedAuth(_ControlledImageClient client) => AuthController(
-    client: client,
-    credentials: MemoryCredentialStore(),
-    servers: MemoryServerListStore(),
-  );
-
   testWidgets('season banner prefers the series backdrop over its poster', (
     tester,
   ) async {
     final client = _ControlledImageClient();
-    final auth = detachedAuth(client);
+    final auth = await authenticatedImageFixture(tester, client);
     addTearDown(auth.dispose);
     const season = MediaItem(
       id: 'img-season',
@@ -427,7 +465,7 @@ void main() {
     tester,
   ) async {
     final client = _ControlledImageClient()..hold = true;
-    final auth = detachedAuth(client);
+    final auth = await authenticatedImageFixture(tester, client);
     final boundaryKey = GlobalKey();
     final bytes = (await tester.runAsync(() async {
       final recorder = ui.PictureRecorder();
@@ -464,12 +502,12 @@ void main() {
     }
 
     await tester.pumpWidget(subject(BoxFit.contain));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     client.pending['img-movie']!.complete(bytes);
     await pumpUntilImage(tester);
     expect(await topPixel(), [0, 0, 0, 255]);
     await tester.pumpWidget(subject(BoxFit.cover));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(await topPixel(), [255, 0, 0, 255]);
     expect(client.requested, ['img-movie']);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -479,7 +517,7 @@ void main() {
     tester,
   ) async {
     final client = _ControlledImageClient()..hold = true;
-    final auth = detachedAuth(client);
+    final auth = await authenticatedImageFixture(tester, client);
     final page = ScrollController();
     addTearDown(page.dispose);
     MediaImageCache.instance.markScrollActivity();
@@ -511,12 +549,12 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(MediaImage, skipOffstage: false), findsOneWidget);
     expect(client.requested, isEmpty, reason: 'cached row is outside the page');
     page.jumpTo(300);
-    await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump(const Duration(milliseconds: 1));
     expect(client.requested, ['img-movie']);
     client.pending['img-movie']!.complete(kTinyPng);
     await pumpUntilImage(tester);
@@ -529,7 +567,7 @@ void main() {
     tester,
   ) async {
     final client = _ControlledImageClient();
-    final auth = detachedAuth(client);
+    final auth = await authenticatedImageFixture(tester, client);
     addTearDown(auth.dispose);
     await tester.pumpWidget(
       wrap(
@@ -563,49 +601,50 @@ void main() {
     await tester.pump(MediaImageCache.defaultScrollIdle);
   });
 
-  testWidgets(
-    'attached player client loads and isolates endpoint, user and logout',
-    (tester) async {
-      final client = _ControlledImageClient();
-      final auth = detachedAuth(client);
-      expect(auth.session, isNull);
-      expect(auth.isLoggedIn, isFalse);
+  testWidgets('entered session loads and isolates endpoint, user and logout', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient();
+    final auth = await authenticatedImageFixture(tester, client);
+    expect(auth.session, isNotNull);
+    expect(auth.isLoggedIn, isTrue);
+    await tester.pumpWidget(buildSubject(auth, withTag));
+    await pumpUntilImage(tester);
+    expect(client.requested, ['img-movie']);
+    expect(find.byType(Image), findsOneWidget);
+    var provider = tester.widget<Image>(find.byType(Image)).image;
+
+    for (final identity in [
+      ('https://second.example/emby', 'alice'),
+      ('https://second.example/emby', 'bob'),
+    ]) {
+      await tester.runAsync(
+        () => changeImageFixtureAccount(
+          auth,
+          address: identity.$1,
+          username: identity.$2,
+        ),
+      );
       await tester.pumpWidget(buildSubject(auth, withTag));
       await pumpUntilImage(tester);
-      expect(client.requested, ['img-movie']);
-      expect(find.byType(Image), findsOneWidget);
-      var provider = tester.widget<Image>(find.byType(Image)).image;
-
-      for (final identity in [
-        ('https://second.example/emby', 'alice'),
-        ('https://second.example/emby', 'bob'),
-      ]) {
-        client.attachSession(
-          baseUrl: Uri.parse(identity.$1),
-          accessToken: 'synthetic',
-          userId: identity.$2,
-        );
-        await tester.pumpWidget(buildSubject(auth, withTag));
-        await pumpUntilImage(tester);
-        final next = tester.widget<Image>(find.byType(Image)).image;
-        expect(next, isNot(provider));
-        provider = next;
-      }
-      expect(client.requested, hasLength(3));
-      client.clearSession();
-      await tester.pumpWidget(buildSubject(auth, withTag));
-      await tester.pump();
-      expect(find.byType(Image), findsNothing);
-      expect(find.byType(PosterPlaceholder), findsOneWidget);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+      final next = tester.widget<Image>(find.byType(Image)).image;
+      expect(next, isNot(provider));
+      provider = next;
+    }
+    expect(client.requested, hasLength(3));
+    await tester.runAsync(auth.logout);
+    await tester.pumpWidget(buildSubject(auth, withTag));
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(find.byType(Image), findsNothing);
+    expect(find.byType(PosterPlaceholder), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'chapter cache follows attached endpoint and drops late logout response',
     (tester) async {
       final client = _ControlledImageClient();
-      final auth = detachedAuth(client);
+      final auth = await authenticatedImageFixture(tester, client);
       late BuildContext imageContext;
       await tester.pumpWidget(
         wrap(
@@ -624,20 +663,22 @@ void main() {
         index: 0,
         tag: 'tag',
       );
-      expect(await chapter(), kTinyPng);
-      expect(await chapter(), kTinyPng);
+      expect(await tester.runAsync(chapter), kTinyPng);
+      expect(await tester.runAsync(chapter), kTinyPng);
       expect(client.requested, hasLength(1));
-      client.attachSession(
-        baseUrl: Uri.parse('https://second.example/emby'),
-        accessToken: 'synthetic',
-        userId: 'alice',
+      await tester.runAsync(
+        () => changeImageFixtureAccount(
+          auth,
+          address: 'https://second.example/emby',
+        ),
       );
       client.hold = true;
       final late = chapter();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(client.requested, hasLength(2));
-      client.clearSession();
+      await tester.runAsync(auth.logout);
       client.pending['chapter-item']!.complete(kTinyPng);
+      await settle(tester);
       expect(await late, isNull);
       expect(await chapter(), isNull);
       expect(client.requested, hasLength(2));
@@ -662,8 +703,13 @@ void main() {
       ]) {
         MediaImage.debugClearCache();
         final client = _ControlledImageClient()..failures.add(failure);
-        await tester.pumpWidget(buildSubject(detachedAuth(client), withTag));
-        await tester.pump();
+        await tester.pumpWidget(
+          buildSubject(
+            await authenticatedImageFixture(tester, client),
+            withTag,
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 1));
         await tester.pump(const Duration(milliseconds: 201));
         await pumpUntilImage(tester);
         expect(client.requested, hasLength(2), reason: '$failure');
@@ -678,8 +724,10 @@ void main() {
             statusCode: 404,
           ),
         );
-      await tester.pumpWidget(buildSubject(detachedAuth(absent), withTag));
-      await tester.pump();
+      await tester.pumpWidget(
+        buildSubject(await authenticatedImageFixture(tester, absent), withTag),
+      );
+      await tester.pump(const Duration(milliseconds: 1));
       await tester.pump(const Duration(seconds: 1));
       expect(absent.requested, hasLength(1));
       expect(find.byType(PosterPlaceholder), findsOneWidget);
@@ -700,9 +748,9 @@ void main() {
             ),
           ),
         );
-      final auth = detachedAuth(client);
+      final auth = await authenticatedImageFixture(tester, client);
       await tester.pumpWidget(buildSubject(auth, withTag));
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       for (final delay in [201, 401, 601]) {
         await tester.pump(Duration(milliseconds: delay));
       }
@@ -720,9 +768,9 @@ void main() {
     'slow queue promotes newly visible poster and backscroll uses warm cache',
     (tester) async {
       final client = _ControlledImageClient()..hold = true;
-      final auth = detachedAuth(client);
+      final auth = await authenticatedImageFixture(tester, client);
       await pumpPosterStrip(tester, auth, count: 24, cacheExtent: 10000);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(client.requested, List.generate(8, (i) => 'poster-$i'));
       await tester.pump(const Duration(milliseconds: 500));
       expect(client.requested, hasLength(8));
@@ -730,13 +778,13 @@ void main() {
           .state<ScrollableState>(find.byType(Scrollable))
           .position;
       position.jumpTo(15 * 180);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       client.pending['poster-0']!.complete(kTinyPng);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(client.requested[8], 'poster-15');
       expect(client.maxActive, 8);
       client.pending['poster-15']!.complete(kTinyPng);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       await pumpUntilImage(tester);
       expect(
         find.descendant(
@@ -746,10 +794,10 @@ void main() {
         findsOneWidget,
       );
       position.jumpTo(0);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       position.jumpTo(15 * 180);
       MediaImageCache.instance.markScrollActivity();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('poster-15')),
@@ -992,11 +1040,7 @@ void main() {
     tester,
   ) async {
     final client = _ControlledImageClient();
-    final auth = AuthController(
-      client: client,
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
-    );
+    final auth = await authenticatedImageFixture(tester, client);
     addTearDown(auth.dispose);
     const first = MediaItem(
       id: 'held-a',
@@ -1031,7 +1075,7 @@ void main() {
 
     client.hold = true;
     await show(second);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(SkeletonBlock), findsNothing);
     expect(find.byType(PosterPlaceholder), findsNothing);
     expect(find.byType(Image), findsOneWidget);
@@ -1080,7 +1124,7 @@ void main() {
       // FutureBuilder listens on this zone. Pump here after the 404, not
       // back in fake-async where the completion never rebuilds the tree.
       for (var i = 0; i < 40; i++) {
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1));
         if (find.byType(PosterPlaceholder).evaluate().isNotEmpty) {
           return;
         }
@@ -1545,18 +1589,18 @@ void main() {
       );
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
-    await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(Image), findsWidgets);
 
     final position = tester
         .state<ScrollableState>(find.byType(Scrollable))
         .position;
     position.jumpTo(190 * 6);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     await tester.pump(const Duration(milliseconds: 200));
     position.jumpTo(0);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(Image), findsWidgets);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(MediaImageCache.defaultFetchTimeout);
@@ -1620,7 +1664,7 @@ void main() {
     );
     expect(MediaImageCache.instance.isScrollBusy, isFalse);
     await tester.drag(find.byType(ListView), const Offset(0, -120));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(MediaImageCache.instance.isScrollBusy, isTrue);
     await tester.pump(MediaImageCache.defaultScrollIdle);
     expect(MediaImageCache.instance.isScrollBusy, isFalse);
@@ -1638,13 +1682,13 @@ void main() {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 10)),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
     }
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(MediaImageCache.instance.isScrollBusy, isTrue);
     expect(imageRequests(), isNotEmpty);
     await tester.pump(MediaImageCache.defaultScrollIdle);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(imageRequests(), isNotEmpty);
     await tester.pumpWidget(const SizedBox.shrink());
     MediaImage.debugResetCacheConfiguration();
@@ -1673,14 +1717,14 @@ void main() {
       MediaImageCache.instance.markScrollActivity();
       await pumpPosterStrip(tester, auth, count: 2);
       MediaImageCache.instance.markScrollActivity();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       // Disk bytes must finish genuine decode validation, not merely produce
       // an Image widget. Drive engine I/O without advancing the scroll clock.
       for (var i = 0; i < 4; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)),
         );
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1));
       }
       expect(MediaImageCache.instance.isScrollBusy, isTrue);
       expect(imageRequests(), isEmpty);
@@ -1704,15 +1748,15 @@ void main() {
           .position;
       position.jumpTo(180);
       MediaImageCache.instance.markScrollActivity();
-      await tester.pump();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 1));
       // Disk bytes must finish genuine decode validation, not merely produce
       // an Image widget. Drive engine I/O without advancing the scroll clock.
       for (var i = 0; i < 4; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)),
         );
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1));
       }
       expect(MediaImageCache.instance.isScrollBusy, isTrue);
       expect(
@@ -1732,14 +1776,14 @@ void main() {
     tester,
   ) async {
     final client = _ControlledImageClient()..hold = true;
-    final auth = detachedAuth(client);
+    final auth = await authenticatedImageFixture(tester, client);
     addTearDown(auth.dispose);
     // Test scheduling independently of Dio's event-loop timers and image
     // decoding. Keep the real viewport/queue and explicitly advance idle time.
     try {
       MediaImageCache.instance.markScrollActivity();
       await pumpPosterStrip(tester, auth, count: 2);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(MediaImageCache.instance.isScrollBusy, isTrue);
       expect(client.requested, ['poster-0']);
       expect(find.byType(MediaImage, skipOffstage: false), findsNWidgets(2));
@@ -1763,7 +1807,7 @@ void main() {
       final disk = _SlowPosterReadStore(slowRead);
       MediaImageCache.instance.debugSetDiskStore(disk);
       final client = _ControlledImageClient()..hold = true;
-      final auth = detachedAuth(client);
+      final auth = await authenticatedImageFixture(tester, client);
       await tester.pumpWidget(
         wrap(
           auth,
@@ -1793,7 +1837,7 @@ void main() {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 30)),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(disk.blocked, isTrue);
       expect(client.requested, contains('poster-1'));
       expect(client.requested, isNot(contains('poster-0')));
@@ -1811,7 +1855,7 @@ void main() {
     tester,
   ) async {
     final client = _ControlledImageClient()..hold = true;
-    final auth = detachedAuth(client);
+    final auth = await authenticatedImageFixture(tester, client);
     await tester.pumpWidget(
       wrap(
         auth,
@@ -1840,6 +1884,7 @@ void main() {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 30)),
     );
+    await tester.pump(const Duration(milliseconds: 1));
     expect(client.requested.toSet(), {
       'poster-0',
       'poster-1',
@@ -1856,7 +1901,7 @@ void main() {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       final decoded = find
           .byType(RawImage)
           .evaluate()

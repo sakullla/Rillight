@@ -127,58 +127,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aggregation => '聚合';
 
   @override
-  String get aggregationLibraryScope => '媒体库范围';
-
-  @override
-  String get aggregationPrivate => '私密区域';
-
-  @override
   String get aggregationPrivateLocked => '私密区域已锁定，请先在服务管理中解锁';
 
   @override
-  String get aggregationUnavailableDetail => '此来源详情当前不可访问，请返回允许的来源范围';
+  String get aggregationUnavailableDetail => '暂时无法打开此服务器的内容，请返回重试。';
 
   @override
-  String get aggregationAllowedSources => '全部允许来源';
-
-  @override
-  String get aggregationAllSources => '全部普通来源';
-
-  @override
-  String get aggregationAllTypes => '全部类型';
-
-  @override
-  String get aggregationAllWatching => '全部观看状态';
-
-  @override
-  String get aggregationContinue => '继续观看';
-
-  @override
-  String get aggregationRecent => '最近更新';
-
-  @override
-  String get aggregationLoaded => '已加载作品';
-
-  @override
-  String get aggregationLoadedRemote => '远端已加载作品';
-
-  @override
-  String get aggregationRemoteEmpty => '远端暂无继续观看项，本机记录仍可用';
-
-  @override
-  String get aggregationRemoteConflict => '远端观看时间不可信，请明确选择实际来源（不取最大进度）';
-
-  @override
-  String get aggregationComplete => '范围完整';
-
-  @override
-  String get aggregationIncomplete => '范围尚不完整 · 仅对已加载结果排序';
-
-  @override
-  String get aggregationEmptyScope => '未选择可参与的服务或媒体库';
-
-  @override
-  String get aggregationEmpty => '所选范围没有匹配作品';
+  String get aggregationEmpty => '暂无内容';
 
   @override
   String get aggregationAllFailed => '所选来源全部失败，请逐来源重试';
@@ -188,51 +143,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aggregationRetry => '重试此来源';
-
-  @override
-  String get aggregationMore => '加载此来源更多';
-
-  @override
-  String get aggregationLocalRecord => '本机确认观看记录';
-
-  @override
-  String get aggregationResumeActual => '从本机记录的实际来源继续';
-
-  @override
-  String get aggregationSources => '查找同源';
-
-  @override
-  String get aggregationConfirmed => '已确认来源';
-
-  @override
-  String get aggregationCandidate => '待辨认候选（非确认续播来源）';
-
-  @override
-  String get aggregationUnknown => '未知';
-
-  @override
-  String get aggregationLoading => '加载中';
-
-  @override
-  String get aggregationAvailable => '已返回';
-
-  @override
-  String get aggregationTimeout => '超时';
-
-  @override
-  String get aggregationOffline => '离线';
-
-  @override
-  String get aggregationNeedsLogin => '需登录';
-
-  @override
-  String get aggregationForbidden => '无权限';
-
-  @override
-  String get aggregationFailed => '查询失败';
-
-  @override
-  String get aggregationRevoked => '许可已撤销';
 
   @override
   String get aggregationEpisodeLookup => '查找此集';
@@ -1514,7 +1424,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneHomeEdit => '编辑首页';
 
   @override
-  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。';
+  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。';
+
+  @override
+  String get configurationUpgradeFailed => '配置升级未完成，原始配置已保留。';
+
+  @override
+  String get historyRecoveryFailed => '播放记录暂时无法读取';
+
+  @override
+  String get historyRecoveryHint => '请保留下面的原始文件；修复文件或从已存在的备份恢复后重试。';
+
+  @override
+  String get configurationRecoveryHint =>
+      '请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。';
 
   @override
   String get phoneHomeSectionBanner => '轮播图';
@@ -2372,6 +2295,429 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateReminderTitle => '应用更新';
 
   @override
+  String get updateLater => '稍后处理';
+
+  @override
+  String get serversTitle => '服务器';
+
+  @override
+  String get serversSearch => '搜索名称或地址';
+
+  @override
+  String get serversEmptyTitle => '添加你的第一台服务器';
+
+  @override
+  String get serversEmptyHint => '连接 Emby、Jellyfin 或 Plex，开始观看。';
+
+  @override
+  String get serversNoResults => '没有找到服务器';
+
+  @override
+  String get serversNoResultsHint => '换个关键词，或清除搜索。';
+
+  @override
+  String get serversSearchResults => '搜索结果';
+
+  @override
+  String get serversConnectionError => '连接失败';
+
+  @override
+  String get serversClearSearch => '清除搜索';
+
+  @override
+  String get serversMore => '更多操作';
+
+  @override
+  String get serversEdit => '编辑服务器';
+
+  @override
+  String get serversRemove => '移除服务器';
+
+  @override
+  String get serversRemoveHint => '只移除此设备上的配置和登录，不会删除服务器上的内容。';
+
+  @override
+  String get serversCurrentImpact => '这是当前使用的服务器。继续将结束这台服务器的当前连接。';
+
+  @override
+  String get serversUp => '上移';
+
+  @override
+  String get serversDown => '下移';
+
+  @override
+  String get serversCurrent => '当前使用';
+
+  @override
+  String get serversLocked => '已锁定';
+
+  @override
+  String get serversEnter => '进入服务器';
+
+  @override
+  String get serversLines => '连接线路';
+
+  @override
+  String get serversAutomatic => '自动选择';
+
+  @override
+  String get serversAutomaticHint => '连接失败时尝试同一服务器的备用线路。';
+
+  @override
+  String get serversFixedHint => '选中具体线路后固定使用，失败时由你决定是否更换。';
+
+  @override
+  String get serversActualLine => '正在使用';
+
+  @override
+  String get serversNotChecked => '尚未检查';
+
+  @override
+  String get serversCheck => '检查连接';
+
+  @override
+  String get serversCheckPassed => '连接正常';
+
+  @override
+  String get serversCheckFailed => '连接失败，可重试或换线';
+
+  @override
+  String get serversCheckIdentity => '这个地址属于另一台服务器';
+
+  @override
+  String get serversCheckLogin => '请重新登录';
+
+  @override
+  String get serversCheckUnknown => '检查未完成';
+
+  @override
+  String get serversCheckedAt => '检查于';
+
+  @override
+  String get serversSave => '保存';
+
+  @override
+  String get serversCancel => '取消';
+
+  @override
+  String get serversBack => '返回';
+
+  @override
+  String get serversName => '显示名称';
+
+  @override
+  String get serversIcon => '图标';
+
+  @override
+  String get serversIconDefault => '服务默认';
+
+  @override
+  String get serversIconHome => '家';
+
+  @override
+  String get serversIconCinema => '影院';
+
+  @override
+  String get serversIconCloud => '云端';
+
+  @override
+  String get serversAccount => '服务器账号';
+
+  @override
+  String get serversReauthorize => '重新登录 / 更换账号';
+
+  @override
+  String get serversSignOut => '退出此账号';
+
+  @override
+  String get serversSignOutHint => '保留服务器配置，下次进入时重新登录。';
+
+  @override
+  String get serversLinesHint => '同一服务器的不同地址。按顺序使用备用线路。';
+
+  @override
+  String get serversLineName => '线路名称（可选）';
+
+  @override
+  String get serversLineAddress => '服务器地址';
+
+  @override
+  String get serversLineAdd => '添加线路';
+
+  @override
+  String get serversLineEdit => '编辑线路';
+
+  @override
+  String get serversLineRemove => '移除这条线路';
+
+  @override
+  String get serversLineLast => '至少保留一条线路';
+
+  @override
+  String get serversLineDraftHint => '返回后继续编辑，点击服务器表单的“保存”才生效。';
+
+  @override
+  String get serversAdvanced => '高级设置';
+
+  @override
+  String get serversPassword => '进入时需要密码';
+
+  @override
+  String get serversPasswordHint => '本机进入密码；服务器账号保持登录。';
+
+  @override
+  String get serversPasswordSet => '设置进入密码';
+
+  @override
+  String get serversPasswordChange => '修改进入密码';
+
+  @override
+  String get serversPasswordDisable => '关闭进入密码';
+
+  @override
+  String get serversPasswordOld => '原进入密码';
+
+  @override
+  String get serversPasswordNew => '新进入密码';
+
+  @override
+  String get serversPasswordConfirm => '再次输入密码';
+
+  @override
+  String get serversPasswordInput => '本机进入密码';
+
+  @override
+  String get serversPasswordPrompt => '输入此服务器的本机进入密码，继续到原来的页面。';
+
+  @override
+  String get serversPasswordWrong => '密码不正确。';
+
+  @override
+  String get serversPasswordUnavailable => '无法读取进入密码。可返回后移除此本机条目，再正常登录添加。';
+
+  @override
+  String get serversPasswordMismatch => '两次密码不一致';
+
+  @override
+  String get serversPasswordRequired => '请输入 1–1024 个字符的密码';
+
+  @override
+  String get serversPasswordSaveFailed => '密码未保存。请检查原密码，稍后重试。';
+
+  @override
+  String get serversPasswordPending => '将在保存服务器时更新';
+
+  @override
+  String get serversConnectionImpact => '你正在修改当前连接。保存成功后将重新连接；取消会保留原连接。';
+
+  @override
+  String get serversSaveFailed => '未保存，请检查输入或连接后重试。';
+
+  @override
+  String get serversInvalidDraft => '请填写服务器名称和有效地址；线路地址不能重复。';
+
+  @override
+  String get serversAddTitle => '添加服务器';
+
+  @override
+  String get serversPaste => '粘贴导入';
+
+  @override
+  String get serversPasteHint => '仅在你点击后读取剪贴板。确认识别结果后再登录。';
+
+  @override
+  String get serversPasteText => '粘贴服务器信息';
+
+  @override
+  String get serversParse => '识别并预览';
+
+  @override
+  String get serversPasteGroups => '识别到多个账号，请选择要添加的一组';
+
+  @override
+  String get serversPasteIncomplete => '请检查并补全信息。每次只添加你选择的一组。';
+
+  @override
+  String get serversPasteUnknown => '未识别到服务器信息，可以修改原文后重试。';
+
+  @override
+  String get serversPasteExtra => '备用线路（每行一个地址）';
+
+  @override
+  String get serversPasteName => '名称（可选）';
+
+  @override
+  String get serversPastePreview => '确认服务器信息';
+
+  @override
+  String get serversContinue => '继续';
+
+  @override
+  String get serversEntryPlaybackImpact => '进入另一台服务器后，当前播放将结束，原服务器会重新锁定。';
+
+  @override
+  String get serversBusy => '正在连接…';
+
+  @override
+  String get serversConnectionFailed => '连接失败，原连接已保留。请检查线路或重新登录。';
+
+  @override
+  String get serversRetry => '重试';
+
+  @override
+  String get serversDone => '完成';
+
+  @override
+  String get serversChangeAccountHint => '重新授权成功后才替换账号；更换账号会结束原账号的播放。取消保留原登录。';
+
+  @override
+  String get serversPasswordOff => '未启用';
+
+  @override
+  String get serversPasswordOn => '已启用';
+
+  @override
+  String get serversImportFile => '从备份文件导入';
+
+  @override
+  String get serversSelectType => '选择服务类型';
+
+  @override
+  String get serversDismiss => '关闭';
+
+  @override
+  String get serversPasteGroup => '账号组';
+
+  @override
+  String get serversAddressHidden => '解锁后查看连接信息';
+
+  @override
+  String get serversNoAccount => '尚未登录';
+
+  @override
+  String get serversActionFailed => '操作未完成，请稍后重试。';
+
+  @override
+  String get serversPasswordBackoff => '密码错误。请稍后重试，或返回选择其他服务器。';
+
+  @override
+  String get serversRemotePassword => '修改服务器账号密码';
+
+  @override
+  String get serversBasic => '基本信息';
+
+  @override
+  String serversPasswordRetryAfter(int seconds) {
+    return '$seconds 秒后可重试';
+  }
+
+  @override
+  String get playbackReconnecting => '正在重新连接…';
+
+  @override
+  String get playbackTryingAlternative => '正在尝试备用线路…';
+
+  @override
+  String get playbackRecoveryStopped => '连接尚未恢复';
+
+  @override
+  String get playbackRecoveryPositionKept => '观看位置已保留，你可以重试或选择其他线路。';
+
+  @override
+  String get playbackChooseLine => '选择线路';
+
+  @override
+  String get playbackLineFailureHint => '线路未切换成功。请重试或选择其他线路。';
+
+  @override
+  String get playbackSwitchNeedsChoice => '继续前，请确认播放选择';
+
+  @override
+  String get playbackPositionUnavailable => '这个版本无法从原观看位置继续。可以从头播放，或取消切换。';
+
+  @override
+  String get playbackTimelineUncertain => '两个版本的时长或片段可能不同，请确认是否沿用原观看位置。';
+
+  @override
+  String get playbackAudioUnavailable => '原音轨不可用，请选择其他音轨。';
+
+  @override
+  String get playbackSubtitleUnavailable => '原字幕不可用，请选择其他字幕，或明确关闭字幕。';
+
+  @override
+  String get playbackUseDefaultAudio => '使用此版本的默认音轨';
+
+  @override
+  String get playbackContinueWithoutSubtitles => '关闭字幕继续';
+
+  @override
+  String get playbackStartFromBeginning => '从头播放';
+
+  @override
+  String get playbackContinueAtPosition => '沿用原观看位置';
+
+  @override
+  String get playbackCertificateStopped => '无法建立安全连接';
+
+  @override
+  String get playbackPermissionStopped => '当前账号没有播放权限';
+
+  @override
+  String get playbackRateLimited => '服务器暂时限制请求';
+
+  @override
+  String get playbackRetryAfterRepair => '修复后重试';
+
+  @override
+  String get playbackRetryAfterPermission => '权限恢复后重试';
+
+  @override
+  String playbackRetryAfter(int seconds) {
+    return '$seconds 秒后可重试';
+  }
+
+  @override
+  String get playbackLinePending => '正在连接，成功后才会保存选择';
+
+  @override
+  String get playbackLineFixed => '固定线路';
+
+  @override
+  String playbackLineActual(String line) {
+    return '正在使用：$line';
+  }
+
+  @override
+  String get sourceSelectionAction => '选择影片来源';
+
+  @override
+  String get sourceSelectionEmpty => '暂未找到其他来源';
+
+  @override
+  String get sourceSelectionRetry => '部分来源加载失败，重试';
+
+  @override
+  String get sourceSelectionMore => '继续查找';
+
+  @override
+  String get sourceSelectionCheckDetails => '请核对影片详情';
+
+  @override
+  String get sourceSelectionHint => '选择来源查看详情，播放不会自动切换。';
+
+  @override
+  String get sourceSelectionPasswordTitle => '输入访问密码';
+
+  @override
+  String get sourceSelectionPasswordPrompt => '输入这台服务器的本机密码，查看可选来源。';
+
+  @override
+  String get sourceSelectionUnlock => '解锁';
+
+  @override
+  String get sourceSelectionUnavailable => '暂时无法加载影片来源，请重试。';
+
+  @override
   String get updateReminderSubtitle => '发现可用更新，可直接在应用内下载校验并安装';
 
   @override
@@ -2406,5 +2752,201 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateAutoReminderSubtitle => '发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查';
 
   @override
-  String get updateLater => '稍后处理';
+  String get settingsWebDavSection => '备份与同步';
+
+  @override
+  String get settingsWebDavSectionSummary => '手动备份完整配置到自备 WebDAV，换机可一键恢复';
+
+  @override
+  String get settingsWebDavAddress => '服务器地址';
+
+  @override
+  String get settingsWebDavAddressHint => '例如 https://dav.example.com:5006';
+
+  @override
+  String get settingsWebDavUsername => '账号';
+
+  @override
+  String get settingsWebDavPassword => '密码';
+
+  @override
+  String get settingsWebDavPasswordShow => '显示密码';
+
+  @override
+  String get settingsWebDavPasswordHide => '隐藏密码';
+
+  @override
+  String get settingsWebDavDirectory => '备份目录';
+
+  @override
+  String get settingsWebDavDirectoryHint => '远端存放备份文件的目录，留空使用根目录';
+
+  @override
+  String get settingsWebDavTestConnection => '测试连接';
+
+  @override
+  String get settingsWebDavConnectionOk => '连接成功';
+
+  @override
+  String get settingsWebDavCredentialError => '账号或密码错误';
+
+  @override
+  String get settingsWebDavDirectoryMissing => '备份目录不存在，请先创建或修改目录';
+
+  @override
+  String settingsWebDavHttpError(int status) {
+    return '服务器返回错误（HTTP $status）';
+  }
+
+  @override
+  String get settingsWebDavUnreachable => '无法连接服务器，请检查地址与网络';
+
+  @override
+  String get settingsWebDavBackup => '立即备份';
+
+  @override
+  String settingsWebDavBackupDone(String time) {
+    return '备份完成 · $time';
+  }
+
+  @override
+  String get settingsWebDavLocalConfigCorrupt => '本地配置文件损坏，本次操作已取消';
+
+  @override
+  String get settingsWebDavBackupFailed => '备份失败，请重试';
+
+  @override
+  String get settingsWebDavRestore => '从备份恢复';
+
+  @override
+  String get settingsWebDavRestored => '已恢复';
+
+  @override
+  String get settingsWebDavNoBackup => '服务器上还没有备份文件';
+
+  @override
+  String get settingsWebDavRestoreRejected => '备份文件校验未通过，本地数据未改动';
+
+  @override
+  String get settingsWebDavRestoreFailed => '恢复失败，请重试';
+
+  @override
+  String get settingsWebDavNotConfigured => '请先填写 WebDAV 服务器地址';
+
+  @override
+  String get settingsWebDavSaveFailed => '配置保存失败，请重试';
+
+  @override
+  String get serversSubtitle => '选择要观看的服务器';
+
+  @override
+  String serversCount(int count) {
+    return '共 $count 台';
+  }
+
+  @override
+  String get serversSectionAll => '全部服务器';
+
+  @override
+  String get serversSwitchLine => '换条线路';
+
+  @override
+  String get serversLineSubtitle => '同一台服务器的不同地址';
+
+  @override
+  String serversLineCount(int count) {
+    return '$count 条线路';
+  }
+
+  @override
+  String get serversLineActual => '当前';
+
+  @override
+  String get serversLineDetails => '线路详情';
+
+  @override
+  String get serversRecommend => '推荐';
+
+  @override
+  String get serversEditorSubtitle => '名称、账号、线路与进入保护';
+
+  @override
+  String get serversAddSubtitle => '登录后即可直接观看';
+
+  @override
+  String get serversLoginAction => '重新登录';
+
+  @override
+  String get serversCurrentLine => '当前线路';
+
+  @override
+  String get serversBackupLine => '备用线路';
+
+  @override
+  String get serversAccountStatus => '账号状态';
+
+  @override
+  String get serversLoggedIn => '已登录';
+
+  @override
+  String get serversProtection => '进入保护';
+
+  @override
+  String get serversProtectionSummary => '只在这台设备上生效，不影响服务器账号';
+
+  @override
+  String get serversBasicSummary => '名称和图标用于在列表中辨认这台服务器';
+
+  @override
+  String get serversLinesSummary => '按顺序尝试；固定线路失败时由你决定是否切换';
+
+  @override
+  String get serversAdvancedSummary => 'User-Agent 等少用配置';
+
+  @override
+  String get serversLockedHint => '已锁定 · 输入进入密码后可用';
+
+  @override
+  String get serversLineFixedSection => '指定线路';
+
+  @override
+  String get serversLineAutoSection => '选线方式';
+
+  @override
+  String get serversRemoveTitle => '移除这台服务器？';
+
+  @override
+  String get serversPasteCardHint => '复制了服务器信息？一键识别地址、账号和多条线路';
+
+  @override
+  String get serversUnlockTitle => '输入进入密码';
+
+  @override
+  String get serversEnterOtherTitle => '切换到这台服务器？';
+
+  @override
+  String get serversSignOutTitle => '退出这个账号？';
+
+  @override
+  String get serversImpactTitle => '修改当前连接？';
+
+  @override
+  String get serversAccountSection => '账号';
+
+  @override
+  String get serversCheckingNow => '正在检查…';
+
+  @override
+  String get serversFixedShort => '固定';
+
+  @override
+  String get serversMoreOptions => '更多方式';
+
+  @override
+  String serversHubSubtitle(int count) {
+    return '$count 台服务器 · 点按进入';
+  }
+
+  @override
+  String get serversAddShort => '添加';
 }

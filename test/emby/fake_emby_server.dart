@@ -2134,6 +2134,13 @@ class FakeEmbyAdapter implements HttpClientAdapter {
     }
   }
 
+  // Faults and gates belong to the shared synthetic transport, so each
+  // independently guarded client sees the same simulated server behavior.
+  Dio? _interceptedTransport;
+  Dio get transport =>
+      _interceptedTransport ??= (Dio()
+        ..httpClientAdapter = _RawFakeEmbyAdapter(this));
+
   bool certificateError = false;
   final Map<String, FakeEmbyServer> _servers = {};
 
@@ -2143,6 +2150,21 @@ class FakeEmbyAdapter implements HttpClientAdapter {
 
   @override
   Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final intercepted = _interceptedTransport;
+    if (intercepted == null) {
+      return _fetch(options, requestStream, cancelFuture);
+    }
+    final response = await intercepted.fetch<ResponseBody>(
+      options.copyWith(data: requestStream, responseType: ResponseType.stream),
+    );
+    return response.data!;
+  }
+
+  Future<ResponseBody> _fetch(
     RequestOptions options,
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
@@ -2196,4 +2218,21 @@ Dio dioForFakeEmby(
       headers: const {'Accept': 'application/json'},
     ),
   )..httpClientAdapter = adapter;
+}
+
+/// Configure synthetic network behavior rather than one client's interceptors.
+Dio fakeEmbyTransport(Dio client) =>
+    (client.httpClientAdapter as FakeEmbyAdapter).transport;
+
+class _RawFakeEmbyAdapter implements HttpClientAdapter {
+  _RawFakeEmbyAdapter(this.owner);
+  final FakeEmbyAdapter owner;
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) => owner._fetch(options, requestStream, cancelFuture);
+  @override
+  void close({bool force = false}) {}
 }

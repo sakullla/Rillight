@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/aggregation/view/server_sections.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -197,7 +197,7 @@ class _Source {
 
 class _Harness {
   final sources = <_Source>[];
-  late RegionAccessController access;
+  late ServerAccessController access;
   late SourceSessionRegistry registry;
   late ServerSectionsLoader loader;
 
@@ -224,7 +224,7 @@ class _Harness {
       private = await add('private', 'Private');
     }
     final listed = [alpha, beta, ?loggedOut, ?private];
-    access = TestRegionAccessController();
+    access = TestServerAccessController();
     registry = SourceSessionRegistry(
       access: access,
       store: MemoryServerListStore(
@@ -235,12 +235,9 @@ class _Harness {
                 id: source.id,
                 name: source.name,
                 username: 'user',
-                region: source.id == 'private'
-                    ? AccessRegion.private
-                    : AccessRegion.ordinary,
-                participates: false,
-                scopeKnown: false,
-                libraryIds: const [],
+                protectionRef: source.id == 'private'
+                    ? 'missing-verifier'
+                    : null,
                 userAgent: userAgent,
                 lines: [ServerLine(id: 'line', address: source.address)],
               ),
@@ -327,15 +324,19 @@ void main() {
       expect(harness.loader.servers.map((item) => item.serverId), [
         'alpha',
         'beta',
+        'gamma',
+        'private',
       ]);
       expect(harness.loader.servers.map((item) => item.serverName), [
         'Alpha',
         'Beta',
+        'Gamma',
+        'Private',
       ]);
       final first = harness.loader.servers.first;
       expect(first.account?.configuredServerId, 'alpha');
       expect(first.account?.userId, 'user-alpha');
-      expect(first.account?.region, AccessRegion.ordinary);
+      expect(harness.access.allows('alpha'), isTrue);
       expect(first.continueWatching.error, isNull);
       expect(first.continueWatching.items.map((item) => item.id), [
         'ep-1',
@@ -571,6 +572,10 @@ void main() {
     addTearDown(harness.close);
     final alpha = harness.source('alpha');
     final beta = harness.source('beta');
+    await harness.registry.authenticate('alpha');
+    await harness.registry.authenticate('beta');
+    alpha.seen.clear();
+    beta.seen.clear();
     alpha.forbidPublicInfo = true;
     beta.forbidPublicInfo = true;
     beta.rich = false;
@@ -585,7 +590,8 @@ void main() {
     expect(harness.loader.servers.first.continueWatching.items, isNotEmpty);
     final first = await harness.registry.ensureSession('alpha');
     final second = await harness.registry.ensureSession('alpha');
-    expect(identical(first.client, second.client), isTrue);
+    expect(first.account, second.account);
+    expect(first.client.accessToken, second.client.accessToken);
     await harness.loader.load();
 
     for (final source in [alpha, beta]) {

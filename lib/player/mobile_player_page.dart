@@ -1,3 +1,7 @@
+import 'playback_entry_access.dart';
+import 'playback_line_recovery_ui.dart';
+import 'source_switch_menu.dart';
+
 import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
@@ -326,10 +330,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
     final matched = serverMatchingPlayback(auth, auth.client.baseUrl);
     final created = PlayerController(
-      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
+      runtime: bindings.runtime,
+      recoveryDeadlineUtc: bindings.recoveryDeadlineUtc,
+      recoveryAttemptDeadlineUtc: bindings.recoveryAttemptDeadlineUtc,
+      recoveryAttemptedLineIds: bindings.recoveryAttemptedLineIds,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
+      initialLineSelection:
+          bindings.playbackLineSelectionSnapshot ?? matched?.lineSelection,
       playbackLineSnapshot: matched?.lines ?? const [],
       verifiedPlaybackServerId: matched?.verifiedServerId,
       itemId: widget.itemId,
@@ -415,7 +424,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
         // Revocation must clear playback/history using that actual controller,
         // not wait for the original detail gate's unrelated source lease.
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) GoRouter.of(context).go('/', extra: null);
+          if (mounted) unawaited(_close());
         });
       }
       _danmaku?.removeListener(_onDanmaku);
@@ -565,6 +574,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {
     if (_closing) return;
     _closing = true;
+    final actualOrigin = controller?.origin;
     final command = controller?.endedSeriesCommand;
     final lease = controller?.origin?.permit;
     final sourceBound =
@@ -595,6 +605,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     // pop can let a predictive back gesture pop the following detail route.
     // A tracks sheet may cover this route when authentication changes. Remove
     // its overlays first, then pop the route whose session we actually closed.
+    if (controller?.permissionRevoked == true &&
+        !playbackEntryStillAllowed(_auth!, actualOrigin)) {
+      GoRouter.of(context).go(AppRoutes.home, extra: null);
+      return;
+    }
     navigator.popUntil((candidate) => identical(candidate, route));
     navigator.pop();
     if (router != null &&
@@ -770,15 +785,24 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   }
 
   Widget _centerStatus(BuildContext context, PlayerController c) {
+    if (playbackNeedsLineStatus(c)) {
+      return PlayerLineStatus(
+        controller: c,
+        onChooseLines: () => unawaited(showPlaybackLineSheet(context, c)),
+      );
+    }
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final message = c.sessionExpired
         ? l.playbackSessionExpired
         : c.disconnected
-        ? l.playbackDisconnected
+        ? playbackClassifiedFailureTitle(c.loadFailure?.kind, l) ??
+              l.playbackDisconnected
         : c.error == PlayerErrorKind.noStream
         ? l.noPlayableStream
+        : c.error == PlayerErrorKind.notPlayable
+        ? l.itemUnavailable
         : l.playbackFailed;
     return Center(
       child: c.loading
@@ -853,6 +877,10 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
         if (popped) return;
         if (_interaction.locked) {
           _interaction.revealUnlock();
+        } else if (c.switchConfirmation != null) {
+          unawaited(c.confirmMediaSourceSwitch(SwitchResumeChoice.cancel));
+        } else if (c.isRecovering) {
+          c.cancelLineRecovery();
         } else {
           _close();
         }
@@ -889,7 +917,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   ListenableBuilder(
                     listenable: Listenable.merge([c, _interaction]),
                     builder: (context, _) {
-                      final visible = _interaction.controlsVisibleFor(c);
+                      final visible =
+                          _interaction.controlsVisibleFor(c) ||
+                          (!_interaction.locked && playbackNeedsLineStatus(c));
                       // Hidden controls sit at opacity 0 behind IgnorePointer.
                       // Reusing the same widget skips rebuilding and laying
                       // out the whole overlay on every playback tick (5 Hz for
@@ -933,7 +963,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                       return built;
                     },
                   ),
-                if (!ended && !_interaction.locked)
+                // 锁屏只挡住误触画面和控制条；跳过片头/片尾是用户明确想要的
+                // 提示，锁定时照常弹出，位置贴到底边（锁定态没有控制条）。
+                if (!ended)
                   ListenableBuilder(
                     listenable: Listenable.merge([c, _interaction]),
                     builder: (context, _) {
@@ -950,7 +982,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                       if (!show) return const SizedBox.shrink();
                       final media = MediaQuery.of(context);
                       final insets = phonePlayerControlInsets(media);
-                      final controls = _interaction.controlsVisibleFor(c);
+                      final controls =
+                          !_interaction.locked &&
+                          _interaction.controlsVisibleFor(c);
                       return Positioned(
                         right: insets.right + 12,
                         bottom: insets.bottom + (controls ? 168 : 16),

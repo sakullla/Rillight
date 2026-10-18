@@ -15,7 +15,7 @@ if (args.includes('--help')) {
   console.log(`Usage: node tool/capture-ui.mjs [options]
   --platform all|desktop|phone|tv      default: all
   --theme all|dark|light               default: all
-  --feature home,aggregation,library,detail,search,servers,settings,login,player,danmaku
+  --feature home,aggregation,entry,library,detail,search,servers,settings,login,player,danmaku
   --only 'server-*,danmaku-search-*'    exact state IDs or * / ? patterns
   --size 360,412,1024,1440,1920,3840    profile widths, default: all
   --list                              list matching states without rendering

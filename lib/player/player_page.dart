@@ -1,3 +1,6 @@
+import 'playback_line_recovery_ui.dart';
+import 'source_switch_menu.dart';
+
 import 'dart:async';
 
 import 'package:rillight/player/player_host_command.dart';
@@ -146,13 +149,19 @@ class PlayerPageState extends State<PlayerPage> {
         : null;
     final created = PlayerController(
       client: auth.client,
+      initialLineSelection:
+          bindings.playbackLineSelectionSnapshot ?? matched?.lineSelection,
       playbackLineSnapshot: widget.playbackLines ?? matched?.lines ?? const [],
       verifiedPlaybackServerId:
           widget.verifiedPlaybackServerId ?? matched?.verifiedServerId,
-      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
+      runtime: bindings.runtime,
+      recoveryDeadlineUtc: bindings.recoveryDeadlineUtc,
+      recoveryAttemptDeadlineUtc: bindings.recoveryAttemptDeadlineUtc,
+      recoveryAttemptedLineIds: bindings.recoveryAttemptedLineIds,
       observationSink: bindings.observationSink,
       switchDispatcher: bindings.switchDispatcher,
       reportOutcomeSink: bindings.reportOutcomeSink,
+      sourceOpenResult: bindings.sourceOpenResult,
       openRequest: widget.sourceRequest,
       itemId: widget.itemId,
       backend: _createBackend(bindings),
@@ -646,7 +655,8 @@ class PlayerPageState extends State<PlayerPage> {
                           child: const SizedBox.expand(),
                         ),
                       ),
-                      if (current.loading || current.isBuffering)
+                      if (!playbackNeedsLineStatus(current) &&
+                          (current.loading || current.isBuffering))
                         Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
@@ -672,12 +682,20 @@ class PlayerPageState extends State<PlayerPage> {
                             ],
                           ),
                         ),
-                      if (_errorText(l10n, current) != null)
+                      if (!playbackNeedsLineStatus(current) &&
+                          _errorText(l10n, current) != null)
                         AppErrorView(
                           message: _errorText(l10n, current)!,
                           onRetry: () {
                             unawaited(current.retryPlayback());
                           },
+                        ),
+                      if (playbackNeedsLineStatus(current))
+                        PlayerLineStatus(
+                          controller: current,
+                          onChooseLines: () => unawaited(
+                            showPlaybackLineDialog(context, current),
+                          ),
                         ),
                       if (!current.playbackEnded && current.error == null)
                         _ControlsBar(
@@ -727,7 +745,9 @@ class PlayerPageState extends State<PlayerPage> {
                         _SkipSegmentButton(controller: current),
                       if (current.playbackEnded && current.nextEpisode == null)
                         _PlaybackEndedOverlay(controller: current),
-                      if (current.disconnected && !current.isPlaying)
+                      if (!playbackNeedsLineStatus(current) &&
+                          current.disconnected &&
+                          !current.isPlaying)
                         _Banner(
                           key: PlayerKeys.disconnect,
                           text:
@@ -759,12 +779,11 @@ class PlayerPageState extends State<PlayerPage> {
                             current.subtitleNotice!,
                           ),
                         ),
-                      if (current.playbackLineFailure != null)
+                      if (!playbackNeedsLineStatus(current) &&
+                          current.playbackLineFailure != null)
                         _Banner(
                           key: const ValueKey('playback-line-failure'),
-                          text: l10n.playbackLineFailed(
-                            current.playbackLineFailure!,
-                          ),
+                          text: current.playbackLineFailure!,
                           onDismiss: current.dismissPlaybackLineFailure,
                         ),
                       if (current.trackFailure != null)

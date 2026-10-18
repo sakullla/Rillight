@@ -14,6 +14,7 @@ import 'package:rillight/player/cache/cache_limits.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
 
@@ -387,6 +388,224 @@ void main() {
     // A test's default 2 GiB budget can evict an active 8 GiB session.
     addTearDown(() => deleteTemporaryDirectory(isolatedCache));
   });
+  for (final backgroundOnly in [false, true]) {
+    cases.test(
+      'read-ahead 403 exhaustion respects foreground demand (background=$backgroundOnly)',
+      () async {
+        const mib = 1024 * 1024;
+        final total = (backgroundOnly ? 64 : 24) * mib;
+        final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        var requests = 0;
+        upstream.listen((request) async {
+          requests++;
+          final response = request.response;
+          final range = RegExp(r'^bytes=(\d+)-(\d+)$')
+              .firstMatch(request.headers.value('range') ?? '');
+          final start = int.parse(range![1]!);
+          final end = int.parse(range[2]!);
+          if (end == 0 || backgroundOnly && start == 1) {
+            response.statusCode = 206;
+            response.headers.set('etag', '"stable"');
+            response.headers.set('cache-control', 'max-age=120');
+            response.headers.set('content-range', 'bytes $start-$end/$total');
+            response.contentLength = end - start + 1;
+            if (backgroundOnly && start == 1) {
+              // Publish enough verified data for the foreground, then interrupt
+              // only the future part of this continuous prefetch response.
+              final socket = await response.detachSocket(writeHeaders: true);
+              socket.add(Uint8List(8 * mib)..fillRange(0, 8 * mib, 7));
+              await socket.flush();
+              socket.destroy();
+              return;
+            }
+            response.add(
+              Uint8List(end - start + 1)..fillRange(0, end - start + 1, 7),
+            );
+          } else {
+            response.statusCode = 403;
+          }
+          try {
+            await response.close();
+          } on HttpException {
+            // The proxy retires rate-limited sockets while cancelling other lanes.
+          }
+        });
+        final driver = _CoreDriver();
+        final backend = RillightVideoBackend(
+          waitForRetry: _retryImmediately,
+          settingsStore: MemoryPlayerSettingsStore(),
+          diskCacheDirectory: isolatedCache,
+          createPlayer: () async => driver,
+        );
+        final events = <VideoBackendEvent>[];
+        final limited = Completer<void>();
+        final subscription = backend.events.listen((event) {
+          events.add(event);
+          if (event.kind == VideoEventKind.error &&
+              event.value is PlaybackRecoveryFailure &&
+              (event.value as PlaybackRecoveryFailure).kind ==
+                  PlaybackRecoveryFailureKind.rateLimited &&
+              !limited.isCompleted) {
+            limited.complete();
+          }
+        });
+        final client = HttpClient();
+        try {
+          await backend.open(
+            VideoOpenRequest(
+              sessionId: 88,
+              url: Uri.parse('http://127.0.0.1:${upstream.port}/movie'),
+            ),
+          );
+          await backend.play();
+          final route = driver.request!.url;
+          final warm = await client.getUrl(route);
+          warm.headers.set('range', 'bytes=0-0');
+          await (await warm.close()).drain<void>();
+          final demand = await client.getUrl(route);
+          demand.headers.set(
+            'range',
+            'bytes=0-${(backgroundOnly ? mib : total) - 1}',
+          );
+          var received = 0;
+          var interrupted = false;
+          try {
+            await for (final bytes in await demand.close()) {
+              expect(bytes, everyElement(7));
+              received += bytes.length;
+            }
+          } on HttpException {
+            interrupted = true;
+          }
+          expect(interrupted, !backgroundOnly);
+          expect(received, backgroundOnly ? mib : 1);
+          final deadline = DateTime.now().add(const Duration(seconds: 5));
+          var data = await backend.diagnostics();
+          while (data['readAheadFailed'] != true &&
+              DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            data = await backend.diagnostics();
+          }
+          expect(
+            data['readAheadFailed'],
+            true,
+            reason:
+                'requests=$requests; status=${data["lastUpstreamStatus"]}; '
+                'published=${data["readAheadPublishedBytes"]}; '
+                'limit=${data["readAheadLimitBytes"]}; '
+                'position=${data["readAheadPositionBytes"]}; '
+                'allowed=${data["readAheadPrefetchAllowed"]}; '
+                'active=${data["readAheadActive"]}',
+          );
+          expect(data['lastMediaUpstreamStatus'], 206);
+          expect(data['authenticationStatus'], isNull);
+          expect(data['prefetchRateLimitStatus'], 403);
+          expect(data['rateLimitStatus'], backgroundOnly ? null : 403);
+          if (backgroundOnly) {
+            final before = requests;
+            final cached = await client.getUrl(route);
+            cached.headers.set('range', 'bytes=0-7');
+            final hit = await cached.close();
+            expect(
+              await hit.expand((chunk) => chunk).toList(),
+              List.filled(8, 7),
+            );
+            expect(requests, before);
+            // Let periodic diagnostics consume the background failure too.
+            await Future<void>.delayed(const Duration(milliseconds: 600));
+            expect(
+              events.where(
+                (event) =>
+                    event.kind == VideoEventKind.error ||
+                    event.kind == VideoEventKind.authenticationRequired ||
+                    event.kind == VideoEventKind.sourceRefreshRequired,
+              ),
+              isEmpty,
+            );
+            expect(backend.isPlaying, true);
+          } else {
+            driver.emit('error', 'Connection lost');
+            await limited.future.timeout(const Duration(seconds: 2));
+            await Future<void>.delayed(const Duration(milliseconds: 300));
+            expect(backend.lastFailure, 'Connection lost');
+            expect(
+              events
+                  .where((event) => event.kind == VideoEventKind.error)
+                  .map((event) => event.value),
+              everyElement(isA<PlaybackRecoveryFailure>()),
+            );
+            expect(
+              events.where(
+                (event) => event.kind == VideoEventKind.authenticationRequired,
+              ),
+              isEmpty,
+            );
+          }
+        } finally {
+          client.close(force: true);
+          await subscription.cancel();
+          await backend.dispose();
+          await upstream.close(force: true);
+        }
+      },
+    );
+  }
+
+  cases.test('expired foreground URL renewal failure preserves later fatal core error', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+    });
+    final driver = _CoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+    );
+    final events = <VideoBackendEvent>[];
+    final subscription = backend.events.listen(events.add);
+    final http = HttpClient();
+    try {
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 1,
+          url: Uri.parse(
+            'http://127.0.0.1:${upstream.port}/video.mp4?Signature=s&Expires=1',
+          ),
+        ),
+      );
+      final refresh = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.sourceRefreshRequired,
+      );
+      final response = await (await http.getUrl(driver.request!.url)).close();
+      await response.drain<void>();
+      expect(
+        (await refresh.timeout(const Duration(seconds: 4))).value,
+        isA<RequiredSourceRenewal>(),
+      );
+      backend.finishSourceRenewal(succeeded: false);
+      final fatal = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.error,
+      );
+      driver.emit('error', 'Connection lost');
+      await fatal.timeout(const Duration(seconds: 2));
+      expect(
+        events.where((e) => e.kind == VideoEventKind.authenticationRequired),
+        isEmpty,
+      );
+      expect(
+        events.where((e) => e.value is RequiredSourceRenewal),
+        hasLength(1),
+      );
+    } finally {
+      http.close(force: true);
+      await subscription.cancel();
+      await backend.dispose();
+      await upstream.close(force: true);
+    }
+  });
+
   cases.test(
     'Android prefetch follows saved disk budget across opens',
     () async {
@@ -454,7 +673,7 @@ void main() {
 
   for (final interrupted in [false, true]) {
     cases.test(
-      'network recovery restores settings and respects interruption=$interrupted',
+      'network failure delegates recovery without reopening interruption=$interrupted',
       () async {
         final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         upstream.listen((request) async {
@@ -494,27 +713,14 @@ void main() {
         expect(response.statusCode, HttpStatus.serviceUnavailable);
         await response.drain<void>();
         final finished = backend.events
-            .firstWhere(
-              (event) =>
-                  event.kind == VideoEventKind.buffering &&
-                  event.value == false,
-            )
-            .timeout(const Duration(seconds: 8));
+            .firstWhere((event) => event.kind == VideoEventKind.error)
+            .timeout(const Duration(seconds: 2));
         if (interrupted) first.emit('interruption', 'audioFocus');
         first.emit('error', 'synthetic network failure');
-        await finished;
-        expect(recovered.request!.paused, isTrue);
-        expect(
-          recovered.commands,
-          containsAllInOrder([
-            'audio',
-            'volume',
-            'rate',
-            if (!interrupted) 'play',
-          ]),
-        );
-        if (interrupted) expect(recovered.commands, isNot(contains('play')));
-        expect((await backend.diagnostics())['playbackActive'], !interrupted);
+        expect((await finished).value, 'synthetic network failure');
+        expect(creates, 1);
+        expect(recovered.request, isNull);
+        expect(recovered.commands, isEmpty);
       },
     );
   }
@@ -1030,7 +1236,12 @@ void main() {
       expect(backend.lastFailure, isNull);
     },
   );
-  for (final status in [HttpStatus.ok, HttpStatus.unauthorized]) {
+  for (final status in [
+    HttpStatus.ok,
+    HttpStatus.unauthorized,
+    HttpStatus.forbidden,
+    HttpStatus.tooManyRequests,
+  ]) {
     cases.test(
       'transport reports HTTP $status before the core finishes opening',
       () async {
@@ -1040,6 +1251,7 @@ void main() {
         upstream.listen((request) async {
           receivedUa = request.headers.value('user-agent');
           request.response.statusCode = status;
+          if (status == 429) request.response.headers.set('retry-after', '90');
           request.response.add(List<int>.filled(1024, 7));
           await request.response.close();
         });
@@ -1056,8 +1268,13 @@ void main() {
           (event) => status == HttpStatus.ok
               ? event.kind == VideoEventKind.cacheSpeed &&
                     (event.value as num) > 0
-              : event.kind == VideoEventKind.authenticationRequired &&
-                    event.value == status,
+              : status == 401
+              ? event.kind == VideoEventKind.authenticationRequired &&
+                    event.value == status
+              : event.kind == VideoEventKind.error &&
+                    event.value is PlaybackRecoveryFailure &&
+                    (event.value as PlaybackRecoveryFailure).kind ==
+                        PlaybackRecoveryFailureKind.rateLimited,
         );
         final opening = backend.open(
           VideoOpenRequest(
@@ -1085,6 +1302,71 @@ void main() {
       },
     );
   }
+  cases.test(
+    'transient 403 backoff does not emit permission or rate-limit failure',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var requests = 0;
+      final waiting = Completer<void>();
+      final release = Completer<void>();
+      upstream.listen((request) async {
+        requests++;
+        if (requests == 2) {
+          waiting.complete();
+          await release.future;
+        }
+        request.response.statusCode = requests == 1 ? 403 : 200;
+        if (requests > 1) request.response.add(List<int>.filled(1024, 7));
+        await request.response.close();
+      });
+      final driver = _PendingOpenCoreDriver();
+      final backend = RillightVideoBackend(
+        waitForRetry: _retryImmediately,
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      final failures = <VideoBackendEvent>[];
+      final events = backend.events.listen((event) {
+        if (event.kind == VideoEventKind.error ||
+            event.kind == VideoEventKind.authenticationRequired ||
+            event.kind == VideoEventKind.sourceRefreshRequired) {
+          failures.add(event);
+        }
+      });
+      final opening = backend.open(
+        VideoOpenRequest(
+          sessionId: 81,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/media'),
+        ),
+      );
+      try {
+        await waiting.future.timeout(const Duration(seconds: 3));
+        // Leave the second response pending across diagnostic timer polls.
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        final data = await backend.diagnostics();
+        expect(data['lastMediaUpstreamStatus'], 403);
+        expect(data['authenticationStatus'], isNull);
+        expect(data['rateLimitStatus'], isNull);
+        expect(requests, 2);
+        expect(failures, isEmpty);
+        release.complete();
+        driver.releaseOpen.complete();
+        await opening.timeout(const Duration(seconds: 3));
+        expect(requests, 2);
+        expect(failures, isEmpty);
+        expect((await backend.diagnostics())['authenticationStatus'], isNull);
+      } finally {
+        if (!release.isCompleted) release.complete();
+        if (!driver.releaseOpen.isCompleted) driver.releaseOpen.complete();
+        await opening;
+        await events.cancel();
+        await backend.dispose();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
   cases.test(
     'session reset clears stale cache speed before open failure',
     () async {

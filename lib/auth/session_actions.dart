@@ -1,42 +1,20 @@
-import 'source_management.dart';
-import 'provider_connect_dialog.dart';
-import '../media_server/capabilities.dart';
-
-import 'dart:async';
+import 'server_selection_page.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_action.dart';
-import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/auth/backup_import/backup_import_flow.dart';
-import 'package:rillight/auth/change_password_dialog.dart';
-import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/home/catalog_scope.dart';
-import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
 class SessionActions extends StatelessWidget {
   const SessionActions({super.key});
 
   static const serverMenuKey = Key('session-current-server');
-
-  /// 未解锁时打开现有 PIN 对话框。已经允许，或对话框解锁成功时返回 true。
-  static Future<bool> ensurePrivateAccess(BuildContext context) async {
-    final auth = AuthScope.of(context);
-    if (!auth.regionAccess.allows(AccessRegion.private)) {
-      await showPrivateAccess(context, auth);
-    }
-    return context.mounted && auth.regionAccess.allows(AccessRegion.private);
-  }
-
-  static const addServerKey = Key('session-add-server');
-  static const lineSwitchFailureKey = Key('session-line-switch-failure');
 
   @override
   Widget build(BuildContext context) {
@@ -48,56 +26,52 @@ class SessionActions extends StatelessWidget {
     return ListenableBuilder(
       listenable: auth,
       builder: (context, _) {
-        if (!auth.isLoggedIn) {
+        if (!auth.isLoggedIn && auth.savedServers.isEmpty) {
           return const SizedBox.shrink();
         }
         final l10n = AppLocalizations.of(context);
-        final server = auth.session!.server;
-        final username = auth.session?.username.trim() ?? '';
-        final initial = username.isEmpty
-            ? null
-            : String.fromCharCode(username.runes.first).toUpperCase();
-        final scheme = AppUiTheme.of(context).colorScheme;
+        final server = auth.session?.server;
+        final compact = MediaQuery.sizeOf(context).width < 800;
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SettingsAction(),
-            AppIconButton(
-              key: serverMenuKey,
-              tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',
-              padding: EdgeInsets.zero,
-              constraints: kTitleBarIconConstraints,
-              size: 18,
-              icon: initial == null
-                  ? const Icon(AppIcons.person, fill: AppIcons.filled)
-                  : SizedBox.square(
-                      dimension: 24,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [scheme.primary, scheme.secondary],
-                          ),
-                          border: Border.all(
-                            color: scheme.onSurface.withValues(alpha: 0.16),
-                          ),
-                        ),
-                        child: Center(
+            AppTooltip(
+              message: server == null
+                  ? l10n.serversTitle
+                  : '${_chipLabel(server)}\n${l10n.serversTitle}',
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: AppButton(
+                  key: serverMenuKey,
+                  onPressed: () => _openSwitcher(context, auth),
+                  minimumSize: const Size(48, 36),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(AppIcons.library, size: 18),
+                      if (!compact) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
                           child: Text(
-                            initial,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: scheme.onPrimary,
-                              height: 1,
-                            ),
+                            MediaQuery.sizeOf(context).width < 1100
+                                ? l10n.serversTitle
+                                : server?.displayName ?? l10n.serversTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                      ),
-                    ),
-              onPressed: () => _openSwitcher(context, auth),
+                        const SizedBox(width: 4),
+                        const Icon(AppIcons.chevronDown, size: 16),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         );
@@ -105,220 +79,25 @@ class SessionActions extends StatelessWidget {
     );
   }
 
-  Future<void> _openSwitcher(BuildContext context, AuthController auth) async {
-    final playerHost = PlayerWindowScope.maybeOf(context);
-    await showAppDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return ListenableBuilder(
-          listenable: auth,
-          builder: (context, _) {
-            return ServerSwitcherDialog(
-              servers: auth.savedServers,
-              activeServerId: auth.session?.server.id,
-              activeLineId: auth.session?.server.activeLineId,
-              onSelect: (serverId, lineId) {
-                Navigator.of(dialogContext).pop();
-                unawaited(
-                  _switchTo(context, auth, playerHost, serverId, lineId),
-                );
-              },
-              canChangePassword: auth
-                  .client
-                  .capabilities[ServiceCapability.changePassword]
-                  .isAvailable,
-              externalAccountManagement:
-                  auth.client.serviceType == MediaServerType.plex,
-              onAddServer: () {
-                Navigator.of(dialogContext).pop();
-                GoRouter.of(context).push('${AppRoutes.connect}?add=1');
-              },
-              onImportBackup: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(showBackupImportFlow(context, auth: auth));
-              },
-              onLogout: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(_logout(auth, playerHost));
-              },
-              onDelete: (serverId) {
-                Navigator.of(dialogContext).pop();
-                unawaited(_deleteServer(auth, playerHost, serverId));
-              },
-              onAddLine: (serverId) {
-                Navigator.of(dialogContext).pop();
-                unawaited(
-                  _editLineAddress(context, auth, playerHost, serverId),
-                );
-              },
-              onEditLine: (serverId, line) {
-                Navigator.of(dialogContext).pop();
-                unawaited(
-                  _editLineAddress(
-                    context,
-                    auth,
-                    playerHost,
-                    serverId,
-                    line: line,
-                  ),
-                );
-              },
-              onDeleteLine: (serverId, line) {
-                Navigator.of(dialogContext).pop();
-                unawaited(
-                  _deleteLine(context, auth, playerHost, serverId, line),
-                );
-              },
-              onChangePassword: () {
-                Navigator.of(dialogContext).pop();
-                if (auth.client.serviceType == MediaServerType.plex) {
-                  unawaited(showProviderAccountSettings(context));
-                  return;
-                }
-                unawaited(
-                  showAppDialog<void>(
-                    context: context,
-                    builder: (_) => ChangePasswordDialog(auth: auth),
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /// 登出前先关闭播放窗口:此时主进程会话仍有效,宿主才能代发 Stopped。
-  Future<void> _logout(
-    AuthController auth,
-    PlayerWindowHost? playerHost,
-  ) async {
-    await _closePlayer(playerHost);
-    await auth.logout();
-  }
-
-  /// 删除当前登录的服务器前同样先停播;删除其它服务器不影响播放与会话。
-  Future<void> _deleteServer(
-    AuthController auth,
-    PlayerWindowHost? playerHost,
-    String serverId,
-  ) async {
-    if (auth.session?.server.id == serverId) {
-      await _closePlayer(playerHost);
-    }
-    await auth.deleteServer(serverId);
-  }
-
-  /// 线路地址编辑:添加只录地址、不改当前线路;修改仅改地址,无
-  /// User-Agent 输入项。改的是当前线路时先停掉走旧地址的播放窗口,
-  /// 成功后刷新目录,之后浏览与播放走新地址。
-  Future<void> _editLineAddress(
-    BuildContext context,
-    AuthController auth,
-    PlayerWindowHost? playerHost,
-    String serverId, {
-    ServerLine? line,
-  }) async {
-    final catalog = CatalogScope.maybeOf(context);
-    final address = await showLineAddressDialog(
-      context,
-      initialAddress: line?.address,
-    );
-    if (address == null || address == line?.address) {
-      return;
-    }
-    final wasActive =
-        auth.session?.server.id == serverId &&
-        auth.session?.server.activeLineId == line?.id;
-    if (wasActive) {
-      await _closePlayer(playerHost);
-    }
-    if (line == null) {
-      await auth.addLine(serverId, address);
-      return;
-    }
-    final changed = await auth.updateLineAddress(serverId, line.id, address);
-    if (changed && wasActive) {
-      catalog?.reload();
-    }
-  }
-
-  /// 删除一条线路;删除当前线路时先停播,随后客户端挂到剩余线路并
-  /// 刷新目录。只剩一条线路时界面不会给出可点的删除入口。
-  Future<void> _deleteLine(
-    BuildContext context,
-    AuthController auth,
-    PlayerWindowHost? playerHost,
-    String serverId,
-    ServerLine line,
-  ) async {
-    final catalog = CatalogScope.maybeOf(context);
-    final wasActive =
-        auth.session?.server.id == serverId &&
-        auth.session?.server.activeLineId == line.id;
-    if (wasActive) {
-      await _closePlayer(playerHost);
-    }
-    await auth.deleteLine(serverId, line.id);
-    if (wasActive) {
-      catalog?.reload();
-    }
-  }
-
-  /// 切换服务器/线路:成功后才停播、刷新目录并回首页。目标线路不可达或
-  /// 身份不一致时保持原线路、原会话与正在进行的播放,不刷新目录、不离开
-  /// 当前页面,只以临时提示展示 lineSwitchFailure 的原因。
-  Future<void> _switchTo(
-    BuildContext context,
-    AuthController auth,
-    PlayerWindowHost? playerHost,
-    String serverId,
-    String lineId,
-  ) async {
-    final current = auth.session?.server;
-    if (serverId == current?.id && lineId == current?.activeLineId) {
-      return;
-    }
-    final catalog = CatalogScope.maybeOf(context);
-    final router = GoRouter.of(context);
-    await auth.switchTo(serverId, lineId: lineId);
-    final failure = auth.lineSwitchFailure;
-    final switched =
-        auth.session?.server.id == serverId &&
-        auth.session?.server.activeLineId == lineId;
-    if (!switched && failure != null) {
-      if (!context.mounted) {
-        return;
-      }
-      showAppNotice(
+  Future<void> _openSwitcher(BuildContext context, AuthController auth) =>
+      showServerSelection(
         context,
-        AppLocalizations.of(context).lineSwitchFailed(failure.detail),
-        key: SessionActions.lineSwitchFailureKey,
+        auth: auth,
+        onEntered: () async {
+          if (!context.mounted) return;
+          await CatalogScope.maybeOf(context)?.reload();
+          if (context.mounted) GoRouter.of(context).go(AppRoutes.home);
+        },
+        onLineChanged: () async {
+          if (context.mounted) await CatalogScope.maybeOf(context)?.reload();
+        },
       );
-      return;
-    }
-    await _closePlayer(playerHost);
-    catalog?.reload();
-    router.go(AppRoutes.home);
-  }
-
-  Future<void> _closePlayer(PlayerWindowHost? playerHost) async {
-    if (playerHost == null) {
-      return;
-    }
-    try {
-      await playerHost.close();
-    } catch (_) {
-      // 播放窗口关闭失败不应阻断登出/切换。
-    }
-  }
 }
 
 String _chipLabel(SavedServer server) {
   final line = server.activeLine;
   if (line == null || server.lines.length < 2) {
-    return server.name;
+    return server.displayName;
   }
-  return '${server.name} · ${line.hostLabel}';
+  return '${server.displayName} · ${line.hostLabel}';
 }

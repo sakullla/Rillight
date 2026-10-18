@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:convert';
 
@@ -12,6 +12,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/playback_runtime.dart';
@@ -69,7 +70,6 @@ void main() {
         userId: '1',
       );
     const account = SourceAccount(
-      region: AccessRegion.ordinary,
       configuredServerId: 'source',
       verifiedServerId: 'server-a',
       userId: '1',
@@ -130,8 +130,6 @@ void main() {
             username: 'Owner',
             serviceType: MediaServerType.plex,
             verifiedServerId: 'server-a',
-            scopeKnown: true,
-            libraryIds: const ['section:1'],
             lines: [ServerLine(id: 'line', address: fake.url.toString())],
           ),
         ],
@@ -145,12 +143,37 @@ void main() {
         serviceType: MediaServerType.plex,
       ),
     });
+    var cleanupRateLimited = true;
+    PlexClient cleanupClient() => PlexClient(
+      device: device,
+      dio: Dio()
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              if (cleanupRateLimited && options.uri.path.endsWith('/stop')) {
+                handler.reject(
+                  DioException(
+                    requestOptions: options,
+                    type: DioExceptionType.badResponse,
+                    response: Response(
+                      requestOptions: options,
+                      statusCode: 403,
+                    ),
+                  ),
+                );
+              } else {
+                handler.next(options);
+              }
+            },
+          ),
+        ),
+    );
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: servers,
       credentials: credentials,
       createClient: () => PlexClient(device: device),
-      createProviderClient: (_) => PlexClient(device: device),
+      createProviderClient: (_) => cleanupClient(),
       sessionIdentityVerifier: (_, _, _) async =>
           throw StateError('cleanup must not authorize'),
     );
@@ -172,6 +195,20 @@ void main() {
     final runtime = PlaybackRuntime(auth: coldAuth, history: history);
     expect(runtime.canRecoverSnapshot(pending), isTrue);
     fake.failStops = false;
+    await expectLater(
+      recoverAndroidSession(coldAuth.client, coldStore, runtime: runtime),
+      throwsA(
+        isA<MediaServerException>().having(
+          (error) => error.statusCode,
+          'status',
+          403,
+        ),
+      ),
+    );
+    final retained = (await coldStore.read())!;
+    expect(retained.playSessionId, saved.playSessionId);
+    expect(fake.sessions, contains(pending.playSessionId));
+    cleanupRateLimited = false;
     final before = fake.requests.length;
     expect(
       await recoverAndroidSession(coldAuth.client, coldStore, runtime: runtime),
@@ -191,13 +228,6 @@ void main() {
       ),
       isTrue,
     );
-    expect(
-      registry.sessionAccount(
-        'source',
-        region: AccessRegion.ordinary,
-        libraryId: 'section:1',
-      ),
-      isNull,
-    );
+    expect(registry.sessionAccount('source', libraryId: 'section:1'), isNull);
   });
 }

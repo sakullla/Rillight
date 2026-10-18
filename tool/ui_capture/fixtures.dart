@@ -368,10 +368,13 @@ FakeEmbyServer captureServer() {
 
 /// In-memory transport: no real server, credentials, image host or native core.
 class CaptureAdapter extends FakeEmbyAdapter {
-  CaptureAdapter(super.servers);
+  CaptureAdapter(this.servers) : super(servers);
+  final List<FakeEmbyServer> servers;
   Completer<void>? catalogGate;
   Completer<void>? detailGate;
   bool failAggregationMirror = false;
+  bool emptyAggregationMirror = false;
+  bool failLineCheck = false;
   final artwork = <String, Uint8List>{};
 
   @override
@@ -380,6 +383,33 @@ class CaptureAdapter extends FakeEmbyAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (failLineCheck && options.uri.path.endsWith('/System/Info/Public')) {
+      throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionError,
+      );
+    }
+    // Aliases in this fixture are routes to the same remote server and share
+    // issued credentials; independent server identities remain isolated.
+    for (final server in servers) {
+      server.issuedTokens.addAll(
+        servers
+            .where((other) => other.serverId == server.serverId)
+            .expand((other) => other.issuedTokens)
+            .toList(),
+      );
+    }
+    if (emptyAggregationMirror &&
+        options.uri.host == 'capture-mirror.test' &&
+        options.uri.path.endsWith('/Items')) {
+      return ResponseBody.fromString(
+        '{"Items":[],"TotalRecordCount":0}',
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
     if (failAggregationMirror &&
         options.uri.host == 'capture-mirror.test' &&
         options.uri.path.endsWith('/Items')) {
@@ -528,9 +558,19 @@ class CaptureBackend extends FakeVideoBackend
 
   CaptureBackend() : super(duration: const Duration(minutes: 96));
   Completer<void>? openGate;
+  bool rejectAllOpens = false;
+  int rejectNextOpens = 0;
 
   @override
   Future<void> open(VideoOpenRequest request) async {
+    if (rejectAllOpens || rejectNextOpens > 0) {
+      if (rejectNextOpens > 0) rejectNextOpens--;
+      throw DioException(
+        requestOptions: RequestOptions(path: request.url.toString()),
+        type: DioExceptionType.connectionError,
+        message: 'Synthetic connection reset',
+      );
+    }
     if (openGate != null) await openGate!.future;
     await super.open(request);
   }

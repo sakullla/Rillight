@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../media_server/resources.dart';
+import 'playback_recovery_coordinator.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
@@ -57,6 +58,10 @@ class VideoOpenRequest {
 }
 
 /// Optional backend contract; existing desktop and fake defaults are unchanged.
+abstract interface class VideoBackendRecoveryBudget {
+  set recoveryBudget(PlaybackRecoveryBudget? value);
+}
+
 abstract interface class VideoBackendCapabilities {
   Future<PlaybackCapabilities> playbackCapabilities(int maxStreamingBitrate);
 }
@@ -96,6 +101,17 @@ abstract interface class VideoBackendTrackSupport {
 /// Renew a progressive media URL without replacing its decoder or cache.
 abstract interface class VideoBackendSourceRenewal {
   Future<void> refreshSourceUrl(Uri url);
+}
+
+/// Foreground rejection requires a bounded recovery result. Integer events
+/// remain optional prefetch/stall hints, while this request owns failed IO.
+class RequiredSourceRenewal {
+  const RequiredSourceRenewal(this.status);
+  final int status;
+}
+
+abstract interface class VideoBackendSourceRenewalFeedback {
+  void finishSourceRenewal({required bool succeeded});
 }
 
 /// Pause a ready native session and retain its bounded byte cache on backgrounding.
