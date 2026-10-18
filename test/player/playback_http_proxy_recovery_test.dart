@@ -107,20 +107,27 @@ void main() {
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       var requests = 0;
+      final started = Completer<void>();
       server.listen((request) {
         requests++;
+        if (!started.isCompleted) started.complete();
       });
-      final budget = PlaybackRecoveryBudget(
-        total: const Duration(milliseconds: 150),
-      );
-      final proxy = await PlaybackHttpProxy.create(recoveryBudget: budget);
+      final proxy = await PlaybackHttpProxy.create();
       final client = HttpClient();
-      final watch = Stopwatch()..start();
+      final watch = Stopwatch();
       try {
-        await _read(
+        final read = _read(
           client,
           proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
-        ).timeout(const Duration(seconds: 2));
+        );
+        // Start the short deadline after the response is actually stalled.
+        // Local connection setup speed is not part of this assertion.
+        await started.future.timeout(const Duration(seconds: 2));
+        watch.start();
+        proxy.recoveryBudget = PlaybackRecoveryBudget(
+          total: const Duration(milliseconds: 150),
+        );
+        await read.timeout(const Duration(seconds: 2));
         expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
         expect(requests, 1);
       } finally {
@@ -164,27 +171,34 @@ void main() {
       () async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         var requests = 0;
+        final started = Completer<void>();
+        final respond = Completer<void>();
         server.listen((request) async {
           requests++;
+          if (!started.isCompleted) started.complete();
+          await respond.future;
           request.response.statusCode = status;
           if (status == 403 || status == 429) {
             request.response.headers.set('retry-after', '90');
           }
           await request.response.close();
         });
-        final proxy = await PlaybackHttpProxy.create(
-          recoveryBudget: PlaybackRecoveryBudget(
-            total: const Duration(milliseconds: 200),
-          ),
-        );
+        final proxy = await PlaybackHttpProxy.create();
         final client = HttpClient();
         try {
-          await _read(
+          final read = _read(
             client,
             proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
-          ).timeout(const Duration(seconds: 2));
+          );
+          await started.future.timeout(const Duration(seconds: 2));
+          proxy.recoveryBudget = PlaybackRecoveryBudget(
+            total: const Duration(milliseconds: 200),
+          );
+          respond.complete();
+          await read.timeout(const Duration(seconds: 2));
           expect(requests, 1);
         } finally {
+          if (!respond.isCompleted) respond.complete();
           client.close(force: true);
           await proxy.close();
           await server.close(force: true);

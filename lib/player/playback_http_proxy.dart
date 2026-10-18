@@ -382,10 +382,7 @@ class PlaybackHttpProxy {
   }
 
   List<CachedTimeRange> get _visibleCachedTimeline {
-    final degradation = cache?.diagnostics['degradation'];
-    return degradation == null || degradation == 'disk-timeout'
-        ? _cachedTimeline
-        : const [];
+    return _cacheReadsUncertain ? const [] : _cachedTimeline;
   }
 
   void _clearByteCoverage() {
@@ -447,7 +444,7 @@ class PlaybackHttpProxy {
         _byteIdentity != '$resource:${representation.generation}') {
       return false;
     }
-    if (cache!.diagnostics['degradation'] == 'disk-timeout' &&
+    if (cache!.diagnostics['degradation'] != null &&
         (_lastByteIntegrityCheck == null ||
             DateTime.now().difference(_lastByteIntegrityCheck!) >=
                 verifiedSnapshotTtl)) {
@@ -479,8 +476,7 @@ class PlaybackHttpProxy {
   String? get _timelineUnknownReason {
     if (_closed) return 'closed';
     if (cache == null || !sessionBuffering) return 'cacheDisabled';
-    final degradation = cache!.diagnostics['degradation'];
-    if (degradation != null && degradation != 'disk-timeout') {
+    if (_cacheReadsUncertain) {
       return 'cacheUncertain';
     }
     if (_hlsPlaylists.isNotEmpty) return _hlsUnknownReason;
@@ -730,8 +726,7 @@ class PlaybackHttpProxy {
 
   Duration bufferedEnd(Duration position, Duration demuxerEnd) {
     var end = demuxerEnd < position ? position : demuxerEnd;
-    final degradation = cache?.diagnostics['degradation'];
-    if (degradation != null && degradation != 'disk-timeout') return end;
+    if (_cacheReadsUncertain) return end;
     for (final range in _visibleCachedTimeline) {
       if (range.start <= end && range.end > end) end = range.end;
     }
@@ -848,11 +843,10 @@ class PlaybackHttpProxy {
   }
 
   bool get _cacheReadsUncertain {
-    final degradation = cache?.diagnostics['degradation'];
     // Slow publication is independent of the read/verification workers. Keep
     // recent verified coverage; actual loss, expiry and identity changes still
     // retract it. Otherwise one busy write also appears as a playback hole.
-    return degradation != null && degradation != 'disk-timeout';
+    return cache?.hasReadUncertainty ?? false;
   }
 
   Future<void> _refreshByteCoverage() async {

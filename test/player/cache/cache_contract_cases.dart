@@ -1186,6 +1186,16 @@ void main() {
       try {
         await put(cache, 4, [5, 6, 7, 8]);
         expect(cache.diagnostics['degradation'], 'disk-lock-timeout');
+        expect(cache.hasReadUncertainty, isFalse);
+        expect(
+          cache.firstMissingOffset(
+            resource: 'secret-url-not-on-disk',
+            generation: 1,
+            offset: 0,
+            length: 4,
+          ),
+          isNull,
+        );
         expect((await read(cache, 0))?.bytes, [1, 2, 3, 4]);
         final verified = await cache.availableRanges(
           resource: 'secret-url-not-on-disk',
@@ -1196,6 +1206,23 @@ void main() {
         expect(
           verified!.any((range) => range.start == 0 && range.end >= 4),
           true,
+        );
+        // Writer contention is safe for reads, but never excuses actual
+        // corruption. The independent reader must still retract this block.
+        final block = root
+            .listSync(recursive: true)
+            .whereType<File>()
+            .singleWhere((file) => file.path.endsWith('.block'));
+        block.writeAsBytesSync([9, 2, 3, 4]);
+        expect(await read(cache, 0), isNull);
+        expect(
+          cache.firstMissingOffset(
+            resource: 'secret-url-not-on-disk',
+            generation: 1,
+            offset: 0,
+            length: 4,
+          ),
+          0,
         );
       } finally {
         lock.unlockSync();
