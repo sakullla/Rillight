@@ -30,6 +30,7 @@ import '../app/tv_top_nav.dart';
 import '../app/tv_widgets.dart';
 import '../app/window_chrome.dart';
 import '../app/widgets/app_empty_view.dart';
+import '../app/widgets/app_error_view.dart';
 import '../app/widgets/option_pill.dart';
 import '../auth/auth_controller.dart';
 import '../auth/server_list_store.dart';
@@ -46,6 +47,7 @@ import '../player/player_window_host.dart';
 import 'detail_source_scope.dart';
 import 'episode_mapping_dialog.dart';
 import 'poster_card.dart';
+import 'shelf_grid_page.dart';
 import '../app/mobile_widgets.dart';
 import '../home/catalog_failure.dart';
 import '../home/catalog_keys.dart';
@@ -3162,38 +3164,178 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         ),
         if (failed > 0 && failed < visible.length)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
             child: Text(l.aggregationPartialFailure),
           ),
         if (failed == visible.length && visible.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
             child: Text(l.aggregationAllFailed),
           ),
-        for (final row in visible)
-          scopeServerPosters(
-            account: row.account,
-            serverId: row.serverId,
-            child: MediaShelf(
-              key: ValueKey('aggregation-search-${row.serverId}'),
-              shelfId: 'aggregation-search-${row.serverId}',
-              title: row.serverName,
-              items: row.items,
-              loading: row.loading,
-              error: row.error,
-              onRetry: row.error == null ? null : () => _retry(row.serverId),
-              onTap: (item) {
-                final account = row.account;
-                if (account == null) return;
-                unawaited(RecentSearches.instance.add(_term));
-                openServerItem(context, account: account, item: item);
-              },
-            ),
-          ),
+        for (final row in visible) _searchSection(context, row),
       ],
     );
   }
+
+  /// 一个服务器的结果分区:标题(服务器名 + 结果数)+ 海报网格。
+  Widget _searchSection(BuildContext context, _SearchHit row) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final count = row.items.length;
+    return scopeServerPosters(
+      account: row.account,
+      serverId: row.serverId,
+      child: Padding(
+        key: ValueKey('aggregation-search-${row.serverId}'),
+        // 分区之间留 32(AppSpacing.xxl)。
+        padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+              child: Row(
+                children: [
+                  // 服务器名与结果数分开成两个 Text,便于各自截断。
+                  Flexible(
+                    child: Text(
+                      row.serverName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  if (count > 0)
+                    Text(
+                      '  ·  ${AppLocalizations.of(context).phoneSearchResultCount(count)}',
+                      maxLines: 1,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            // 标题与网格之间留 12(AppSpacing.sm)。
+            const SizedBox(height: AppSpacing.sm),
+            _searchBody(context, row),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 分区内容:加载骨架 / 错误 / 结果网格;结果为空且无错误时不占位。
+  Widget _searchBody(BuildContext context, _SearchHit row) {
+    final l = AppLocalizations.of(context);
+    final hasItems = row.items.isNotEmpty;
+    final error = row.error;
+    if (row.loading && !hasItems) {
+      // 加载占位用单行骨架(网格骨架不可收缩,放在 ListView 里会无限高)。
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+        child: SkeletonShelfRow(
+          posterWidth: MediaShelf.posterWidthFor(
+            MediaQuery.sizeOf(context).width,
+          ),
+          posterAspectRatio: 2 / 3,
+        ),
+      );
+    }
+    if (error != null && !hasItems) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+        child: AppErrorView(
+          message: catalogFailureMessage(l, error),
+          onRetry: () => _retry(row.serverId),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    catalogFailureMessage(l, error),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                AppButton(
+                  onPressed: () => _retry(row.serverId),
+                  variant: AppButtonVariant.plain,
+                  child: Text(l.retry),
+                ),
+              ],
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _searchColumns(constraints.maxWidth);
+              return GridView.builder(
+                // 分区高度由网格内容决定,外层 ListView 负责滚动。
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: row.items.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  mainAxisSpacing: AppSpacing.md,
+                  crossAxisSpacing: AppSpacing.md,
+                  childAspectRatio: _searchAspectRatio(
+                    context,
+                    constraints.maxWidth,
+                    columns,
+                  ),
+                ),
+                itemBuilder: (context, index) {
+                  final item = row.items[index];
+                  return ShelfGridPage.gridCard(
+                    context,
+                    item,
+                    onTap: () {
+                      final account = row.account;
+                      if (account == null) return;
+                      unawaited(RecentSearches.instance.add(_term));
+                      openServerItem(context, account: account, item: item);
+                    },
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 搜索结果列数:列宽不小于 [_searchPosterExtent],间距 16。
+  static int _searchColumns(double width) {
+    final columns =
+        (width + AppSpacing.md) ~/ (_searchPosterExtent + AppSpacing.md);
+    return columns < 1 ? 1 : columns;
+  }
+
+  /// 单元格宽高比:海报 2:3 + 标题行高,与 [ShelfGridPage.gridCard] 的卡片高度一致。
+  static double _searchAspectRatio(
+    BuildContext context,
+    double width,
+    int columns,
+  ) {
+    final cell = (width - (columns - 1) * AppSpacing.md) / columns;
+    final label = MediaShelf.posterLabelExtentFor(context);
+    return cell / (cell * 1.5 + label);
+  }
 }
+
+/// 搜索结果海报的目标列宽。
+const double _searchPosterExtent = 180;
 
 /// 手机搜索页还没输入时:最近搜索的词(可点、可清除);没有记录时是一段引导。
 class _PhoneSearchIdle extends StatefulWidget {

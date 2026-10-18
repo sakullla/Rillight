@@ -2844,6 +2844,17 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
       expect(find.text('来源 A'), findsOneWidget);
+      // 海报网格比单行书架高,小窗口下第二个来源需滚动后才会构建。
+      await tester.scrollUntilVisible(
+        find.text('来源 B'),
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('aggregation-search')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(find.text('来源 B'), findsOneWidget);
       await tester.runAsync(() async {
         await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
@@ -2917,10 +2928,11 @@ void main() {
     );
     expect(find.byKey(ValueKey('aggregation-search-${f.aId}')), findsOneWidget);
     expect(find.byKey(ValueKey('aggregation-search-${f.bId}')), findsNothing);
+    // 桌面搜索结果为海报网格(PosterCard),不再是单行 MediaShelf。
     expect(
       find.descendant(
-        of: find.byType(AggregationPage),
-        matching: find.byType(MediaShelf),
+        of: find.byKey(ValueKey('aggregation-search-${f.aId}')),
+        matching: find.byType(PosterCard),
       ),
       findsWidgets,
     );
