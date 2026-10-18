@@ -16,6 +16,44 @@ Future<void> _read(HttpClient client, Uri url) async {
 }
 
 void main() {
+  test(
+    'healthy headers beyond five seconds retain the configured timeout',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var requests = 0;
+      server.listen((request) async {
+        requests++;
+        await Future<void>.delayed(const Duration(seconds: 6));
+        request.response.write('healthy');
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create(
+        mediaHeaderTimeout: const Duration(seconds: 10),
+      );
+      final client = HttpClient();
+      try {
+        final response = await (await client.getUrl(
+          proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+        )).close();
+        expect(response.statusCode, HttpStatus.ok);
+        expect(
+          await response.fold<List<int>>(
+            [],
+            (all, bytes) => all..addAll(bytes),
+          ),
+          'healthy'.codeUnits,
+        );
+        expect(requests, 1);
+        expect(proxy.diagnostics['mediaHeaderTimeouts'], 0);
+        expect(proxy.diagnostics['recoveryAttempts'], 0);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
   test('released isolate budget cannot expire healthy reads and next fault accepts a fresh budget', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final stalled = Completer<void>();

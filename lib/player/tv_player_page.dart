@@ -1627,6 +1627,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   l.playbackDisconnected
                             : c.error == PlayerErrorKind.noStream
                             ? l.noPlayableStream
+                            : c.error == PlayerErrorKind.notPlayable
+                            ? l.itemUnavailable
                             : l.playbackFailed)
                       : c.playbackEnded
                       ? l.playbackEnded

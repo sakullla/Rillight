@@ -94,9 +94,10 @@ class PlaybackHttpProxy {
 
   Duration _requestTimeout(Duration configured, _ProxyRead read) {
     _recoveryBudget?.check();
-    var result = configured < const Duration(seconds: 5)
-        ? configured
-        : const Duration(seconds: 5);
+    // A healthy request gets its configured budget. The original-line retry
+    // window starts only after a failure, or when the controller supplies a
+    // shared recovery deadline.
+    var result = configured;
     final external = _recoveryBudget?.remaining;
     final local = read.recoveryBudget?.remaining;
     if (external != null && external < result) result = external;
@@ -1909,7 +1910,7 @@ class PlaybackHttpProxy {
         final request = await _observeUpstream(
           'connect',
           () => opening.timeout(
-            _requestTimeout(const Duration(seconds: 5), read),
+            _requestTimeout(_client.connectionTimeout!, read),
             onTimeout: () {
               unawaited(
                 opening.then<void>(
@@ -2591,6 +2592,10 @@ class PlaybackHttpProxy {
           'if-modified-since': null,
         },
       );
+      if (probe.statusCode == HttpStatus.unauthorized ||
+          probe.statusCode == HttpStatus.forbidden) {
+        throw _MediaAuthenticationFailure(probe.statusCode);
+      }
       final range = MediaContentRange.parse(
         probe.headers.value('content-range'),
       );
@@ -2648,6 +2653,10 @@ class PlaybackHttpProxy {
       },
     );
     await _discard(response, read);
+    if (response.statusCode == HttpStatus.unauthorized) {
+      _authenticationStatus = response.statusCode;
+      throw _MediaAuthenticationFailure(response.statusCode);
+    }
     final newPolicy = MediaCachePolicy(
       response.headers,
       allowSessionBuffering: sessionBuffering,
@@ -2734,6 +2743,12 @@ class PlaybackHttpProxy {
                 'if-modified-since': null,
               },
             );
+            if (response.statusCode == HttpStatus.unauthorized ||
+                response.statusCode == HttpStatus.forbidden) {
+              // A denied cache gap is still the foreground request. Do not
+              // turn it into a second request through the uncached fallback.
+              throw _MediaAuthenticationFailure(response.statusCode);
+            }
             if (_retryableStatus(response.statusCode)) {
               retryAfter = _retryAfter(response.headers.value('retry-after'));
               fastFailover =
@@ -3030,9 +3045,7 @@ class PlaybackHttpProxy {
                       // An optional future range may be rejected while the
                       // player is still consuming valid cached bytes. Preserve
                       // those bytes and surface authentication only on demand.
-                      throw _ReadAheadAuthenticationFailure(
-                        response.statusCode,
-                      );
+                      throw _MediaAuthenticationFailure(response.statusCode);
                     }
                     final range = MediaContentRange.parse(
                       response.headers.value('content-range'),
@@ -3255,7 +3268,7 @@ class PlaybackHttpProxy {
             read.outputStarted = true;
             yield bytes;
           }
-        } on _ReadAheadAuthenticationFailure catch (failure) {
+        } on _MediaAuthenticationFailure catch (failure) {
           _authenticationStatus = failure.status;
           rethrow;
         }
@@ -3269,6 +3282,7 @@ class PlaybackHttpProxy {
         read.cancel();
         rethrow;
       } catch (error) {
+        if (error is _MediaAuthenticationFailure) rethrow;
         if (!read.outputStarted && !read.cancelled) {
           if (error is TimeoutException && !ahead.failed) {
             // A foreground deadline is not evidence that this representation
@@ -4133,7 +4147,6 @@ class PlaybackHttpProxy {
               throw const HttpException('Media body recovery exhausted');
             }
             final attempt = prefixRecoveryAttempts++;
-            _recoveryAttempts++;
             try {
               await _backoff(
                 attempt,
@@ -4141,6 +4154,7 @@ class PlaybackHttpProxy {
                 read,
                 retryAfter: prefixRetryAfter,
               );
+              _recoveryAttempts++;
               prefixRetryAfter = null;
               final remaining = _recoveryRemaining(read);
               if (remaining <= Duration.zero) {
@@ -4211,6 +4225,10 @@ class PlaybackHttpProxy {
                 throw const _UnsafeForegroundResume();
               }
               resumed = candidate;
+            } on _MediaRecoveryExhausted {
+              _lastValidationFailure = 'foreground-resume-exhausted';
+              _recoveryFailures++;
+              rethrow;
             } on _UnsafeForegroundResume {
               rethrow;
             } on SocketException {
@@ -4576,7 +4594,6 @@ class PlaybackHttpProxy {
                       );
                     }
                     final attempt = resumeAttempts++;
-                    _recoveryAttempts++;
                     try {
                       await _backoff(
                         attempt,
@@ -4584,6 +4601,7 @@ class PlaybackHttpProxy {
                         bodyRead,
                         retryAfter: retryAfter,
                       );
+                      _recoveryAttempts++;
                       retryAfter = null;
                       final remaining = _recoveryRemaining(bodyRead);
                       if (remaining <= Duration.zero) {
@@ -4649,6 +4667,10 @@ class PlaybackHttpProxy {
                         throw const _UnsafeForegroundResume();
                       }
                       resumed = candidate;
+                    } on _MediaRecoveryExhausted {
+                      _lastValidationFailure = 'foreground-resume-exhausted';
+                      _recoveryFailures++;
+                      rethrow;
                     } on _UnsafeForegroundResume {
                       rethrow;
                     } on SocketException {
@@ -4797,7 +4819,7 @@ class PlaybackHttpProxy {
           await chunks.cancel();
         }
       }
-    } catch (_) {
+    } catch (error) {
       // Do not expose upstream URLs/credentials in player errors or logs.
       try {
         if (read.outputStarted) {
@@ -4806,7 +4828,9 @@ class PlaybackHttpProxy {
         } else {
           output.contentLength = -1;
           output.headers.removeAll('content-range');
-          output.statusCode = HttpStatus.badGateway;
+          output.statusCode = error is _MediaAuthenticationFailure
+              ? error.status
+              : HttpStatus.badGateway;
         }
       } catch (_) {}
     } finally {
@@ -5210,8 +5234,8 @@ class _MediaRecoveryExhausted implements Exception {
   const _MediaRecoveryExhausted();
 }
 
-class _ReadAheadAuthenticationFailure implements Exception {
-  const _ReadAheadAuthenticationFailure(this.status);
+class _MediaAuthenticationFailure implements Exception {
+  const _MediaAuthenticationFailure(this.status);
   final int status;
 }
 

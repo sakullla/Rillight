@@ -406,9 +406,12 @@ void main() {
   );
 
   test('an actual child process acknowledges ready, routes a command, and exits on close', () async {
-    final root = await Directory.systemTemp.createTemp(
-      'rillight-process-test-',
-    );
+    // Keep the compiled child and its disposable mailbox on the same volume
+    // and inherited security boundary. A low-integrity build executable on
+    // Windows cannot write to a medium-integrity system temporary directory.
+    final testArea = await Directory('build/test-execution')
+        .create(recursive: true);
+    final root = await testArea.absolute.createTemp('rillight-process-test-');
     final script = File('${root.path}/child.dart');
     final protocolUri = File('lib/player/player_process_protocol.dart')
         .absolute
@@ -450,7 +453,11 @@ Future<void> main(List<String> args) async {
       }
       await root.delete(recursive: true);
     });
-    final child = await control.spawn(executable: executable, arguments: '{}');
+    Future<int> spawn() => IOOverrides.runZoned(
+      () => control.spawn(executable: executable, arguments: '{}'),
+      getSystemTempDirectory: () => root,
+    );
+    final child = await spawn();
     expect(control.isAlive(child), isTrue);
     var command = await control.consumeOpenItem(child);
     for (var i = 0; i < 50 && command == null; i++) {
@@ -467,10 +474,7 @@ Future<void> main(List<String> args) async {
     if (Platform.isWindows) {
       // Exercise real TerminateProcess/WaitForSingleObject as well as the
       // graceful protocol path; both must retain ownership until release.
-      final secondChild = await control.spawn(
-        executable: executable,
-        arguments: '{}',
-      );
+      final secondChild = await spawn();
       await control.kill(secondChild);
       expect(control.isAlive(secondChild), isFalse);
       expect(control.activePids, [secondChild]);

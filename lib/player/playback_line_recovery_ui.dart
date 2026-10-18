@@ -397,7 +397,7 @@ bool playbackNeedsLineStatus(PlayerController c) =>
     c.switchConfirmation != null ||
     (c.playbackLines.isNotEmpty &&
         !c.sessionExpired &&
-        (c.isRecovering || c.disconnected || c.error != null));
+        (c.isRecovering || c.disconnected || c.error == PlayerErrorKind.load));
 
 class PlayerLineStatus extends StatelessWidget {
   const PlayerLineStatus({

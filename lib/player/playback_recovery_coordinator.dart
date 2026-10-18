@@ -149,6 +149,7 @@ enum PlaybackRecoveryFailureKind {
   forbidden,
   temporaryUrl,
   rateLimited,
+  contentUnavailable,
   needsSelection,
 }
 
@@ -267,7 +268,8 @@ class PlaybackRecoveryCoordinator {
           }
           if (kind == PlaybackRecoveryFailureKind.unauthorized ||
               kind == PlaybackRecoveryFailureKind.forbidden ||
-              kind == PlaybackRecoveryFailureKind.rateLimited) {
+              kind == PlaybackRecoveryFailureKind.rateLimited ||
+              kind == PlaybackRecoveryFailureKind.contentUnavailable) {
             break;
           }
         } finally {

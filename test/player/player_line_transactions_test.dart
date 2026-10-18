@@ -422,6 +422,56 @@ void main() {
     },
   );
 
+  for (final automatic in [false, true]) {
+    for (final missingStream in [false, true]) {
+      test(
+        'initial content failure stays actionable without trying backup automatic=$automatic missingStream=$missingStream',
+        () async {
+          final runtime = player.runtime!;
+          await player.disposeAsync();
+          player.dispose();
+          if (automatic) {
+            await auth.selectLine(serverId, const LineSelection.auto());
+          }
+          final item = a.items.firstWhere((item) => item.id == 'movie-up');
+          if (missingStream) {
+            item.supportsDirectPlay = false;
+            item.supportsDirectStream = false;
+          } else {
+            item.type = 'Folder';
+          }
+          final backupRequests = b.requests.length;
+          backend = _Backend();
+          player = PlayerController(
+            client: auth.client,
+            itemId: 'movie-up',
+            backend: backend,
+            window: PlayerWindow(),
+            runtime: runtime,
+            autoResume: false,
+            snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+            settingsStore: MemoryPlayerSettingsStore(),
+          );
+          await player.start();
+          expect(
+            player.error,
+            missingStream
+                ? PlayerErrorKind.noStream
+                : PlayerErrorKind.notPlayable,
+          );
+          expect(player.disconnected, isFalse);
+          expect(player.isRecovering, isFalse);
+          expect(player.loading, isFalse);
+          expect(player.playbackLineFailure, isNull);
+          expect(backend.opens, isEmpty);
+          expect(b.requests.length, backupRequests);
+          expect(auth.savedServers.single.activeLineId, aId);
+          expect(backend.attachedBudget, isNull);
+        },
+      );
+    }
+  }
+
   test('first automatic connection uses verified backup when initial metadata is unreachable', () async {
     final runtime = player.runtime!;
     await player.disposeAsync();
@@ -606,6 +656,49 @@ void main() {
       LineSelection.fixed(aId),
     );
   });
+
+  test(
+    'helper startup preserves missing stream without requesting line recovery',
+    () async {
+      await player.disposeAsync();
+      player.dispose();
+      final item = a.items.firstWhere((item) => item.id == 'movie-up');
+      item.supportsDirectPlay = false;
+      item.supportsDirectStream = false;
+      backend = _Backend();
+      var commands = 0;
+      player = PlayerController(
+        client: auth.client,
+        itemId: 'movie-up',
+        backend: backend,
+        window: PlayerWindow(),
+        playbackLineSnapshot: auth.savedServers.single.lines,
+        initialLineSelection: const LineSelection.auto(),
+        recoveryDeadlineUtc: DateTime.now().toUtc().add(
+          const Duration(seconds: 45),
+        ),
+        recoveryAttemptDeadlineUtc: DateTime.now().toUtc().add(
+          const Duration(seconds: 5),
+        ),
+        switchDispatcher: (_) async {
+          commands++;
+          return <String, dynamic>{};
+        },
+        autoResume: false,
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        settingsStore: MemoryPlayerSettingsStore(),
+      );
+      await player.start();
+      expect(player.error, PlayerErrorKind.noStream);
+      expect(player.disconnected, isFalse);
+      expect(player.isRecovering, isFalse);
+      expect(player.loading, isFalse);
+      expect(player.playbackLineFailure, isNull);
+      expect(backend.attachedBudget, isNull);
+      expect(backend.opens, isEmpty);
+      expect(commands, 0);
+    },
+  );
 
   test('helper committed client survives the preparation deadline', () async {
     await player.disposeAsync();

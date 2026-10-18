@@ -1,5 +1,12 @@
 part of 'player_controller.dart';
 
+class _PlaybackContentFailure extends PlaybackRecoveryFailure {
+  const _PlaybackContentFailure(this.error)
+    : super(PlaybackRecoveryFailureKind.contentUnavailable);
+
+  final PlayerErrorKind error;
+}
+
 /// Same-server line policy and transactions. Native commands still pass through
 /// the controller's command barrier; configuration commits keep the account lease.
 extension PlayerLineTransactions on PlayerController {
@@ -77,6 +84,12 @@ extension PlayerLineTransactions on PlayerController {
       }
     }
     if (revision != _lineRevision || _disposed || _revoked) return true;
+    if (_hasContentError) {
+      isRecovering = false;
+      _lineBudget = null;
+      _emit();
+      return true;
+    }
     if (succeeded) {
       isRecovering = false;
       _lineBudget = null;
@@ -206,15 +219,17 @@ extension PlayerLineTransactions on PlayerController {
       isRecovering = false;
       loading = false;
       if (result.status != PlaybackRecoveryStatus.succeeded) {
-        error = PlayerErrorKind.load;
-        isPlaying = false;
-        disconnected = true;
-        state.phase = PlaybackPhase.failed;
-        playbackLineFailure = _lineFailureText(
-          result.error ?? const PlaybackRecoveryCancelled(),
-        );
-        if (result.error is MediaServerException) {
-          loadFailure = result.error as MediaServerException;
+        if (!_retainContentFailure(result.error)) {
+          error = PlayerErrorKind.load;
+          isPlaying = false;
+          disconnected = true;
+          state.phase = PlaybackPhase.failed;
+          playbackLineFailure = _lineFailureText(
+            result.error ?? const PlaybackRecoveryCancelled(),
+          );
+          if (result.error is MediaServerException) {
+            loadFailure = result.error as MediaServerException;
+          }
         }
       }
       if (result.status != PlaybackRecoveryStatus.needsSelection) {
@@ -524,6 +539,7 @@ extension PlayerLineTransactions on PlayerController {
         PlaybackRecoveryFailureKind.unauthorized,
       );
     }
+    if (_hasContentError) throw _PlaybackContentFailure(error!);
     if (!_accepts(operation) ||
         error != null ||
         loading ||
@@ -532,6 +548,21 @@ extension PlayerLineTransactions on PlayerController {
       throw loadFailure ??
           const PlaybackRecoveryFailure(PlaybackRecoveryFailureKind.network);
     }
+  }
+
+  bool get _hasContentError =>
+      error == PlayerErrorKind.noStream || error == PlayerErrorKind.notPlayable;
+
+  bool _retainContentFailure(Object? failure) {
+    if (failure is! _PlaybackContentFailure) return false;
+    error = failure.error;
+    loading = false;
+    isPlaying = false;
+    disconnected = false;
+    state.phase = PlaybackPhase.failed;
+    state.buffering = false;
+    playbackLineFailure = null;
+    return true;
   }
 
   Future<void> _recoverPlaybackLines({
@@ -548,7 +579,8 @@ extension PlayerLineTransactions on PlayerController {
         _backgroundReleased ||
         _operations.isClosed ||
         playbackLines.isEmpty ||
-        (automatic && !playbackLineSelection.isAutomatic)) {
+        (automatic &&
+            (!playbackLineSelection.isAutomatic || _hasContentError))) {
       return Future.value();
     }
     final existing = _lineRecovery;
@@ -647,6 +679,7 @@ extension PlayerLineTransactions on PlayerController {
                 PlaybackRecoveryFailureKind.unauthorized) {
           sessionExpired = true;
         }
+        _retainContentFailure(result.error);
       }
       if (result.status != PlaybackRecoveryStatus.needsSelection) {
         pendingLineId = null;
@@ -1064,6 +1097,9 @@ extension PlayerLineTransactions on PlayerController {
   }
 
   String _lineFailureText(Object failure) {
+    if (failure is _PlaybackContentFailure) {
+      return failure.error == PlayerErrorKind.noStream ? '没有可播放的流' : '此项目无法播放';
+    }
     if (failure is PlaybackRecoveryFailure) {
       return switch (failure.kind) {
         PlaybackRecoveryFailureKind.certificate => '证书验证失败，请检查服务器证书',

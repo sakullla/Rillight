@@ -801,6 +801,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
               l.playbackDisconnected
         : c.error == PlayerErrorKind.noStream
         ? l.noPlayableStream
+        : c.error == PlayerErrorKind.notPlayable
+        ? l.itemUnavailable
         : l.playbackFailed;
     return Center(
       child: c.loading

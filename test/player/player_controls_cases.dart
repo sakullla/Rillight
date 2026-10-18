@@ -172,6 +172,35 @@ void main() {
     },
   );
 
+  test(
+    'shared line status preserves unavailable item and missing stream errors',
+    () {
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'unavailable',
+        backend: FakeVideoBackend(),
+        window: PlayerWindow(),
+        playbackLineSnapshot: const [
+          ServerLine(id: 'primary', address: 'https://synthetic.invalid'),
+        ],
+        settingsStore: MemoryPlayerSettingsStore(),
+      );
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      // Desktop, phone and TV all use this decision before rendering their
+      // original actionable content error. Having a line alone is not a fault.
+      for (final error in [
+        PlayerErrorKind.notPlayable,
+        PlayerErrorKind.noStream,
+      ]) {
+        controller.error = error;
+        expect(playbackNeedsLineStatus(controller), isFalse);
+      }
+      controller.error = PlayerErrorKind.load;
+      expect(playbackNeedsLineStatus(controller), isTrue);
+    },
+  );
+
   testWidgets('line retry waits for the original deadline across rebuilds', (
     tester,
   ) async {

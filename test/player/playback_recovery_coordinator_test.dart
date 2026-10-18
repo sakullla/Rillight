@@ -123,6 +123,7 @@ void main() {
     PlaybackRecoveryFailureKind.unauthorized,
     PlaybackRecoveryFailureKind.forbidden,
     PlaybackRecoveryFailureKind.rateLimited,
+    PlaybackRecoveryFailureKind.contentUnavailable,
   ]) {
     test('$kind terminates recovery without bypassing Retry-After', () async {
       var next = false;
