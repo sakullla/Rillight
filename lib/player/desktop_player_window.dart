@@ -326,6 +326,24 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   int _lineSelectionSequence = 0;
+  Future<void> _lineSelectionWrites = Future<void>.value();
+
+  Future<void> _writeLineSelection(
+    PlayerLineProcessControl control,
+    int pid,
+    int sequence,
+    Map<String, dynamic> command,
+  ) {
+    final write = _lineSelectionWrites.then((_) async {
+      // A mailbox has one slot. Serialize writes and recheck ownership after
+      // queued I/O so an old cancel cannot replace a newer selection.
+      if (sequence != _lineSelectionSequence || _pid != pid) return;
+      await control.requestLineSelection(pid, command);
+    });
+    _lineSelectionWrites = write.catchError((Object _) {});
+    return write;
+  }
+
   Future<void> _selectLiveLine(
     LineSelection selection,
     void Function() guard,
@@ -351,7 +369,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
     current();
     final deadline = DateTime.now().toUtc().add(lineSelectionTimeout);
-    await ipc.requestLineSelection(pid, {
+    await _writeLineSelection(ipc, pid, sequence, {
       'deadlineUtc': deadline.toIso8601String(),
       'sequence': sequence,
       'selection': selection.toJson(),
@@ -375,7 +393,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       }
       throw TimeoutException('Playback line selection timed out');
     } catch (_) {
-      await ipc.requestLineSelection(pid, {
+      await _writeLineSelection(ipc, pid, sequence, {
         'sequence': sequence,
         'cancel': true,
       });

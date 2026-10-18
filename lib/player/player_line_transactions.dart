@@ -437,7 +437,18 @@ extension PlayerLineTransactions on PlayerController {
               wasRecovering ||
               state.phase == PlaybackPhase.failed)) {
         // The explicit automatic intent is saved only with a successful open.
-        await _recoverPlaybackLines(selection: selection, sharedBudget: budget);
+        await _recoverPlaybackLines(
+          selection: selection,
+          sharedBudget: budget,
+          intentRevision: revision,
+          intentGuard: current,
+        );
+        current();
+        if (switchConfirmation != null && _lineConfirmationResult != null) {
+          throw const PlaybackRecoveryFailure(
+            PlaybackRecoveryFailureKind.needsSelection,
+          );
+        }
         if (playbackLineSelection != selection ||
             disconnected ||
             state.phase == PlaybackPhase.failed) {
@@ -451,6 +462,7 @@ extension PlayerLineTransactions on PlayerController {
         budget,
         current,
         compensate: true,
+        confirmationGuard: current,
       );
     } catch (failure) {
       if (revision == _lineRevision && !_disposed && !_revoked) {
@@ -527,6 +539,8 @@ extension PlayerLineTransactions on PlayerController {
     LineSelection? selection,
     PlaybackRecoveryBudget? sharedBudget,
     Set<String> alreadyAttempted = const {},
+    int? intentRevision,
+    void Function()? intentGuard,
   }) {
     if (_disposed ||
         _revoked ||
@@ -551,7 +565,7 @@ extension PlayerLineTransactions on PlayerController {
         }.contains(PlaybackRecoveryCoordinator.classify(failure))) {
       return Future.value();
     }
-    final revision = ++_lineRevision;
+    final revision = intentRevision ?? ++_lineRevision;
     final budget =
         sharedBudget ?? PlaybackRecoveryBudget(total: recoveryTimeout);
     if (!identical(_lineBudget, budget)) _lineBudget?.cancel();
@@ -570,6 +584,7 @@ extension PlayerLineTransactions on PlayerController {
     PlaybackRecoveryCandidate candidate(ServerLine line) =>
         PlaybackRecoveryCandidate(line.id, (window) async {
           void current() {
+            intentGuard?.call();
             window.check();
             if (_disposed || _revoked || revision != _lineRevision) {
               throw const PlaybackRecoveryCancelled();
@@ -585,6 +600,7 @@ extension PlayerLineTransactions on PlayerController {
               window,
               current,
               compensate: false,
+              confirmationGuard: intentGuard,
             );
           } finally {
             if (revision == _lineRevision) _attachRecoveryBudget(null);
@@ -771,6 +787,7 @@ extension PlayerLineTransactions on PlayerController {
     PlaybackRecoveryBudget budget,
     void Function() current, {
     required bool compensate,
+    void Function()? confirmationGuard,
   }) async {
     final prepared = await _preparePlaybackLine(line, budget, current);
     final plan = await _inspectPlaybackLine(prepared, budget, current);
@@ -818,7 +835,9 @@ extension PlayerLineTransactions on PlayerController {
         _lineBudget = confirmedBudget;
         void confirmed() {
           confirmedBudget.check();
-          if (deadline != null) current();
+          // The candidate window has retired once it asks for a decision.
+          // Retain the enclosing host intent and absolute deadline instead.
+          if (deadline != null) confirmationGuard?.call();
           if (_disposed || _revoked || revision != _lineRevision) {
             throw StateError('Playback line confirmation cancelled');
           }

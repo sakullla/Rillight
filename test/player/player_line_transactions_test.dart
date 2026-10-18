@@ -12,6 +12,7 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_process_control.dart';
+import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_state.dart';
@@ -122,6 +123,38 @@ class _ConfirmationProcess extends _Process {
         'accepted': false,
       };
     }
+  }
+}
+
+class _MailboxProcess extends _ConfirmationProcess {
+  _MailboxProcess(super.helper, this.endpoint);
+  final PlayerProcessProtocol endpoint;
+  final firstEntered = Completer<void>();
+  final firstWritten = Completer<void>();
+  final secondWritten = Completer<void>();
+  Completer<void>? firstWriteGate;
+
+  @override
+  Future<void> requestLineSelection(
+    int pid,
+    Map<String, dynamic> command,
+  ) async {
+    if (command['sequence'] == 1 && command['cancel'] != true) {
+      firstEntered.complete();
+      await firstWriteGate?.future;
+    }
+    await endpoint.write('line-selection', command);
+    if (command['sequence'] == 1 && command['cancel'] != true) {
+      firstWritten.complete();
+    }
+    if (command['sequence'] == 2 && command['cancel'] != true) {
+      secondWritten.complete();
+    }
+  }
+
+  Future<void> pollHelper() async {
+    final command = await endpoint.read('line-selection');
+    if (command != null) await super.requestLineSelection(lastPid, command);
   }
 }
 
@@ -781,6 +814,167 @@ void main() {
       }
     });
   }
+
+  for (final outcome in ['commit', 'cancel', 'expire', 'guard revoked']) {
+    test(
+      'automatic candidate confirmation after fixed failure: $outcome',
+      () async {
+        await player.seekTo(const Duration(minutes: 4));
+        b.items.firstWhere((m) => m.id == 'movie-up').runtime = const Duration(
+          minutes: 2,
+        );
+        backend.emitEvent(VideoEventKind.error, 'Connection lost');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        adapter.offline.add(a.baseUrl.host);
+        final pending = Completer<void>();
+        var valid = true;
+        var settled = false;
+        final work = player.selectPlaybackLineWithConfirmation(
+          const LineSelection.auto(),
+          deadlineUtc: DateTime.now().toUtc().add(
+            Duration(milliseconds: outcome == 'expire' ? 200 : 2000),
+          ),
+          guard: () {
+            if (!valid) throw StateError('Host intent revoked');
+          },
+          onNeedsSelection: () async => pending.complete(),
+        );
+        final result = outcome == 'commit'
+            ? work.then((_) => settled = true)
+            : expectLater(work, throwsA(anything)).then((_) => settled = true);
+        await pending.future.timeout(const Duration(seconds: 1));
+        expect(settled, false);
+        expect(player.switchConfirmation, isNotNull);
+        expect(backend.opens, [a.baseUrl.host]);
+        expect(
+          (await store.load()).servers.single.lineSelection,
+          LineSelection.fixed(aId),
+        );
+        if (outcome == 'commit') {
+          final gate = store.gate = Completer<void>();
+          final entered = store.entered = Completer<void>();
+          final confirmation = player.confirmMediaSourceSwitch(
+            SwitchResumeChoice.beginning,
+          );
+          await entered.future.timeout(const Duration(seconds: 1));
+          expect(settled, false);
+          gate.complete();
+          await confirmation;
+        } else if (outcome == 'cancel') {
+          await player.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
+        } else if (outcome == 'guard revoked') {
+          valid = false;
+          await expectLater(
+            player.confirmMediaSourceSwitch(SwitchResumeChoice.beginning),
+            throwsA(anything),
+          );
+        }
+        await result.timeout(const Duration(seconds: 1));
+        expect(player.switchConfirmation, isNull);
+        expect(player.isRecovering, false);
+        expect(player.isPlaying, outcome == 'commit');
+        expect(
+          (await store.load()).servers.single.lineSelection,
+          outcome == 'commit'
+              ? const LineSelection.auto()
+              : LineSelection.fixed(aId),
+        );
+        expect(player.activeLineId, outcome == 'commit' ? bId : aId);
+        if (outcome != 'commit') expect(backend.opens, [a.baseUrl.host]);
+      },
+    );
+  }
+
+  for (final delayedWrite in [false, true]) {
+    test(
+      'late helper reads latest selection after supersession delayedWrite=$delayedWrite',
+      () async {
+        final endpoint = await PlayerProcessProtocol.create();
+        final process = _MailboxProcess(player, endpoint);
+        if (delayedWrite) process.firstWriteGate = Completer<void>();
+        final host = DesktopPlayerWindowHost(
+          auth: auth,
+          runtime: player.runtime!,
+          processControl: process,
+          lineSelectionTimeout: const Duration(seconds: 2),
+        );
+        try {
+          await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+          final first = expectLater(
+            auth.chooseConnection(serverId, LineSelection.fixed(bId)),
+            throwsA(anything),
+          );
+          await process.firstEntered.future;
+          if (!delayedWrite) await process.firstWritten.future;
+          final second = auth.chooseConnection(
+            serverId,
+            const LineSelection.auto(),
+          );
+          // Neither helper read nor first write completion is required for the
+          // newer user intent to take ownership of the command slot.
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+          process.firstWriteGate?.complete();
+          await process.secondWritten.future.timeout(
+            const Duration(seconds: 1),
+          );
+          await first;
+          final message = await endpoint.read('line-selection', consume: false);
+          expect(message!['sequence'], 2);
+          expect(message['cancel'], isNull);
+          await process.pollHelper();
+          await second.timeout(const Duration(seconds: 1));
+          expect(
+            (await store.load()).servers.single.lineSelection,
+            const LineSelection.auto(),
+          );
+          expect(player.activeLineId, aId);
+          expect(backend.opens, [a.baseUrl.host]);
+        } finally {
+          if (process.firstWriteGate != null &&
+              !process.firstWriteGate!.isCompleted) {
+            process.firstWriteGate!.complete();
+          }
+          await host.close();
+          host.dispose();
+          await endpoint.dispose();
+        }
+      },
+    );
+  }
+
+  test(
+    'current expired host request still replaces its mailbox with cancellation',
+    () async {
+      final endpoint = await PlayerProcessProtocol.create();
+      final process = _MailboxProcess(player, endpoint);
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        runtime: player.runtime!,
+        processControl: process,
+        lineSelectionTimeout: const Duration(milliseconds: 150),
+      );
+      try {
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        await expectLater(
+          auth.chooseConnection(serverId, LineSelection.fixed(bId)),
+          throwsA(isA<TimeoutException>()),
+        );
+        final message = await endpoint.read('line-selection', consume: false);
+        expect(message!['sequence'], 1);
+        expect(message['cancel'], true);
+        await process.pollHelper();
+        expect(
+          (await store.load()).servers.single.lineSelection,
+          LineSelection.fixed(aId),
+        );
+        expect(backend.opens, [a.baseUrl.host]);
+      } finally {
+        await host.close();
+        host.dispose();
+        await endpoint.dispose();
+      }
+    },
+  );
 
   test(
     'superseded confirmation cannot settle or cancel the next confirmation',
