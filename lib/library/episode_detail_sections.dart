@@ -807,6 +807,7 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
             Align(
               alignment: Alignment.centerLeft,
               child: ScrimIconButton(
+                paperInLight: true,
                 key: CatalogKeys.shelfScrollLeft(shelfId),
                 tooltip: l10n.scrollLeft,
                 icon: const Icon(CupertinoIcons.chevron_left),
@@ -817,6 +818,7 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
             Align(
               alignment: Alignment.centerRight,
               child: ScrimIconButton(
+                paperInLight: true,
                 key: CatalogKeys.shelfScrollRight(shelfId),
                 tooltip: l10n.scrollRight,
                 icon: const Icon(CupertinoIcons.chevron_right),
@@ -1227,11 +1229,16 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
           return ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 960),
             child: DecoratedBox(
+              // 浅色是白卡细边:卡内轨道胶囊用浅灰,两层不再糊成一片灰。
               decoration: BoxDecoration(
-                color: scheme.surfaceContainerHigh.withValues(alpha: .55),
+                color: scheme.brightness == Brightness.light
+                    ? scheme.surfaceContainerLowest
+                    : scheme.surfaceContainerHigh.withValues(alpha: .55),
                 borderRadius: BorderRadius.circular(AppRadii.lg),
                 border: Border.all(
-                  color: scheme.onSurface.withValues(alpha: .06),
+                  color: scheme.brightness == Brightness.light
+                      ? scheme.outlineVariant
+                      : scheme.onSurface.withValues(alpha: .06),
                 ),
               ),
               child: Padding(
@@ -1962,9 +1969,18 @@ class _StreamChoiceWrap extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: selected
-            ? scheme.primary.withValues(alpha: 0.18)
-            : scheme.surfaceContainerHigh,
+            ? scheme.primary.withValues(
+                alpha: scheme.brightness == Brightness.light ? 0.10 : 0.18,
+              )
+            : (scheme.brightness == Brightness.light
+                  ? scheme.surfaceContainer
+                  : scheme.surfaceContainerHigh),
         borderRadius: BorderRadius.circular(AppRadii.sm),
+        border: Border.all(
+          color: selected
+              ? scheme.primary.withValues(alpha: 0.45)
+              : const Color(0x00000000),
+        ),
       ),
       key: ValueKey('media-stream-${choice.index}'),
       clipBehavior: Clip.antiAlias,

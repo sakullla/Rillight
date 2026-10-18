@@ -252,11 +252,13 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
               key: const Key('phone-library-filter'),
               onPressed: _openFilters,
               style: AppButtonStyle(
+                // 未筛选时是安静的文字按钮,不在顶栏边缘压一块色块;
+                // 有条件时才换成实底,一眼看出当前列表被筛过。
                 backgroundColor: active
                     ? scheme.primary
-                    : scheme.surfaceContainerHigh,
+                    : const Color(0x00000000),
                 foregroundColor: active ? scheme.onPrimary : scheme.onSurface,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 minimumSize: const Size(48, 44),
                 shape: const StadiumBorder(),
                 textStyle: theme.textTheme.labelLarge?.copyWith(
@@ -605,7 +607,14 @@ class _PhonePosterSliver extends StatelessWidget {
       textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
     );
     final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
-    final label = phoneLibraryPosterLabelExtent(context);
+    // 季数行只有剧集才有:纯电影片库不预留这一行,行与行之间不再空出一截。
+    final label = phonePosterCardLabelExtent(
+      context,
+      titleLines: 2,
+      includeSeasonLine: items.any(
+        (item) => item.isSeries && (item.childCount ?? 0) > 0,
+      ),
+    );
     final imageWidth = catalogPosterMaxWidth(
       cellWidth,
       MediaQuery.devicePixelRatioOf(context),
@@ -613,7 +622,8 @@ class _PhonePosterSliver extends StatelessWidget {
     return SliverGrid(
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns,
-        mainAxisSpacing: AppSpacing.lg,
+        // 文字区已按两行标题预留高度,行距不必再加大。
+        mainAxisSpacing: AppSpacing.sm,
         crossAxisSpacing: spacing,
         childAspectRatio: cellWidth / (cellWidth * 1.5 + label),
       ),

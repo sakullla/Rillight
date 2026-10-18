@@ -751,9 +751,12 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
           style: AppButtonStyle(
             minimumSize: const Size(48, 48),
             padding: const EdgeInsets.symmetric(horizontal: 16),
+            // 浅色下未选分类用与页面同色系的浅底,不再和选中的樱粉撞成两种色块。
             backgroundColor: selected
                 ? scheme.primaryContainer
-                : scheme.surfaceContainerHigh,
+                : (scheme.brightness == Brightness.light
+                      ? scheme.surfaceContainer
+                      : scheme.surfaceContainerHigh),
             foregroundColor: selected
                 ? scheme.onPrimaryContainer
                 : scheme.onSurfaceVariant,

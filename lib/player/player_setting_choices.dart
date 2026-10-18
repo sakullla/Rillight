@@ -123,7 +123,23 @@ class PlayerRateCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final foreground = scheme.onSurface;
+    // 播放器面板固定深色,保持原来的灰阶选中;浅色设置页里改用强调色:
+    // 未选是浅灰平铺,选中是强调色浅底加描边,一眼分清。
+    final light = scheme.brightness == Brightness.light;
+    final foreground = light && selected
+        ? scheme.onPrimaryContainer
+        : scheme.onSurface;
+    final Color fill;
+    final Color edge;
+    if (light) {
+      fill = selected ? scheme.primaryContainer : scheme.surfaceContainer;
+      edge = selected ? scheme.primary : const Color(0x00000000);
+    } else {
+      fill = selected ? scheme.surfaceBright : scheme.surfaceContainerHighest;
+      edge = selected
+          ? scheme.onSurface.withValues(alpha: .7)
+          : scheme.outlineVariant;
+    }
     return Opacity(
       opacity: onPressed == null ? .45 : 1,
       child: Semantics(
@@ -134,14 +150,8 @@ class PlayerRateCell extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(
-              color: selected
-                  ? scheme.onSurface.withValues(alpha: .7)
-                  : scheme.outlineVariant,
-            ),
-            color: selected
-                ? scheme.surfaceBright
-                : scheme.surfaceContainerHighest,
+            border: Border.all(color: edge, width: light && selected ? 1.5 : 1),
+            color: fill,
           ),
           child: AppSurfaceAction(
             onTap: onPressed,

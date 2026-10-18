@@ -57,6 +57,8 @@ node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
 
 macOS 若运行磁盘缓存测试时出现 `disk-unavailable`，先检查系统临时目录是否经过 `/var` 等符号链接。缓存协调器有意拒绝链接根目录；可使用 `env TMPDIR=/private/tmp flutter test --no-pub` 指定真实临时目录，无需放宽生产代码中的目录保护。原型捕获使用内存缓存，不依赖这项设置。
 
+捕获使用自带的测试绑定开启真实投影。Flutter 测试默认关闭阴影，会把 `BoxShadow` 画成无模糊的实色块，浅色页面上看起来像卡片底下多了一条灰边；这里的截图因此与实机的弥散投影一致。
+
 手机播放器包含真实字幕偏好编辑器的“大”和“原始 ASS”状态，以及画中画入口与控制层隐藏状态。
 画中画隐藏状态通过注入原生事实的测试 backend 驱动同一 Flutter 树，仅验证覆盖层显隐；
 它不是系统小窗、原生字幕像素或连续视频／音频证据。系统 PiP 使用隔离 Android 验证包，

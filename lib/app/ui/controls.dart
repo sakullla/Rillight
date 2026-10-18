@@ -273,9 +273,8 @@ class _AppButtonState extends State<AppButton> {
             )
           : _stateFill(colors, resting, customFill != null, _PressKind.pressed);
       scale = theme.tv && _focused ? _tvPressScale : 1;
-      if (widget.style?.side == null) {
-        side = BorderSide(color: colors.tertiary, width: 2);
-      }
+      // 按下只压暗底色;键盘焦点保留焦点环,不再叠一圈强调色边。
+      if (_focused) side = BorderSide(color: colors.primary, width: 2);
     } else if (_focused) {
       if (customFill == null) {
         fill = _stateFill(colors, resting, false, _PressKind.focus);
@@ -287,12 +286,10 @@ class _AppButtonState extends State<AppButton> {
         side = BorderSide(color: colors.secondary, width: 2);
       }
     } else if (_hovered) {
+      // 悬停只换底色,不额外加边框,平面按钮更干净。
       fill =
           widget.style?.hoverColor ??
           _stateFill(colors, resting, customFill != null, _PressKind.hover);
-      if (widget.style?.side == null) {
-        side = BorderSide(color: colors.outlineVariant);
-      }
     }
 
     return _ButtonFace(
@@ -518,13 +515,22 @@ class AppIconButton extends StatelessWidget {
   final bool selected;
   @override
   Widget build(BuildContext context) {
+    // 纯图标按钮默认用中性墨色:工具栏一排图标若都染强调色,页面会显得杂乱。
+    // 强调色留给主要操作与选中态;调用方显式传色时仍按调用方。
+    final neutral =
+        color == null &&
+            style?.foregroundColor == null &&
+            !selected &&
+            !AppUiTheme.of(context).tv
+        ? AppUiTheme.of(context).colorScheme.onSurfaceVariant
+        : color;
     final button = AppButton(
       onPressed: onPressed,
       selected: selected,
       focusNode: focusNode,
       autofocus: autofocus,
       padding: padding,
-      foregroundColor: color,
+      foregroundColor: neutral,
       color: backgroundColor,
       style: style,
       minimumSize: minimumSize,

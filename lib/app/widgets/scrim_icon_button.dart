@@ -27,6 +27,7 @@ class ScrimIconButton extends StatelessWidget {
     this.size = ScrimIconButtonSize.regular,
     this.focusNode,
     this.autofocus = false,
+    this.paperInLight = false,
   });
 
   final Widget icon;
@@ -36,24 +37,40 @@ class ScrimIconButton extends StatelessWidget {
   final FocusNode? focusNode;
   final bool autofocus;
 
+  /// 浅色主题下改用纸色圆钮:近白实底 + 墨色图标 + 细边与弥散软影。
+  ///
+  /// 只给货架/章节等横向翻页钮用:它们一半压在卡片上、一半压在浅色页面上,
+  /// 黑色 scrim 在纸面上像一块污渍。深色主题仍是黑色 scrim。
+  final bool paperInLight;
+
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
     final highContrast = MediaQuery.highContrastOf(context);
-    final backing = scheme.scrim.withValues(
-      alpha: AppScrim.resolve(AppScrim.control, highContrast: highContrast),
-    );
     final dimension = size.dimension;
-    return AppIconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      focusNode: focusNode,
-      autofocus: autofocus,
-      icon: icon,
-      size: size.iconSize,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(width: dimension, height: dimension),
-      style: AppButtonStyle(
+    final paper = paperInLight && scheme.brightness == Brightness.light;
+    final AppButtonStyle style;
+    if (paper) {
+      style = AppButtonStyle(
+        backgroundColor: scheme.surfaceContainerLowest.withValues(
+          alpha: highContrast ? 1 : 0.94,
+        ),
+        hoverColor: scheme.surfaceContainerLowest,
+        foregroundColor: scheme.onSurface,
+        disabledForegroundColor: scheme.onSurface.withValues(
+          alpha: AppScrim.controlDisabledIcon,
+        ),
+        side: BorderSide(color: scheme.outlineVariant),
+        shape: const CircleBorder(),
+        fixedSize: Size.square(dimension),
+        minimumSize: Size.square(dimension),
+        boxShadow: AppShadow.emphasis(Brightness.light),
+      );
+    } else {
+      final backing = scheme.scrim.withValues(
+        alpha: AppScrim.resolve(AppScrim.control, highContrast: highContrast),
+      );
+      style = AppButtonStyle(
         backgroundColor: backing,
         foregroundColor: const Color(0xffffffff),
         disabledForegroundColor: const Color(0xffffffff)
@@ -66,7 +83,18 @@ class ScrimIconButton extends StatelessWidget {
         shape: const CircleBorder(),
         fixedSize: Size.square(dimension),
         minimumSize: Size.square(dimension),
-      ),
+      );
+    }
+    return AppIconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      focusNode: focusNode,
+      autofocus: autofocus,
+      icon: icon,
+      size: size.iconSize,
+      padding: EdgeInsets.zero,
+      constraints: BoxConstraints.tightFor(width: dimension, height: dimension),
+      style: style,
     );
   }
 }

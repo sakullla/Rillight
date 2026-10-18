@@ -97,7 +97,8 @@ void main() {
         );
         expect(ui.AppUiTheme.of(dialog).brightness, brightness);
         expect(ui.CupertinoTheme.brightnessOf(dialog), brightness);
-        await tester.tap(find.text('取消'));
+        // 锚定菜单没有「取消」条目:Esc 或点外面关闭。
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await settle(tester);
         expect(controller.style, selected);
         expect((await store.read()).appearanceStyle, selected.name);

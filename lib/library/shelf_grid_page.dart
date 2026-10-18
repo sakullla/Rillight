@@ -1132,6 +1132,9 @@ class _Header extends StatelessWidget {
                 AppMenuButton<CatalogSort>(
                   key: CatalogKeys.sortBy,
                   tooltip: l10n.sortBy,
+                  padding: EdgeInsets.zero,
+                  // 胶囊自己就是按钮外形,外层不再铺悬停底面。
+                  style: const AppButtonStyle(hoverColor: Color(0x00000000)),
                   selected: sort,
                   onSelected: onSort,
                   items: [
@@ -1145,8 +1148,8 @@ class _Header extends StatelessWidget {
                   child: _HeaderChip(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                        vertical: AppSpacing.xs,
+                        horizontal: 14,
+                        vertical: 8,
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1161,6 +1164,7 @@ class _Header extends StatelessWidget {
                           const SizedBox(width: AppSpacing.xxs),
                           Icon(
                             CupertinoIcons.chevron_down,
+                            size: 14,
                             color: colorScheme.onSurfaceVariant,
                           ),
                         ],
@@ -1177,25 +1181,51 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _HeaderChip extends StatelessWidget {
+class _HeaderChip extends StatefulWidget {
   const _HeaderChip({required this.child, this.active = false});
 
   final Widget child;
   final bool active;
 
   @override
+  State<_HeaderChip> createState() => _HeaderChipState();
+}
+
+class _HeaderChipState extends State<_HeaderChip> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: active ? scheme.primaryContainer : scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: active ? scheme.primary : scheme.outlineVariant,
+    final light = scheme.brightness == Brightness.light;
+    final active = widget.active;
+    // 浅色页面上用白底细边的胶囊,与选项面板里的胶囊同一种质感;
+    // 悬停时底面加深一档、描边加重,作为可点反馈。
+    final rest = active
+        ? scheme.primaryContainer
+        : (light ? scheme.surfaceContainerLowest : scheme.surfaceContainerHigh);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: AppMotion.durationOf(context, AppMotion.fast),
+        curve: AppMotion.standard,
+        decoration: BoxDecoration(
+          color: _hovered
+              ? Color.alphaBlend(scheme.onSurface.withValues(alpha: .05), rest)
+              : rest,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: active
+                ? scheme.primary
+                : (light
+                      ? scheme.onSurface.withValues(alpha: _hovered ? .24 : .14)
+                      : scheme.outlineVariant),
+          ),
         ),
+        clipBehavior: Clip.antiAlias,
+        child: widget.child,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: child,
     );
   }
 }
