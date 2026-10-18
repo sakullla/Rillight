@@ -424,8 +424,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 children: [
                   Text(
                     l.pickEpisode,
-                    style: AppUiTheme.of(context).textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
+                    style: AppUiTheme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(width: AppSpacing.xs),
                   DecoratedBox(
@@ -443,7 +442,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                         style: AppUiTheme.of(context).textTheme.labelSmall
                             ?.copyWith(
                               color: scheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w600,
                               fontFeatures: const [
                                 FontFeature.tabularFigures(),
                               ],
@@ -498,9 +496,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           : null,
                       textStyle: AppUiTheme.of(context).textTheme.labelLarge
                           ?.copyWith(
-                            fontWeight: isCurrent
-                                ? FontWeight.w700
-                                : FontWeight.w500,
+                            fontWeight: isCurrent ? FontWeight.w600 : null,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                     ),
@@ -1264,7 +1260,8 @@ class _SecondaryAction extends StatelessWidget {
         fill: iconFill,
       ),
     );
-    final borderRadius = BorderRadius.circular(compact ? 999 : AppRadii.lg);
+    // 同一行的操作统一为胶囊，高度一致，边线只用细 AppEdge。
+    final borderRadius = BorderRadius.circular(AppRadii.pill);
     return AppTooltip(
       message: tooltip ?? label,
       child: MobilePressFeedback(
@@ -1284,7 +1281,7 @@ class _SecondaryAction extends StatelessWidget {
             border: Border.all(
               color: highlighted
                   ? scheme.primary.withValues(alpha: .44)
-                  : scheme.outlineVariant.withValues(alpha: .38),
+                  : AppEdge.of(theme.brightness),
             ),
           ),
           clipBehavior: Clip.antiAlias,
@@ -1311,10 +1308,7 @@ class _SecondaryAction extends StatelessWidget {
                           (compact
                                   ? theme.textTheme.labelMedium
                                   : theme.textTheme.labelLarge)
-                              ?.copyWith(
-                                color: labelColor,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              ?.copyWith(color: labelColor),
                     ),
                   ),
                 ],

@@ -409,7 +409,7 @@ TextStyle? phoneDetailTitleStyle(
   return theme.textTheme.headlineLarge?.copyWith(
     color: theme.colorScheme.onSurface,
     fontSize: size,
-    fontWeight: FontWeight.w800,
+    fontWeight: FontWeight.w600,
     height: 1.22,
     letterSpacing: -0.3,
   );
@@ -567,23 +567,17 @@ class _MetaChip extends StatelessWidget {
     if (entry.badge) {
       return DecoratedBox(
         decoration: BoxDecoration(
-          color: scheme.onSurface.withValues(alpha: .08),
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(
-            color: scheme.onSurface.withValues(alpha: .28),
-            width: 0.8,
-          ),
+          // 安静的技术标签：细发丝边 + 次要文字色，不抢标题。
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(color: AppEdge.of(theme.brightness, strong: true)),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           child: Text(
             entry.label,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurface.withValues(alpha: .86),
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
+              color: scheme.onSurfaceVariant,
               height: 1.3,
-              letterSpacing: .3,
             ),
           ),
         ),
@@ -595,7 +589,7 @@ class _MetaChip extends StatelessWidget {
           : entry.onTap != null
           ? scheme.primary
           : scheme.onSurfaceVariant,
-      fontWeight: entry.highlight ? FontWeight.w700 : FontWeight.w500,
+      fontWeight: entry.highlight ? FontWeight.w600 : null,
     );
     final chip = entry.highlight
         ? Row(
@@ -721,12 +715,15 @@ class PhoneSeasonTab extends StatelessWidget {
           duration: AppMotion.durationOf(context, AppMotion.fast),
           curve: AppMotion.standard,
           decoration: BoxDecoration(
-            color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(999),
+            color: selected ? scheme.primary : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+            border: selected
+                ? null
+                : Border.all(color: AppEdge.of(theme.brightness)),
           ),
           clipBehavior: Clip.antiAlias,
           child: AppSurfaceAction(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadii.pill),
             onTap: onPressed,
             child: ConstrainedBox(
               constraints: const BoxConstraints(minWidth: 64, minHeight: 36),
@@ -738,8 +735,8 @@ class PhoneSeasonTab extends StatelessWidget {
                     label,
                     maxLines: 1,
                     style: theme.textTheme.labelLarge?.copyWith(
-                      color: selected ? scheme.surface : scheme.onSurface,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? scheme.onPrimary : scheme.onSurface,
+                      fontWeight: selected ? FontWeight.w600 : null,
                     ),
                   ),
                 ),
@@ -1213,10 +1210,10 @@ class _EpisodeRow extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.titleSmall?.copyWith(
         fontSize: 15,
-        fontWeight: current ? FontWeight.w700 : FontWeight.w600,
+        fontWeight: FontWeight.w600,
         height: 1.3,
         color: current
-            ? scheme.primary
+            ? scheme.onPrimaryContainer
             : played
             ? scheme.onSurfaceVariant
             : scheme.onSurface,
@@ -1229,89 +1226,103 @@ class _EpisodeRow extends StatelessWidget {
         brighten: .04,
         child: Container(
           decoration: BoxDecoration(
+            // 当前集用 primaryContainer 底色加左侧 3px 主色条标记，不描彩色边。
             color: current
-                ? scheme.primary.withValues(alpha: .14)
+                ? scheme.primaryContainer
                 : scheme.surfaceContainerLow.withValues(alpha: .52),
             borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: Border.all(
-              color: current
-                  ? scheme.primary.withValues(alpha: .38)
-                  : scheme.outlineVariant.withValues(alpha: .28),
-            ),
+            border: current
+                ? null
+                : Border.all(color: AppEdge.of(theme.brightness)),
           ),
           clipBehavior: Clip.antiAlias,
-          child: AppSurfaceAction(
-            key: CatalogKeys.episode(episode.id),
-            onTap: onTap,
-            child: Padding(
-              // 外距 sm + 内距 sm，剧照左缘与「剧集」标题、季标签同一条 16 竖线。
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm - 1,
-                vertical: 9,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+          child: Stack(
+            children: [
+              if (current)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 3,
+                  child: ColoredBox(color: scheme.primary),
+                ),
+              AppSurfaceAction(
+                key: CatalogKeys.episode(episode.id),
+                onTap: onTap,
+                child: Padding(
+                  // 外距 sm + 内距 sm，剧照左缘与「剧集」标题、季标签同一条 16 竖线。
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm - 1,
+                    vertical: 9,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _EpisodeThumb(
-                        episode: episode,
-                        width: _thumbWidth,
-                        current: current,
-                        played: played,
-                        progress: progress,
-                        onPlay: onPlay,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _EpisodeThumb(
+                            episode: episode,
+                            width: _thumbWidth,
+                            current: current,
+                            played: played,
+                            progress: progress,
+                            onPlay: onPlay,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                title,
+                                if (facts.isNotEmpty || date != null) ...[
+                                  const SizedBox(height: 4),
+                                  _EpisodeFacts(
+                                    facts: facts,
+                                    date: date,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            AppIcons.chevronRight,
+                            size: 16,
+                            color: scheme.onSurfaceVariant.withValues(
+                              alpha: .48,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            title,
-                            if (facts.isNotEmpty || date != null) ...[
-                              const SizedBox(height: 4),
-                              _EpisodeFacts(
-                                facts: facts,
-                                date: date,
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ],
+
+                      if (overview != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 7),
+                          child: Text(
+                            overview,
+                            key: const Key('phone-episode-overview'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                              height: 1.45,
+                            ),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        AppIcons.chevronRight,
-                        size: 16,
-                        color: scheme.onSurfaceVariant.withValues(alpha: .48),
-                      ),
                     ],
                   ),
-
-                  if (overview != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 7),
-                      child: Text(
-                        overview,
-                        key: const Key('phone-episode-overview'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          height: 1.45,
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),

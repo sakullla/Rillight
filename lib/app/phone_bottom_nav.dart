@@ -29,13 +29,53 @@ class PhoneBottomNav extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final bool floating;
 
+  static const int _itemCount = 4;
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     final radius = floating
         ? BorderRadius.circular(AppMobileNav.floatRadius)
         : BorderRadius.zero;
     final bottom = MediaQuery.viewPaddingOf(context).bottom;
+    final barHeight = floating
+        ? AppMobileNav.floatingHeight
+        : AppMobileNav.dockedHeight;
+    // 选中项的胶囊指示器:按等分列宽定位,位移走统一动效。
+    final tabBar = CupertinoTabBar(
+      activeColor: scheme.onPrimaryContainer,
+      inactiveColor: scheme.onSurfaceVariant,
+      height: barHeight,
+      backgroundColor: const Color(0x00000000),
+      currentIndex: index,
+      onTap: onSelected,
+      iconSize: 24,
+      border: null,
+      items: [
+        BottomNavigationBarItem(
+          icon: const Icon(AppIcons.home, fill: AppIcons.outline),
+          activeIcon: const Icon(AppIcons.home, fill: AppIcons.filled),
+          label: l.home,
+        ),
+        BottomNavigationBarItem(
+          icon: const Icon(AppIcons.library, fill: AppIcons.outline),
+          activeIcon: const Icon(AppIcons.library, fill: AppIcons.filled),
+          label: l.libraries,
+        ),
+        BottomNavigationBarItem(
+          icon: const Icon(AppIcons.aggregation, fill: AppIcons.outline),
+          activeIcon: const Icon(AppIcons.aggregation, fill: AppIcons.filled),
+          label: l.aggregation,
+        ),
+        BottomNavigationBarItem(
+          icon: const Icon(AppIcons.search, fill: AppIcons.outline),
+          activeIcon: const Icon(AppIcons.search, fill: AppIcons.filled),
+          label: l.search,
+        ),
+      ],
+    );
     Widget bar = LiquidGlassBackdrop(
       enabled: false,
       child: LiquidGlass(
@@ -45,42 +85,30 @@ class PhoneBottomNav extends StatelessWidget {
         child: MediaQuery.removePadding(
           context: context,
           removeBottom: floating,
-          child: CupertinoTabBar(
-            activeColor: AppUiTheme.of(context).colorScheme.primary,
-            inactiveColor: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-            height: floating
-                ? AppMobileNav.floatingHeight
-                : AppMobileNav.dockedHeight,
-            backgroundColor: const Color(0x00000000),
-            currentIndex: index,
-            onTap: onSelected,
-            iconSize: 24,
-            border: null,
-            items: [
-              BottomNavigationBarItem(
-                icon: const Icon(AppIcons.home, fill: AppIcons.outline),
-                activeIcon: const Icon(AppIcons.home, fill: AppIcons.filled),
-                label: l.home,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(AppIcons.library, fill: AppIcons.outline),
-                activeIcon: const Icon(AppIcons.library, fill: AppIcons.filled),
-                label: l.libraries,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(AppIcons.aggregation, fill: AppIcons.outline),
-                activeIcon: const Icon(
-                  AppIcons.aggregation,
-                  fill: AppIcons.filled,
-                ),
-                label: l.aggregation,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(AppIcons.search, fill: AppIcons.outline),
-                activeIcon: const Icon(AppIcons.search, fill: AppIcons.filled),
-                label: l.search,
-              ),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth / _itemCount;
+              final contentHeight = barHeight - (floating ? 0 : bottom);
+              return Stack(
+                children: [
+                  AnimatedPositioned(
+                    duration: AppMotion.durationOf(context, AppMotion.normal),
+                    curve: AppMotion.standard,
+                    left: index * itemWidth + AppSpacing.xs,
+                    top: AppSpacing.xs,
+                    width: itemWidth - AppSpacing.xs * 2,
+                    height: contentHeight - AppSpacing.xs * 2,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
+                      ),
+                    ),
+                  ),
+                  tabBar,
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -89,13 +117,7 @@ class PhoneBottomNav extends StatelessWidget {
       bar = DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: radius,
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x52000000),
-              blurRadius: 20,
-              offset: Offset(0, 6),
-            ),
-          ],
+          boxShadow: AppShadow.overlay(theme.brightness),
         ),
         child: bar,
       );
@@ -114,7 +136,7 @@ class PhoneBottomNav extends StatelessWidget {
     if (!floating) {
       return padded;
     }
-    final surface = AppUiTheme.of(context).colorScheme.surface;
+    final surface = scheme.surface;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(

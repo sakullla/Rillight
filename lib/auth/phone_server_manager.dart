@@ -291,11 +291,11 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
     final disabled = _busy || widget.auth.isBusy;
     return Container(
       decoration: BoxDecoration(
-        color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(14),
+        // 当前服务器用 primaryContainer 底色标记，不描彩色边。
+        color: current ? scheme.primaryContainer : scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(
-          color: current ? scheme.primary : scheme.outlineVariant,
-          width: current ? 1.5 : 1,
+          color: AppEdge.of(AppUiTheme.of(context).brightness),
         ),
       ),
       margin: const EdgeInsets.only(bottom: 12),

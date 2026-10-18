@@ -496,7 +496,6 @@ class _Caption extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: theme.colorScheme.onSurface.withValues(alpha: .78),
-                      fontWeight: FontWeight.w500,
                       height: 1.2,
                     ),
                   ),
@@ -521,7 +520,6 @@ class _Caption extends StatelessWidget {
       style: theme.textTheme.displaySmall?.copyWith(
         color: theme.colorScheme.onSurface,
         fontSize: 30,
-        fontWeight: FontWeight.w800,
         height: 1.15,
         letterSpacing: -0.4,
       ),

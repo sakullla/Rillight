@@ -330,9 +330,8 @@ class PhoneHomeSectionEditor extends StatelessWidget {
         if (controller.isHidden(id)) id,
     ];
     final scheme = theme.colorScheme;
-    final groupLabel = theme.textTheme.labelLarge?.copyWith(
+    final groupLabel = theme.textTheme.titleSmall?.copyWith(
       color: scheme.onSurfaceVariant,
-      fontWeight: FontWeight.w600,
     );
     return CustomScrollView(
       slivers: [
