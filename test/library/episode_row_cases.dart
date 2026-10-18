@@ -381,7 +381,11 @@ void main() {
 
     await tester.pumpWidget(
       host(
-        LibraryFilterPanel(initial: const ShelfFilters(), onApply: (_, _) {}),
+        LibraryFilterPanel(
+          initial: const ShelfFilters(),
+          genres: [for (var i = 0; i < 18; i++) '流派$i'],
+          onApply: (_, _) {},
+        ),
       ),
     );
     await tester.pump();

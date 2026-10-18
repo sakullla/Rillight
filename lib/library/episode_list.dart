@@ -297,7 +297,14 @@ class _EpisodeListState extends State<EpisodeList> {
                           textStyle: theme.textTheme.labelLarge,
                         ),
                         variant: AppButtonVariant.plain,
-                        child: Text(l10n.more),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(l10n.more),
+                            const SizedBox(width: 2),
+                            const Icon(CupertinoIcons.chevron_right, size: 14),
+                          ],
+                        ),
                       ),
                   ],
                 ),

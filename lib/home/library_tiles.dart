@@ -249,6 +249,7 @@ class _LibraryScrollButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
       child: ScrimIconButton(
+        paperInLight: true,
         key: buttonKey,
         tooltip: tooltip,
         onPressed: onPressed,

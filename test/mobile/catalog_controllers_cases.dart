@@ -10,6 +10,7 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/detail_controller.dart';
+import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/search/search_controller.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -662,4 +663,70 @@ void main() {
       expect(catalog.librariesNotice, isNull);
     },
   );
+
+  test('browse controller supports 10 sort dimensions, order toggle, searchTerm and per-library memory', () async {
+    LibrarySortMemory.clear();
+    addTearDown(LibrarySortMemory.clear);
+
+    final options = CatalogSort.optionsFor(
+      const [],
+      capabilities: auth.client.capabilities,
+    );
+    expect(
+      options,
+      containsAll(<CatalogSort>[
+        CatalogSort.dateUpdated,
+        CatalogSort.dateCreated,
+        CatalogSort.premiereDate,
+        CatalogSort.datePlayed,
+        CatalogSort.productionYear,
+        CatalogSort.communityRating,
+        CatalogSort.criticRating,
+        CatalogSort.name,
+        CatalogSort.runtime,
+        CatalogSort.random,
+      ]),
+    );
+
+    final movies = BrowseController(
+      auth: auth,
+      cache: cache,
+      parentId: 'view-movies',
+    );
+    addTearDown(movies.dispose);
+    expect(movies.sortBy, 'DateLastContentAdded');
+    expect(movies.sortOrder, 'Descending');
+
+    await movies.toggleSortOrder();
+    expect(movies.sortOrder, 'Ascending');
+    expect(server.requests.last, contains('SortOrder=Ascending'));
+
+    await movies.selectSort(CatalogSort.communityRating);
+    expect(movies.sortBy, 'CommunityRating');
+    expect(movies.sortOrder, 'Descending');
+    expect(server.requests.last, contains('SortBy=CommunityRating'));
+
+    await movies.setSearchTerm('  Inception  ');
+    expect(movies.searchTerm, 'Inception');
+    expect(server.requests.last, contains('SearchTerm=Inception'));
+
+    // Switching to another library keeps default sort while view-movies remembers CommunityRating.
+    final series = BrowseController(
+      auth: auth,
+      cache: cache,
+      parentId: 'view-tv',
+    );
+    addTearDown(series.dispose);
+    expect(series.sortBy, 'DateLastContentAdded');
+    expect(series.sortOrder, 'Descending');
+
+    final moviesReentered = BrowseController(
+      auth: auth,
+      cache: cache,
+      parentId: 'view-movies',
+    );
+    addTearDown(moviesReentered.dispose);
+    expect(moviesReentered.sortBy, 'CommunityRating');
+    expect(moviesReentered.sortOrder, 'Descending');
+  });
 }

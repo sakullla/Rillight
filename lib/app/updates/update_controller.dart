@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../product.dart';
+import '../../player/player_settings.dart';
 import 'update_download.dart';
 import 'update_platform_contract.dart';
 import 'update_service.dart';
@@ -61,12 +62,26 @@ class UpdateController extends ChangeNotifier {
     required this.platform,
     UpdateService? service,
     UpdateDownloader? downloader,
+    PlayerSettingsStore? settingsStore,
+    this.openSettingsStore,
     this.currentVersion = kAppVersion,
+    this.autoReminderEnabled = true,
+    String? ignoredVersion,
   }) : _service = service ?? UpdateService(),
-       _downloader = downloader ?? UpdateDownloader();
+       _downloader = downloader ?? UpdateDownloader(),
+       _settingsStore = settingsStore,
+       ignoredVersion = _normalizeVersion(ignoredVersion) {
+    if (settingsStore != null) {
+      _preferencesLoad = _loadPreferences(Future.value(settingsStore));
+    }
+  }
+  static const _ioTimeout = Duration(seconds: 2);
+
   final UpdatePlatform platform;
   final UpdateService _service;
   final UpdateDownloader _downloader;
+  final PlayerSettingsStore? _settingsStore;
+  final Future<PlayerSettingsStore> Function()? openSettingsStore;
   final String currentVersion;
 
   UpdateCheckPhase checkPhase = UpdateCheckPhase.idle;
@@ -75,6 +90,8 @@ class UpdateController extends ChangeNotifier {
   UpdateAssetSelection? selection;
   UpdateCapabilities? capabilities;
   bool manualCheck = false;
+  bool autoReminderEnabled;
+  String? ignoredVersion;
   UpdateDownloadState download = const UpdateDownloadState();
   UpdateActionResult? releaseAction;
   UpdateActionResult? installAction;
@@ -84,6 +101,10 @@ class UpdateController extends ChangeNotifier {
   bool requestingPermission = false;
 
   Future<void>? _checking;
+  Future<PlayerSettingsStore>? _openedStore;
+  Future<void>? _preferencesLoad;
+  bool _preferencesLoaded = false;
+  int _preferenceRevision = 0;
   CancelToken? _cancelToken;
   int _downloadGeneration = 0;
   bool _disposed = false;
@@ -95,15 +116,130 @@ class UpdateController extends ChangeNotifier {
   /// Host additionally arbitrates playback, lifecycle, routes and navigator state.
   AppRelease? get pendingAutomaticRelease => _automaticRelease;
 
+  static String _versionKey(AppRelease candidate) =>
+      candidate.version.toString().split('+').first;
+
+  static String? _normalizeVersion(String? raw) {
+    final trimmed = raw?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    final clean = trimmed.startsWith('v') || trimmed.startsWith('V')
+        ? trimmed.substring(1)
+        : trimmed;
+    final key = clean.split('+').first.trim();
+    return key.isEmpty ? null : key;
+  }
+
+  bool isReleaseIgnored(AppRelease? candidate) =>
+      candidate != null &&
+      ignoredVersion != null &&
+      ignoredVersion == _versionKey(candidate);
+
   void acknowledgeAutomaticRelease(AppRelease candidate) {
-    _shownVersions.add(candidate.version.toString().split('+').first);
+    _shownVersions.add(_versionKey(candidate));
     if (_automaticRelease == candidate) _automaticRelease = null;
     _notify();
+  }
+
+  Future<void> ignoreRelease([AppRelease? candidate]) async {
+    final target = candidate ?? _automaticRelease ?? release;
+    if (_disposed || target == null) return;
+    _preferenceRevision++;
+    final key = _versionKey(target);
+    ignoredVersion = key;
+    _shownVersions.add(key);
+    if (_automaticRelease == target) _automaticRelease = null;
+    _notify();
+    await _writePreferences(PlayerSettings(ignoredUpdateVersion: key));
+  }
+
+  Future<void> unignoreRelease() async {
+    if (_disposed || ignoredVersion == null) return;
+    _preferenceRevision++;
+    _shownVersions.remove(ignoredVersion);
+    ignoredVersion = null;
+    _notify();
+    await _writePreferences(const PlayerSettings(ignoredUpdateVersion: ''));
+  }
+
+  Future<void> setAutoReminderEnabled(bool enabled) async {
+    if (_disposed) return;
+    _preferenceRevision++;
+    autoReminderEnabled = enabled;
+    if (!enabled) _automaticRelease = null;
+    _notify();
+    await _writePreferences(PlayerSettings(updateReminderEnabled: enabled));
+  }
+
+  Future<PlayerSettingsStore> _resolveStore() async {
+    if (_settingsStore != null) return _settingsStore;
+    try {
+      return await openSettingsStore!().timeout(_ioTimeout);
+    } catch (_) {
+      return MemoryPlayerSettingsStore();
+    }
+  }
+
+  Future<void> _loadPreferences(Future<PlayerSettingsStore> opening) async {
+    try {
+      final store = await opening;
+      final settings = await store.read().timeout(_ioTimeout);
+      if (_disposed || _preferenceRevision != 0) return;
+      final nextAuto = settings.isUpdateReminderEnabled;
+      final nextIgnored = _normalizeVersion(
+        settings.effectiveIgnoredUpdateVersion,
+      );
+      if (nextAuto != autoReminderEnabled || nextIgnored != ignoredVersion) {
+        autoReminderEnabled = nextAuto;
+        ignoredVersion = nextIgnored;
+        if (!autoReminderEnabled ||
+            (_automaticRelease != null &&
+                isReleaseIgnored(_automaticRelease))) {
+          _automaticRelease = null;
+        }
+        _notify();
+      }
+    } catch (_) {
+      /* Default reminder preferences remain active when storage is unavailable. */
+    } finally {
+      _preferencesLoaded = true;
+    }
+  }
+
+  bool get _hasPendingPreferencesLoad =>
+      !_preferencesLoaded &&
+      (_preferencesLoad != null ||
+          _settingsStore != null ||
+          openSettingsStore != null);
+
+  Future<void> _ensurePreferencesLoaded() {
+    if (_preferencesLoad != null) return _preferencesLoad!;
+    if (_settingsStore != null) {
+      return _preferencesLoad = _loadPreferences(Future.value(_settingsStore));
+    }
+    if (openSettingsStore != null) {
+      return _preferencesLoad = _loadPreferences(
+        _openedStore ??= _resolveStore(),
+      );
+    }
+    return Future.value();
+  }
+
+  Future<void> _writePreferences(PlayerSettings patch) async {
+    if (_settingsStore == null && openSettingsStore == null) return;
+    try {
+      final store = _settingsStore ?? await (_openedStore ??= _resolveStore());
+      await store.writePatch(patch).timeout(_ioTimeout);
+    } catch (_) {}
   }
 
   Future<void> checkAtStartup() {
     if (_startupChecked || _disposed) return Future.value();
     _startupChecked = true;
+    if (!autoReminderEnabled &&
+        _preferencesLoad == null &&
+        openSettingsStore == null) {
+      return Future.value();
+    }
     return check(automatic: true);
   }
 
@@ -129,6 +265,14 @@ class UpdateController extends ChangeNotifier {
 
   Future<void> _performCheck() async {
     try {
+      if (_hasPendingPreferencesLoad) {
+        await _ensurePreferencesLoaded();
+      }
+      if (_disposed) return;
+      if (_autoRequested && !manualCheck && !autoReminderEnabled) {
+        checkPhase = UpdateCheckPhase.idle;
+        return;
+      }
       final candidate = await _service.check();
       if (_disposed) return;
       UpdateCapabilities? environment;
@@ -148,11 +292,12 @@ class UpdateController extends ChangeNotifier {
       checkPhase = candidate.isNewerThan(currentVersion)
           ? UpdateCheckPhase.available
           : UpdateCheckPhase.current;
+      final versionKey = _versionKey(candidate);
       if (_autoRequested &&
+          autoReminderEnabled &&
           checkPhase == UpdateCheckPhase.available &&
-          !_shownVersions.contains(
-            candidate.version.toString().split('+').first,
-          )) {
+          !_shownVersions.contains(versionKey) &&
+          ignoredVersion != versionKey) {
         _automaticRelease = candidate;
       }
     } catch (error) {

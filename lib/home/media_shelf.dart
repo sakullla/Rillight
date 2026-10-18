@@ -190,11 +190,14 @@ class MediaShelf extends StatefulWidget {
     return AppSpacing.xxs + title + lineHeightOf(context, textTheme.bodySmall);
   }
 
-  /// 竖版海报行的标签高度:xs 间距 + 一行标题。
+  /// 竖版海报行的标签高度:xs 间距 + 一行标题 + 2px + 一行年份/评分副信息。
   /// 续播进度画在封面上，不另占标题行。
   static double posterLabelExtentFor(BuildContext context) {
+    final textTheme = AppUiTheme.of(context).textTheme;
     return AppSpacing.xs +
-        lineHeightOf(context, AppUiTheme.of(context).textTheme.titleSmall);
+        lineHeightOf(context, textTheme.titleSmall) +
+        2 +
+        lineHeightOf(context, textTheme.labelSmall);
   }
 
   @override
@@ -389,16 +392,14 @@ class _MediaShelfState extends State<MediaShelf> {
                 ),
                 if (widget.headerAction != null) widget.headerAction!,
                 if (widget.onMore != null && widget.error == null)
-                  AppButton.icon(
+                  // 「更多」是次要入口:文字加箭头,不铺底色,悬停才出现底面。
+                  AppButton(
                     key: CatalogKeys.shelfMore(widget.shelfId),
                     onPressed: widget.onMore,
                     style: AppButtonStyle(
                       foregroundColor: AppUiTheme.of(context)
                           .colorScheme
                           .onSurfaceVariant,
-                      backgroundColor: AppUiTheme.of(context)
-                          .colorScheme
-                          .surfaceContainerHigh,
                       textStyle: AppUiTheme.of(context).textTheme.labelLarge,
                       padding: const EdgeInsets.fromLTRB(
                         AppSpacing.sm,
@@ -408,9 +409,15 @@ class _MediaShelfState extends State<MediaShelf> {
                       ),
                       shape: const StadiumBorder(),
                     ),
-                    icon: const Icon(CupertinoIcons.arrow_right, size: 16),
-                    label: Text(l10n.more),
                     variant: AppButtonVariant.plain,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(l10n.more),
+                        const SizedBox(width: 2),
+                        const Icon(CupertinoIcons.chevron_right, size: 14),
+                      ],
+                    ),
                   ),
               ],
             ),
@@ -689,6 +696,7 @@ class _ScrollButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
       child: ScrimIconButton(
+        paperInLight: true,
         key: buttonKey,
         tooltip: tooltip,
         onPressed: onPressed,

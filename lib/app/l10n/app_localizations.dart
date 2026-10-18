@@ -5223,6 +5223,228 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂时无法加载影片来源，请重试。'**
   String get sourceSelectionUnavailable;
+
+  /// No description provided for @updateReminderSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现可用更新，可直接在应用内下载校验并安装'**
+  String get updateReminderSubtitle;
+
+  /// No description provided for @updateVersionTransition.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前 v{current} → 最新 v{target}'**
+  String updateVersionTransition(String current, String target);
+
+  /// No description provided for @updateCurrentBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'已是最新'**
+  String get updateCurrentBadge;
+
+  /// No description provided for @updateNewBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'可更新'**
+  String get updateNewBadge;
+
+  /// No description provided for @updateIgnoreVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'此版本不再提醒'**
+  String get updateIgnoreVersion;
+
+  /// No description provided for @updateUnignoreVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复此版本提醒'**
+  String get updateUnignoreVersion;
+
+  /// No description provided for @updateIgnoredBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'已忽略 v{version} 提醒'**
+  String updateIgnoredBadge(String version);
+
+  /// No description provided for @updateDisableReminder.
+  ///
+  /// In zh, this message translates to:
+  /// **'不再自动提醒'**
+  String get updateDisableReminder;
+
+  /// No description provided for @updateAutoReminderTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'启动时自动提醒更新'**
+  String get updateAutoReminderTitle;
+
+  /// No description provided for @updateAutoReminderSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查'**
+  String get updateAutoReminderSubtitle;
+
+  /// Settings section title for WebDAV backup and restore.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份与同步'**
+  String get settingsWebDavSection;
+
+  /// Summary of the WebDAV backup section.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动备份完整配置到自备 WebDAV，换机可一键恢复'**
+  String get settingsWebDavSectionSummary;
+
+  /// Setting row label for the WebDAV server address.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器地址'**
+  String get settingsWebDavAddress;
+
+  /// Placeholder for the WebDAV server address.
+  ///
+  /// In zh, this message translates to:
+  /// **'例如 https://dav.example.com:5006'**
+  String get settingsWebDavAddressHint;
+
+  /// Setting row label for the WebDAV account name.
+  ///
+  /// In zh, this message translates to:
+  /// **'账号'**
+  String get settingsWebDavUsername;
+
+  /// Setting row label for the WebDAV password.
+  ///
+  /// In zh, this message translates to:
+  /// **'密码'**
+  String get settingsWebDavPassword;
+
+  /// Tooltip to reveal the WebDAV password.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示密码'**
+  String get settingsWebDavPasswordShow;
+
+  /// Tooltip to hide the WebDAV password.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐藏密码'**
+  String get settingsWebDavPasswordHide;
+
+  /// Setting row label for the remote WebDAV backup directory.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份目录'**
+  String get settingsWebDavDirectory;
+
+  /// Hint that an empty directory falls back to the WebDAV root.
+  ///
+  /// In zh, this message translates to:
+  /// **'远端存放备份文件的目录，留空使用根目录'**
+  String get settingsWebDavDirectoryHint;
+
+  /// Button that probes the configured WebDAV server.
+  ///
+  /// In zh, this message translates to:
+  /// **'测试连接'**
+  String get settingsWebDavTestConnection;
+
+  /// Notice when the WebDAV connection test succeeds.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接成功'**
+  String get settingsWebDavConnectionOk;
+
+  /// Notice when the WebDAV server rejects the credentials.
+  ///
+  /// In zh, this message translates to:
+  /// **'账号或密码错误'**
+  String get settingsWebDavCredentialError;
+
+  /// Notice when the WebDAV directory does not exist.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份目录不存在，请先创建或修改目录'**
+  String get settingsWebDavDirectoryMissing;
+
+  /// Notice when the WebDAV server returns an unexpected status.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器返回错误（HTTP {status}）'**
+  String settingsWebDavHttpError(int status);
+
+  /// Notice when the WebDAV server cannot be reached.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法连接服务器，请检查地址与网络'**
+  String get settingsWebDavUnreachable;
+
+  /// Button that uploads a full local backup to WebDAV.
+  ///
+  /// In zh, this message translates to:
+  /// **'立即备份'**
+  String get settingsWebDavBackup;
+
+  /// Notice when the WebDAV backup upload succeeds.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份完成 · {time}'**
+  String settingsWebDavBackupDone(String time);
+
+  /// Notice when a local configuration file cannot be parsed.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地配置文件损坏，本次操作已取消'**
+  String get settingsWebDavLocalConfigCorrupt;
+
+  /// Notice for an unexpected WebDAV backup failure.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份失败，请重试'**
+  String get settingsWebDavBackupFailed;
+
+  /// Button that downloads and applies the WebDAV backup.
+  ///
+  /// In zh, this message translates to:
+  /// **'从备份恢复'**
+  String get settingsWebDavRestore;
+
+  /// Notice when the WebDAV backup has been applied.
+  ///
+  /// In zh, this message translates to:
+  /// **'已恢复'**
+  String get settingsWebDavRestored;
+
+  /// Notice when the WebDAV server has no backup file.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器上还没有备份文件'**
+  String get settingsWebDavNoBackup;
+
+  /// Notice when the downloaded backup fails validation.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份文件校验未通过，本地数据未改动'**
+  String get settingsWebDavRestoreRejected;
+
+  /// Notice for an unexpected WebDAV restore failure.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复失败，请重试'**
+  String get settingsWebDavRestoreFailed;
+
+  /// Notice when an action runs without a WebDAV address.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先填写 WebDAV 服务器地址'**
+  String get settingsWebDavNotConfigured;
+
+  /// Notice when the WebDAV configuration cannot be saved.
+  ///
+  /// In zh, this message translates to:
+  /// **'配置保存失败，请重试'**
+  String get settingsWebDavSaveFailed;
 }
 
 class _AppLocalizationsDelegate

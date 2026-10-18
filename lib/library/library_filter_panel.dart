@@ -9,8 +9,11 @@ import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/media_server/capabilities.dart';
 
-/// A staged filter editor. Categories and actions stay visible while options
-/// scroll; the host commits exactly once on Apply and cancellation is harmless.
+/// 一页式多维平铺标签筛选与排序面板（R3、R4、R5）。
+///
+/// 手机端（底部圆角抽屉）、桌面端（居中模态框）、Android TV 端（大屏平铺模态框）
+/// 共用同一纵向分组平铺结构（排序、类型、观看状态、流派、年份），草稿态修改在点击
+/// 「应用筛选」时一次性提交；点击取消或返回键丢弃未提交修改。
 class LibraryFilterPanel extends StatefulWidget {
   const LibraryFilterPanel({
     super.key,
@@ -19,37 +22,57 @@ class LibraryFilterPanel extends StatefulWidget {
     this.years = const [],
     this.genres = const [],
     this.sort,
+    this.sortOrder,
+    this.onApplyWithOrder,
     this.capabilities = const ServiceCapabilities({}),
     this.typeFilterable = true,
     this.television = false,
     this.keyPrefix = 'catalog-grid-filter',
     this.loadGenres,
   });
+
   final ShelfFilters initial;
   final List<int> years;
   final List<String> genres;
   final CatalogSort? sort;
+  final String? sortOrder;
   final ServiceCapabilities capabilities;
   final bool typeFilterable, television;
   final String keyPrefix;
   final void Function(ShelfFilters, CatalogSort?) onApply;
+  final void Function(ShelfFilters, CatalogSort?, String?)? onApplyWithOrder;
   final Future<List<String>> Function()? loadGenres;
+
   @override
   State<LibraryFilterPanel> createState() => _LibraryFilterPanelState();
 }
 
 class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
+  static const int _recentYearWindow = 15;
+  static const int _genreSearchThreshold = 16;
+
   late ShelfFilters _draft = widget.initial;
   late CatalogSort? _sort = widget.sort;
-  late String _section = widget.typeFilterable ? 'type' : 'watch';
+  late String _sortOrder = CatalogSort.normalizeSortOrder(
+    widget.sortOrder,
+    fallback: widget.sort ?? CatalogSort.initialFor(widget.capabilities),
+  );
+  late String _activeSection = widget.typeFilterable ? 'type' : 'watch';
+  bool _allYearsExpanded = false;
   final _search = TextEditingController();
+  final _scrollController = ScrollController();
+  final Map<String, GlobalKey> _sectionAnchorKeys = {
+    'sort': GlobalKey(),
+    'type': GlobalKey(),
+    'watch': GlobalKey(),
+    'genre': GlobalKey(),
+    'year': GlobalKey(),
+  };
+
   late final Set<String> _genres = {...widget.genres, ...widget.initial.genres};
   bool _loadingGenres = false, _genreFailed = false;
-  int get _count =>
-      (_draft.type == CatalogTypeFilter.all ? 0 : 1) +
-      (_draft.watch == CatalogWatchFilter.all ? 0 : 1) +
-      _draft.years.length +
-      _draft.genres.length;
+
+  int get _count => _draft.activeCount;
 
   @override
   void initState() {
@@ -76,28 +99,94 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
   @override
   void dispose() {
     _search.dispose();
+    _scrollController.dispose();
     super.dispose();
-  }
-
-  List<(String, String, IconData)> _sections(AppLocalizations l) => [
-    if (widget.typeFilterable)
-      ('type', l.libraryFilterType, CupertinoIcons.rectangle_stack),
-    ('watch', l.libraryFilterWatch, CupertinoIcons.eye),
-    ('genre', l.libraryFilterGenre, CupertinoIcons.square_grid_2x2),
-    ('year', l.libraryFilterYear, CupertinoIcons.calendar),
-    if (_sort != null) ('sort', l.mobileSort, CupertinoIcons.sort_down),
-  ];
-  void _chooseSection(String section) {
-    setState(() {
-      _section = section;
-      _search.clear();
-    });
   }
 
   Key _key(String suffix) => Key('${widget.keyPrefix}-$suffix');
 
   bool _phoneSheet(BuildContext context) =>
       !widget.television && PresentationScope.isPhoneOf(context);
+
+  void _chooseSection(String section) {
+    setState(() {
+      _activeSection = section;
+    });
+    final anchorContext = _sectionAnchorKeys[section]?.currentContext;
+    if (anchorContext != null && anchorContext.mounted) {
+      Scrollable.ensureVisible(
+        anchorContext,
+        duration: AppMotion.durationOf(context, AppMotion.fast),
+        curve: AppMotion.standard,
+      );
+    }
+  }
+
+  void _reset() => setState(() {
+    _draft = const ShelfFilters();
+    if (_sort != null) {
+      final def = CatalogSort.initialFor(widget.capabilities);
+      _sort = def;
+      _sortOrder = def.sortOrder;
+    }
+    _search.clear();
+  });
+
+  void _apply() {
+    if (widget.onApplyWithOrder != null) {
+      widget.onApplyWithOrder!(
+        _draft,
+        _sort,
+        _sort == null ? null : _sortOrder,
+      );
+    } else {
+      widget.onApply(_draft, _sort);
+    }
+    Navigator.pop(context);
+  }
+
+  void _selectSort(CatalogSort target) {
+    setState(() {
+      if (_sort == target && target.supportsOrderToggle) {
+        _sortOrder = CatalogSort.flipSortOrder(_sortOrder);
+      } else {
+        _sort = target;
+        _sortOrder = target.sortOrder;
+      }
+    });
+  }
+
+  void _toggleSortOrder() {
+    final current = _sort;
+    if (current == null || !current.supportsOrderToggle) return;
+    setState(() {
+      _sortOrder = CatalogSort.flipSortOrder(_sortOrder);
+    });
+  }
+
+  List<int> _visibleYears() {
+    final currentYear = DateTime.now().year;
+    final recentCutoff = currentYear - (_recentYearWindow - 1);
+    if (_allYearsExpanded) {
+      final all = <int>{
+        ...widget.years,
+        ..._draft.years,
+        for (var y = currentYear; y >= 1900; y--) y,
+      }.toList()..sort((a, b) => b.compareTo(a));
+      return all;
+    }
+    final defaultSet = <int>{
+      ...widget.years,
+      ..._draft.years,
+      for (var y = currentYear; y >= recentCutoff; y--) y,
+    }.toList()..sort((a, b) => b.compareTo(a));
+    return defaultSet;
+  }
+
+  bool get _showSearchField => _genres.length > _genreSearchThreshold;
+
+  String _applyButtonLabel(AppLocalizations l) =>
+      _count > 0 ? '${l.filterApply} ($_count)' : l.filterApply;
 
   @override
   Widget build(BuildContext context) {
@@ -106,11 +195,9 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
     final wide = widget.television || size.width >= 700;
-    final sections = _sections(l);
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    final compactSection = _section == 'type' || _section == 'watch';
-    // 1080p 上观看状态、类型约 600×420，流派和年份约 600×520。
-    // 2K、4K 按窗口比例放大，仍留出四周，不铺满。
+    final compactSection =
+        _activeSection == 'type' || _activeSection == 'watch';
     final panelScale = widget.television || wide
         ? AppViewport.scaleOf(size)
         : 1.0;
@@ -143,9 +230,10 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 12, 12),
+                padding: const EdgeInsets.fromLTRB(24, 16, 12, 8),
                 child: Row(
                   children: [
                     Icon(
@@ -162,7 +250,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                             l.filterBrowseTitle,
                             style: theme.textTheme.headlineSmall,
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             l.filterSelectedCount(_count),
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -182,122 +270,26 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                   ],
                 ),
               ),
+              _buildQuickAnchorRail(context, l, phone: false),
               if (_count > 0)
                 SizedBox(
-                  height: 44 * textScale,
+                  height: 40 * textScale,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    children: [
-                      if (_draft.type != CatalogTypeFilter.all)
-                        _summary(
-                          _draft.type.label,
-                          () => _draft = _draft.copyWith(
-                            type: CatalogTypeFilter.all,
-                          ),
-                        ),
-                      if (_draft.watch != CatalogWatchFilter.all)
-                        _summary(
-                          _watchLabel(l, _draft.watch),
-                          () => _draft = _draft.copyWith(
-                            watch: CatalogWatchFilter.all,
-                          ),
-                        ),
-                      for (final year in _draft.years)
-                        _summary(
-                          '$year',
-                          () => _draft = _draft.copyWith(
-                            years: [..._draft.years]..remove(year),
-                          ),
-                        ),
-                      for (final genre in _draft.genres)
-                        _summary(
-                          genre,
-                          () => _draft = _draft.copyWith(
-                            genres: [..._draft.genres]..remove(genre),
-                          ),
-                        ),
-                    ],
+                    children: _buildSummaryPills(l),
                   ),
                 ),
               const AppDivider(height: 1),
-              Expanded(
-                child: wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(
-                            width: widget.television ? 230 : 180,
-                            child: ListView(
-                              padding: const EdgeInsets.all(12),
-                              children: [
-                                for (final section in sections)
-                                  _category(section, wide: true),
-                              ],
-                            ),
-                          ),
-                          SizedBox(
-                            width: 1,
-                            child: ColoredBox(
-                              color: AppUiTheme.of(context).dividerColor,
-                            ),
-                          ),
-                          Expanded(child: _options(context)),
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          SizedBox(
-                            height: math.max(60, 44 * textScale + 12),
-                            child: ListView(
-                              scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              children: [
-                                for (final section in sections)
-                                  _category(section, wide: false),
-                              ],
-                            ),
-                          ),
-                          Expanded(child: _options(context)),
-                        ],
-                      ),
-              ),
-              const AppDivider(height: 1),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                  child: Row(
-                    children: [
-                      if (widget.television) ...[
-                        Expanded(
-                          child: TvAction(
-                            key: _key('clear'),
-                            onPressed: _reset,
-                            child: Text(l.filterReset),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TvAction(
-                            key: _key('cancel'),
-                            onPressed: () => Navigator.pop(context),
-                            child: Text(l.libraryFilterCancel),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TvAction(
-                            key: _key('apply'),
-                            emphasized: true,
-                            onPressed: _apply,
-                            child: Text(l.filterApply),
-                          ),
-                        ),
-                      ] else ...[
+              Expanded(child: _buildFlatBody(context, phone: false)),
+              if (!widget.television) ...[
+                const AppDivider(height: 1),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+                    child: Row(
+                      children: [
                         AppButton(
                           key: _key('clear'),
                           onPressed: _reset,
@@ -309,19 +301,19 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                           child: AppButton.icon(
                             key: _key('apply'),
                             onPressed: _apply,
-                            style: AppButtonStyle(
-                              minimumSize: const Size(48, 48),
+                            style: const AppButtonStyle(
+                              minimumSize: Size(48, 48),
                             ),
                             icon: const Icon(CupertinoIcons.check_mark),
-                            label: Text(l.filterApply),
+                            label: Text(_applyButtonLabel(l)),
                             variant: AppButtonVariant.filled,
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
@@ -329,264 +321,15 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     );
   }
 
-  void _reset() => setState(() {
-    _draft = const ShelfFilters();
-    if (_sort != null) _sort = CatalogSort.initialFor(widget.capabilities);
-    _search.clear();
-  });
-  void _apply() {
-    widget.onApply(_draft, _sort);
-    Navigator.pop(context);
-  }
-
-  Widget _summary(String label, VoidCallback change) => Padding(
-    padding: const EdgeInsets.only(right: 8),
-    child: RemovablePill(label: label, onDeleted: () => setState(change)),
-  );
-
-  Widget _category((String, String, IconData) entry, {required bool wide}) {
-    final selected = _section == entry.$1;
-    final scheme = AppUiTheme.of(context).colorScheme;
-    if (widget.television) {
-      return TvAction(
-        key: _key('section-${entry.$1}'),
-        autofocus: selected,
-        selected: selected,
-        onPressed: () => _chooseSection(entry.$1),
-        child: Row(
-          children: [
-            Icon(entry.$3, size: 22),
-            const SizedBox(width: 12),
-            Expanded(child: Text(entry.$2)),
-          ],
-        ),
-      );
-    }
-    final style = AppButtonStyle(
-      padding: EdgeInsets.symmetric(horizontal: wide ? 16 : 10),
-      minimumSize: const Size(48, 48),
-      backgroundColor: selected
-          ? scheme.primaryContainer
-          : const Color(0x00000000),
-      foregroundColor: selected
-          ? scheme.onPrimaryContainer
-          : scheme.onSurfaceVariant,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    );
-    return Semantics(
-      selected: selected,
-      child: Padding(
-        padding: EdgeInsets.only(right: wide ? 0 : 4, bottom: wide ? 8 : 0),
-        child: wide
-            ? AppButton.icon(
-                key: _key('section-${entry.$1}'),
-                onPressed: () => _chooseSection(entry.$1),
-                style: style,
-                icon: Icon(entry.$3, size: 20),
-                label: Text(entry.$2),
-                variant: AppButtonVariant.plain,
-              )
-            : AppButton(
-                key: _key('section-${entry.$1}'),
-                onPressed: () => _chooseSection(entry.$1),
-                style: style,
-                variant: AppButtonVariant.plain,
-                child: Text(entry.$2),
-              ),
-      ),
-    );
-  }
-
-  Widget _options(BuildContext context) {
-    final l = AppLocalizations.of(context), theme = AppUiTheme.of(context);
-    final label = _sections(l).firstWhere((s) => s.$1 == _section).$2;
-    final searchable = _section == 'year' || _section == 'genre';
-    final query = _search.text.trim().toLowerCase();
-    final options = _optionEntries(l, query);
-    return Padding(
-      padding: EdgeInsets.all(widget.television ? 24 : 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(label, style: theme.textTheme.titleMedium),
-          if (searchable) ...[
-            const SizedBox(height: 8),
-            if (widget.television)
-              TvInput(
-                label: l.filterSearchOptions,
-                controller: _search,
-                onSubmitted: () => setState(() {}),
-              )
-            else
-              AppTextField(
-                controller: _search,
-                onChanged: (_) => setState(() {}),
-                placeholder: l.filterSearchOptions,
-                prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
-                suffix: query.isEmpty
-                    ? null
-                    : AppIconButton(
-                        tooltip: l.filterReset,
-                        onPressed: () => setState(_search.clear),
-                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
-                      ),
-              ),
-            const SizedBox(height: 8),
-            Text(
-              l.filterChooseHint,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          if (_section == 'genre' && _loadingGenres) const AppLoadingBar(),
-          if (_section == 'genre' && _genreFailed)
-            AppButton.icon(
-              onPressed: _loadGenres,
-              icon: const Icon(CupertinoIcons.arrow_clockwise),
-              label: Text(l.retry),
-              variant: AppButtonVariant.plain,
-            ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: SingleChildScrollView(
-              key: _key('$_section-section'),
-              child: Wrap(
-                spacing: widget.television ? 12 : 8,
-                runSpacing: widget.television ? 12 : 8,
-                children: [
-                  for (final option in options)
-                    if (widget.television)
-                      SizedBox(
-                        width: _section == 'year' ? 120 : 270,
-                        child: TvAction(
-                          key: _key('$_section-${option.$1}'),
-                          selected: option.$3,
-                          onPressed: () => setState(option.$4),
-                          child: Row(
-                            children: [
-                              Expanded(child: Text(option.$2)),
-                              if (option.$3)
-                                const Icon(CupertinoIcons.check_mark, size: 20),
-                            ],
-                          ),
-                        ),
-                      )
-                    else
-                      OptionPill(
-                        key: _key('$_section-${option.$1}'),
-                        label: option.$2,
-                        selected: option.$3,
-                        onPressed: () => setState(option.$4),
-                      ),
-                  if (options.isEmpty ||
-                      (_section == 'genre' &&
-                          options.length == 1 &&
-                          !_loadingGenres))
-                    Text(l.filterNoOptions),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<(String, String, bool, VoidCallback)> _optionEntries(
-    AppLocalizations l,
-    String query,
-  ) {
-    final options = <(String, String, bool, VoidCallback)>[];
-    void option(
-      String value,
-      String label,
-      bool selected,
-      VoidCallback change,
-    ) {
-      if (value == 'all' ||
-          query.isEmpty ||
-          label.toLowerCase().contains(query)) {
-        options.add((value, label, selected, change));
-      }
-    }
-
-    switch (_section) {
-      case 'type':
-        for (final value in CatalogTypeFilter.values) {
-          option(
-            value.itemType ?? 'all',
-            value.label,
-            _draft.type == value,
-            () => _draft = _draft.copyWith(type: value),
-          );
-        }
-      case 'watch':
-        for (final value in CatalogWatchFilter.values) {
-          if (widget.capabilities.unsupportedFilters.contains(value.param)) {
-            continue;
-          }
-          option(
-            value.param ?? 'all',
-            _watchLabel(l, value),
-            _draft.watch == value,
-            () => _draft = _draft.copyWith(watch: value),
-          );
-        }
-      case 'year':
-        option(
-          'all',
-          l.libraryFilterAll,
-          _draft.years.isEmpty,
-          () => _draft = _draft.copyWith(years: []),
-        );
-        final years = {
-          ...widget.years,
-          ..._draft.years,
-          for (var y = DateTime.now().year; y >= 1900; y--) y,
-        }.toList()..sort((a, b) => b.compareTo(a));
-        for (final year in years) {
-          option('$year', '$year', _draft.years.contains(year), () {
-            final values = [..._draft.years];
-            values.contains(year) ? values.remove(year) : values.add(year);
-            _draft = _draft.copyWith(years: values);
-          });
-        }
-      case 'genre':
-        option(
-          'all',
-          l.libraryFilterAll,
-          _draft.genres.isEmpty,
-          () => _draft = _draft.copyWith(genres: []),
-        );
-        final genres = _genres.toList()..sort();
-        for (final genre in genres) {
-          option(genre, genre, _draft.genres.contains(genre), () {
-            final values = [..._draft.genres];
-            values.contains(genre) ? values.remove(genre) : values.add(genre);
-            _draft = _draft.copyWith(genres: values);
-          });
-        }
-      case 'sort':
-        for (final sort in CatalogSort.optionsFor(
-          const [],
-          capabilities: widget.capabilities,
-        )) {
-          option(sort.sortBy, sort.label(l), _sort == sort, () => _sort = sort);
-        }
-    }
-    return options;
-  }
-
   Widget _buildPhone(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
-    final sections = _sections(l);
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    final compactSection = _section == 'type' || _section == 'watch';
-    final naturalHeight = (compactSection ? 480.0 : 640.0) * textScale;
+    final compactSection =
+        _activeSection == 'type' || _activeSection == 'watch';
+    final naturalHeight = (compactSection ? 560.0 : 660.0) * textScale;
     final height = math.min(
       naturalHeight,
       (size.height - MediaQuery.viewInsetsOf(context).bottom) * .9,
@@ -651,56 +394,18 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                   ],
                 ),
               ),
+              _buildQuickAnchorRail(context, l, phone: true),
               if (_count > 0)
                 SizedBox(
                   height: math.max(48, 40 * textScale),
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: [
-                      if (_draft.type != CatalogTypeFilter.all)
-                        _summary(
-                          _draft.type.label,
-                          () => _draft = _draft.copyWith(
-                            type: CatalogTypeFilter.all,
-                          ),
-                        ),
-                      if (_draft.watch != CatalogWatchFilter.all)
-                        _summary(
-                          _watchLabel(l, _draft.watch),
-                          () => _draft = _draft.copyWith(
-                            watch: CatalogWatchFilter.all,
-                          ),
-                        ),
-                      for (final year in _draft.years)
-                        _summary(
-                          '$year',
-                          () => _draft = _draft.copyWith(
-                            years: [..._draft.years]..remove(year),
-                          ),
-                        ),
-                      for (final genre in _draft.genres)
-                        _summary(
-                          genre,
-                          () => _draft = _draft.copyWith(
-                            genres: [..._draft.genres]..remove(genre),
-                          ),
-                        ),
-                    ],
+                    children: _buildSummaryPills(l),
                   ),
                 ),
-              SizedBox(
-                height: math.max(60, 48 * textScale + 12),
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-                  children: [
-                    for (final section in sections) _phoneCategory(section),
-                  ],
-                ),
-              ),
               const AppDivider(height: 1),
-              Expanded(child: _phoneOptions(context)),
+              Expanded(child: _buildFlatBody(context, phone: true)),
               const AppDivider(height: 1),
               SafeArea(
                 top: false,
@@ -723,7 +428,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                             minimumSize: Size(48, 48),
                           ),
                           variant: AppButtonVariant.filled,
-                          child: Text(l.filterApply),
+                          child: Text(_applyButtonLabel(l)),
                         ),
                       ),
                     ],
@@ -737,63 +442,373 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     );
   }
 
-  Widget _phoneCategory((String, String, IconData) entry) {
-    final selected = _section == entry.$1;
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
+  Widget _buildQuickAnchorRail(
+    BuildContext context,
+    AppLocalizations l, {
+    required bool phone,
+  }) {
+    final sections = <(String, String)>[
+      if (_sort != null) ('sort', l.mobileSort),
+      if (widget.typeFilterable) ('type', l.libraryFilterType),
+      ('watch', l.libraryFilterWatch),
+      ('year', l.libraryFilterYear),
+      ('genre', l.libraryFilterGenre),
+    ];
+    final horizontalPad = widget.television ? 24.0 : (phone ? 16.0 : 20.0);
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: Semantics(
-        selected: selected,
-        child: AppButton(
-          key: _key('section-${entry.$1}'),
-          onPressed: () => _chooseSection(entry.$1),
-          style: AppButtonStyle(
-            minimumSize: const Size(48, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            backgroundColor: selected
-                ? scheme.primaryContainer
-                : scheme.surfaceContainerHigh,
-            foregroundColor: selected
-                ? scheme.onPrimaryContainer
-                : scheme.onSurfaceVariant,
-            shape: const StadiumBorder(),
-            textStyle: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-          variant: AppButtonVariant.tinted,
-          child: Text(entry.$2),
-        ),
+      padding: EdgeInsets.fromLTRB(horizontalPad, 2, horizontalPad, 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final (id, label) in sections)
+            if (widget.television)
+              TvAction(
+                key: _key('section-$id'),
+                pill: true,
+                selected: _activeSection == id,
+                onPressed: () => _chooseSection(id),
+                child: Text(label),
+              )
+            else
+              Semantics(
+                selected: _activeSection == id,
+                child: AppButton(
+                  key: _key('section-$id'),
+                  onPressed: () => _chooseSection(id),
+                  style: const AppButtonStyle(
+                    minimumSize: Size(48, 48),
+                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  variant: _activeSection == id
+                      ? AppButtonVariant.filled
+                      : AppButtonVariant.outlined,
+                  child: Text(label),
+                ),
+              ),
+        ],
       ),
     );
   }
 
-  Widget _phoneOptions(BuildContext context) {
+  List<Widget> _buildSummaryPills(AppLocalizations l) {
+    return [
+      if (_draft.type != CatalogTypeFilter.all)
+        _summary(
+          _draft.type.label,
+          () => _draft = _draft.copyWith(type: CatalogTypeFilter.all),
+        ),
+      if (_draft.watch != CatalogWatchFilter.all)
+        _summary(
+          _watchLabel(l, _draft.watch),
+          () => _draft = _draft.copyWith(watch: CatalogWatchFilter.all),
+        ),
+      for (final year in _draft.years)
+        _summary(
+          '$year',
+          () =>
+              _draft = _draft.copyWith(years: [..._draft.years]..remove(year)),
+        ),
+      for (final genre in _draft.genres)
+        _summary(
+          genre,
+          () => _draft = _draft.copyWith(
+            genres: [..._draft.genres]..remove(genre),
+          ),
+        ),
+    ];
+  }
+
+  Widget _summary(String label, VoidCallback change) => Padding(
+    padding: const EdgeInsets.only(right: 8),
+    child: RemovablePill(label: label, onDeleted: () => setState(change)),
+  );
+
+  Widget _buildFlatBody(BuildContext context, {required bool phone}) {
     final l = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final label = _sections(l)
-        .firstWhere((section) => section.$1 == _section)
-        .$2;
-    final searchable = _section == 'year' || _section == 'genre';
     final query = _search.text.trim().toLowerCase();
-    final options = _optionEntries(l, query);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+    final tv = widget.television;
+    final horizontalPad = tv ? 24.0 : (phone ? 16.0 : 20.0);
+    return SingleChildScrollView(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(horizontalPad, 12, horizontalPad, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_sort != null) ...[
+            _buildSortSection(context, l),
+            const SizedBox(height: 16),
+          ],
+          if (widget.typeFilterable) ...[
+            _buildTypeSection(context, l),
+            const SizedBox(height: 16),
+          ],
+          _buildWatchSection(context, l),
+          const SizedBox(height: 16),
+          _buildGenreSection(context, l, query),
+          const SizedBox(height: 16),
+          _buildYearSection(context, l, query),
+          if (tv) ...[
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: TvAction(
+                    key: _key('clear'),
+                    onPressed: _reset,
+                    child: Text(l.filterReset),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TvAction(
+                    key: _key('cancel'),
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(l.libraryFilterCancel),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TvAction(
+                    key: _key('apply'),
+                    emphasized: true,
+                    onPressed: _apply,
+                    child: Text(_applyButtonLabel(l)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(
+    BuildContext context, {
+    required String section,
+    required String title,
+    required IconData icon,
+    Widget? trailing,
+  }) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final anchorKey = _sectionAnchorKeys[section];
+    return Container(
+      key: anchorKey,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
           Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium?.copyWith(
+            '$title ·',
+            style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
             ),
           ),
-          if (searchable) ...[
-            const SizedBox(height: 8),
+          const Spacer(),
+          ?trailing,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOptionItem({
+    required String section,
+    required String value,
+    required String label,
+    required bool selected,
+    required VoidCallback onPressed,
+    bool autofocus = false,
+  }) {
+    if (widget.television) {
+      return TvAction(
+        key: _key('$section-$value'),
+        autofocus: autofocus,
+        pill: true,
+        selected: selected,
+        onPressed: () => setState(onPressed),
+        trailing: selected
+            ? const Icon(CupertinoIcons.check_mark, size: 16)
+            : null,
+        child: Text(label),
+      );
+    }
+    return OptionPill(
+      key: _key('$section-$value'),
+      label: label,
+      selected: selected,
+      onPressed: () => setState(onPressed),
+    );
+  }
+
+  Widget _buildSortSection(BuildContext context, AppLocalizations l) {
+    final sorts = CatalogSort.optionsFor(
+      const [],
+      capabilities: widget.capabilities,
+    );
+    final current = _sort;
+    final canToggleOrder = current != null && current.supportsOrderToggle;
+    final isAsc = CatalogSort.normalizeSortOrder(_sortOrder) == 'Ascending';
+    final orderLabel = isAsc ? l.filterSortAscending : l.filterSortDescending;
+    final orderIcon = isAsc ? CupertinoIcons.sort_up : CupertinoIcons.sort_down;
+
+    final Widget? orderButton = canToggleOrder
+        ? (widget.television
+              ? TvAction(
+                  key: _key('sort-order'),
+                  pill: true,
+                  leading: Icon(orderIcon, size: 16),
+                  onPressed: _toggleSortOrder,
+                  child: Text(orderLabel),
+                )
+              : OptionPill(
+                  key: _key('sort-order'),
+                  label: '${isAsc ? "↑" : "↓"} $orderLabel',
+                  selected: true,
+                  onPressed: _toggleSortOrder,
+                ))
+        : null;
+
+    return Column(
+      key: _key('sort-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(
+          context,
+          section: 'sort',
+          title: l.mobileSort,
+          icon: CupertinoIcons.sort_down,
+          trailing: orderButton,
+        ),
+        Wrap(
+          spacing: widget.television ? 10 : 8,
+          runSpacing: widget.television ? 10 : 8,
+          children: [
+            for (final sort in sorts)
+              _buildOptionItem(
+                section: 'sort',
+                value: sort.sortBy,
+                label: sort.label(l),
+                selected: _sort == sort,
+                autofocus: widget.television && _sort == sort,
+                onPressed: () => _selectSort(sort),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTypeSection(BuildContext context, AppLocalizations l) {
+    return Column(
+      key: _key('type-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(
+          context,
+          section: 'type',
+          title: l.libraryFilterType,
+          icon: CupertinoIcons.rectangle_stack,
+        ),
+        Wrap(
+          spacing: widget.television ? 10 : 8,
+          runSpacing: widget.television ? 10 : 8,
+          children: [
+            for (final value in CatalogTypeFilter.values)
+              _buildOptionItem(
+                section: 'type',
+                value: value.itemType ?? 'all',
+                label: value.label,
+                selected: _draft.type == value,
+                autofocus:
+                    widget.television && _sort == null && _draft.type == value,
+                onPressed: () => _draft = _draft.copyWith(type: value),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWatchSection(BuildContext context, AppLocalizations l) {
+    return Column(
+      key: _key('watch-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(
+          context,
+          section: 'watch',
+          title: l.libraryFilterWatch,
+          icon: CupertinoIcons.eye,
+        ),
+        Wrap(
+          spacing: widget.television ? 10 : 8,
+          runSpacing: widget.television ? 10 : 8,
+          children: [
+            for (final value in CatalogWatchFilter.values)
+              if (!widget.capabilities.unsupportedFilters.contains(value.param))
+                _buildOptionItem(
+                  section: 'watch',
+                  value: value.param ?? 'all',
+                  label: _watchLabel(l, value),
+                  selected: _draft.watch == value,
+                  autofocus:
+                      widget.television &&
+                      _sort == null &&
+                      !widget.typeFilterable &&
+                      _draft.watch == value,
+                  onPressed: () => _draft = _draft.copyWith(watch: value),
+                ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGenreSection(
+    BuildContext context,
+    AppLocalizations l,
+    String query,
+  ) {
+    final genres = (_genres.toList()..sort())
+        .where((g) => query.isEmpty || g.toLowerCase().contains(query))
+        .toList();
+    return Column(
+      key: _key('genre-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(
+          context,
+          section: 'genre',
+          title: l.libraryFilterGenre,
+          icon: CupertinoIcons.square_grid_2x2,
+          trailing: _genreFailed
+              ? AppButton.icon(
+                  onPressed: _loadGenres,
+                  icon: const Icon(CupertinoIcons.arrow_clockwise),
+                  label: Text(l.retry),
+                  variant: AppButtonVariant.plain,
+                )
+              : null,
+        ),
+        if (_loadingGenres) ...[
+          const AppLoadingBar(),
+          const SizedBox(height: 8),
+        ],
+        if (_showSearchField) ...[
+          if (widget.television)
+            TvInput(
+              key: _key('genre-search'),
+              label: l.filterSearchOptions,
+              controller: _search,
+              onSubmitted: () => setState(() {}),
+            )
+          else
             AppTextField(
+              key: _key('genre-search'),
               controller: _search,
               onChanged: (_) => setState(() {}),
               placeholder: l.filterSearchOptions,
@@ -806,48 +821,109 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                       icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                     ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              l.filterChooseHint,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          if (_section == 'genre' && _loadingGenres) const AppLoadingBar(),
-          if (_section == 'genre' && _genreFailed)
-            AppButton.icon(
-              onPressed: _loadGenres,
-              icon: const Icon(CupertinoIcons.arrow_clockwise),
-              label: Text(l.retry),
-              variant: AppButtonVariant.plain,
-            ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: SingleChildScrollView(
-              key: _key('$_section-section'),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final option in options)
-                    OptionPill(
-                      key: _key('$_section-${option.$1}'),
-                      label: option.$2,
-                      selected: option.$3,
-                      onPressed: () => setState(option.$4),
-                    ),
-                  if (options.isEmpty ||
-                      (_section == 'genre' &&
-                          options.length == 1 &&
-                          !_loadingGenres))
-                    Text(l.filterNoOptions),
-                ],
-              ),
-            ),
-          ),
+          const SizedBox(height: 10),
         ],
-      ),
+        Wrap(
+          spacing: widget.television ? 10 : 8,
+          runSpacing: widget.television ? 10 : 8,
+          children: [
+            _buildOptionItem(
+              section: 'genre',
+              value: 'all',
+              label: l.libraryFilterAll,
+              selected: _draft.genres.isEmpty,
+              onPressed: () => _draft = _draft.copyWith(genres: []),
+            ),
+            for (final genre in genres)
+              _buildOptionItem(
+                section: 'genre',
+                value: genre,
+                label: genre,
+                selected: _draft.genres.contains(genre),
+                onPressed: () {
+                  final values = [..._draft.genres];
+                  values.contains(genre)
+                      ? values.remove(genre)
+                      : values.add(genre);
+                  _draft = _draft.copyWith(genres: values);
+                },
+              ),
+            if (genres.isEmpty && !_loadingGenres) Text(l.filterNoOptions),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYearSection(
+    BuildContext context,
+    AppLocalizations l,
+    String query,
+  ) {
+    final years =
+        (query.isNotEmpty
+                ? (<int>{
+                    ...widget.years,
+                    ..._draft.years,
+                    for (var y = DateTime.now().year; y >= 1900; y--) y,
+                  }.toList()..sort((a, b) => b.compareTo(a)))
+                : _visibleYears())
+            .where((y) => query.isEmpty || '$y'.contains(query))
+            .toList();
+
+    return Column(
+      key: _key('year-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(
+          context,
+          section: 'year',
+          title: l.libraryFilterYear,
+          icon: CupertinoIcons.calendar,
+        ),
+        Wrap(
+          spacing: widget.television ? 10 : 8,
+          runSpacing: widget.television ? 10 : 8,
+          children: [
+            _buildOptionItem(
+              section: 'year',
+              value: 'all',
+              label: l.libraryFilterAll,
+              selected: _draft.years.isEmpty,
+              onPressed: () => _draft = _draft.copyWith(years: []),
+            ),
+            for (final year in years)
+              _buildOptionItem(
+                section: 'year',
+                value: '$year',
+                label: '$year',
+                selected: _draft.years.contains(year),
+                onPressed: () {
+                  final values = [..._draft.years];
+                  values.contains(year)
+                      ? values.remove(year)
+                      : values.add(year);
+                  _draft = _draft.copyWith(years: values);
+                },
+              ),
+            if (!_allYearsExpanded && query.isEmpty)
+              if (widget.television)
+                TvAction(
+                  key: _key('year-expand'),
+                  pill: true,
+                  onPressed: () => setState(() => _allYearsExpanded = true),
+                  child: const Text('展开更多年份'),
+                )
+              else
+                OptionPill(
+                  key: _key('year-expand'),
+                  label: '展开更多年份',
+                  selected: false,
+                  onPressed: () => setState(() => _allYearsExpanded = true),
+                ),
+          ],
+        ),
+      ],
     );
   }
 

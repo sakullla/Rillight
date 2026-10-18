@@ -7,43 +7,39 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/desktop_performance_host_test.dart',
-    caseEntrypoints['app/desktop_performance_host_cases.dart']!,
+    'app/appearance_test.dart',
+    caseEntrypoints['app/appearance_cases.dart']!,
   );
   group(
-    'app/desktop_scroll_test.dart',
-    caseEntrypoints['app/desktop_scroll_cases.dart']!,
+    'catalog/catalog_controller_test.dart',
+    caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );
   group(
-    'auth/library_counts_test.dart',
-    caseEntrypoints['auth/library_counts_cases.dart']!,
+    'home/shelf_hover_clip_test.dart',
+    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+  );
+  group(
+    'mobile/detail_route_identity_test.dart',
+    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
   );
   group(
     'mobile/mobile_flow_test.dart [part 4]',
     caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
   );
   group(
-    'mobile/mobile_performance_timing_test.dart',
-    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
+    'mobile/phone_detail_redesign_test.dart',
+    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
   );
   group(
-    'mobile/phone_pages_test.dart [part 3]',
-    caseEntrypoints['mobile/phone_pages_cases.dart#2']!,
+    'mobile/phone_pages_test.dart [part 2]',
+    caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
+    'player/danmaku/danmaku_renderer_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
   );
   group(
-    'player/player_cache_status_test.dart',
-    caseEntrypoints['player/player_cache_status_cases.dart']!,
-  );
-  group(
-    'settings_page_test.dart',
-    caseEntrypoints['settings_page_cases.dart']!,
-  );
-  group(
-    'tv/tv_lan_pair_test.dart [part 2]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
+    'player/seek_preview_test.dart',
+    caseEntrypoints['player/seek_preview_cases.dart']!,
   );
 }

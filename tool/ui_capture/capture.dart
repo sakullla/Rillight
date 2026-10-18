@@ -55,7 +55,16 @@ import '../../test/app/update_ui_fixture.dart';
 
 import 'package:rillight/app/updates/update_platform_contract.dart';
 
+/// 截图要看到真实的弥散投影。测试默认关闭阴影,把 BoxShadow 画成实心色块,
+/// 浅色页面上会被误读成卡片底下的灰色厚边。
+class _CaptureBinding extends AutomatedTestWidgetsFlutterBinding {
+  @override
+  // ignore: invalid_use_of_protected_member
+  bool get disableShadows => false;
+}
+
 void main() {
+  _CaptureBinding();
   TestWidgetsFlutterBinding.ensureInitialized();
   WidgetController.hitTestWarningShouldBeFatal = true;
   final out = Platform.environment['RILLIGHT_CAPTURE_OUT'];

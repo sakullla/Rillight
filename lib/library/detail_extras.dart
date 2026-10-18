@@ -99,12 +99,9 @@ class DetailGenreRow extends StatelessWidget {
         runSpacing: AppSpacing.xs,
         children: [
           for (final genre in genres)
-            Container(
-              decoration: BoxDecoration(
-                color: scheme.onSurface.withValues(alpha: .08),
-              ),
-              clipBehavior: Clip.antiAlias,
+            _GenrePill(
               child: AppSurfaceAction(
+                borderRadius: BorderRadius.circular(999),
                 onTap: () => openGenreShelf(context, item, genre),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -136,6 +133,48 @@ class DetailGenreRow extends StatelessWidget {
               onPressed: () => openGenreShelf(context, item, genre),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// 头部流派胶囊:细描边圆角胶囊,悬停时底面加深一档,提示可以点开流派片库。
+class _GenrePill extends StatefulWidget {
+  const _GenrePill({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_GenrePill> createState() => _GenrePillState();
+}
+
+class _GenrePillState extends State<_GenrePill> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: AppMotion.durationOf(context, AppMotion.fast),
+        curve: AppMotion.standard,
+        decoration: ShapeDecoration(
+          color: scheme.onSurface.withValues(
+            alpha: _hovered ? (light ? .08 : .14) : (light ? .03 : .07),
+          ),
+          shape: StadiumBorder(
+            side: BorderSide(
+              color: scheme.onSurface.withValues(
+                alpha: _hovered ? .22 : (light ? .12 : .16),
+              ),
+            ),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: widget.child,
       ),
     );
   }
@@ -714,6 +753,7 @@ class _AlbumRailState extends State<_AlbumRail> {
           Align(
             alignment: Alignment.centerLeft,
             child: ScrimIconButton(
+              paperInLight: true,
               key: CatalogKeys.shelfScrollLeft(CatalogKeys.shelfAlbum),
               tooltip: l10n.scrollLeft,
               icon: const Icon(CupertinoIcons.chevron_left),
@@ -724,6 +764,7 @@ class _AlbumRailState extends State<_AlbumRail> {
           Align(
             alignment: Alignment.centerRight,
             child: ScrimIconButton(
+              paperInLight: true,
               key: CatalogKeys.shelfScrollRight(CatalogKeys.shelfAlbum),
               tooltip: l10n.scrollRight,
               icon: const Icon(CupertinoIcons.chevron_right),

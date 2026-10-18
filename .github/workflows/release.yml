@@ -23,6 +23,10 @@ jobs:
 
       - name: Build and audit Windows
         uses: ./.github/actions/windows-build
+        with:
+          hills-key: ${{ secrets.RILLIGHT_HILLS_KEY }}
+          common-key: ${{ secrets.RILLIGHT_COMMON_KEY }}
+          rpb-key: ${{ secrets.RILLIGHT_RPB_KEY }}
 
       - name: Install Inno Setup
         shell: pwsh
@@ -57,6 +61,7 @@ jobs:
     uses: ./.github/workflows/linux-package.yml
     with:
       version: ${{ github.ref_name }}
+    secrets: inherit
 
   android:
     name: Build Android
@@ -130,11 +135,37 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Check backup import key secrets
+        shell: bash
+        env:
+          RILLIGHT_HILLS_KEY: ${{ secrets.RILLIGHT_HILLS_KEY }}
+          RILLIGHT_COMMON_KEY: ${{ secrets.RILLIGHT_COMMON_KEY }}
+          RILLIGHT_RPB_KEY: ${{ secrets.RILLIGHT_RPB_KEY }}
+        run: |
+          set -euo pipefail
+          check() {
+            local name="$1" value="$2" length="$3"
+            [ -n "$value" ] || { echo "::error::$name is not configured; release builds must carry backup import keys."; exit 1; }
+            [[ "$value" =~ ^[0-9a-fA-F]+$ ]] && [ "${#value}" -eq "$length" ] \
+              || { echo "::error::$name must be exactly $length hex characters."; exit 1; }
+          }
+          check RILLIGHT_HILLS_KEY "$RILLIGHT_HILLS_KEY" 64
+          check RILLIGHT_COMMON_KEY "$RILLIGHT_COMMON_KEY" 64
+          check RILLIGHT_RPB_KEY "$RILLIGHT_RPB_KEY" 32
+
       - name: Provision verified Android core SDK
         uses: ./.github/actions/android-core
 
       - name: Build Android ABI release APKs
-        run: flutter build apk --release --split-per-abi --no-pub
+        env:
+          RILLIGHT_HILLS_KEY: ${{ secrets.RILLIGHT_HILLS_KEY }}
+          RILLIGHT_COMMON_KEY: ${{ secrets.RILLIGHT_COMMON_KEY }}
+          RILLIGHT_RPB_KEY: ${{ secrets.RILLIGHT_RPB_KEY }}
+        run: >-
+          flutter build apk --release --split-per-abi --no-pub
+          --dart-define=RILLIGHT_HILLS_KEY="$RILLIGHT_HILLS_KEY"
+          --dart-define=RILLIGHT_COMMON_KEY="$RILLIGHT_COMMON_KEY"
+          --dart-define=RILLIGHT_RPB_KEY="$RILLIGHT_RPB_KEY"
 
       - name: Audit owned core APK closure
         shell: bash

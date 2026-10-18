@@ -9,6 +9,7 @@ import 'package:rillight/app/updates/update_controller.dart';
 import 'package:rillight/app/updates/update_download.dart';
 import 'package:rillight/app/updates/update_platform_contract.dart';
 import 'package:rillight/app/updates/update_service.dart';
+import 'package:rillight/player/player_settings.dart';
 
 const _digest =
     'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -330,4 +331,68 @@ void main() {
       expect(platform.installs, 2);
     },
   );
+  test('ignoreRelease and autoReminderEnabled persist across restarts and allow newer versions', () async {
+    final store = MemoryPlayerSettingsStore();
+    final first = UpdateController(
+      platform: platform,
+      service: UpdateService(dio: dio),
+      downloader: UpdateDownloader(dio: dio, cacheDirectory: () async => root),
+      settingsStore: store,
+      currentVersion: '1.0.0',
+    );
+    addTearDown(first.dispose);
+
+    await first.checkAtStartup();
+    expect(first.pendingAutomaticRelease?.version.toString(), '2.0.0');
+    await first.ignoreRelease(first.pendingAutomaticRelease);
+    expect(first.pendingAutomaticRelease, isNull);
+    expect(first.ignoredVersion, '2.0.0');
+    expect((await store.read()).effectiveIgnoredUpdateVersion, '2.0.0');
+
+    // Restart with same 2.0.0 release: ignored version does not trigger popup.
+    final second = UpdateController(
+      platform: platform,
+      service: UpdateService(dio: dio),
+      downloader: UpdateDownloader(dio: dio, cacheDirectory: () async => root),
+      settingsStore: store,
+      currentVersion: '1.0.0',
+    );
+    addTearDown(second.dispose);
+    await second.checkAtStartup();
+    expect(second.checkPhase, UpdateCheckPhase.available);
+    expect(second.pendingAutomaticRelease, isNull);
+    expect(second.isReleaseIgnored(second.release), isTrue);
+
+    // Newer 3.0.0 release still triggers automatic reminder.
+    adapter.version = '3.0.0';
+    await second.check(automatic: true);
+    expect(second.pendingAutomaticRelease?.version.toString(), '3.0.0');
+
+    // Disabling automatic reminders clears pending popup and skips startup check.
+    await second.setAutoReminderEnabled(false);
+    expect(second.pendingAutomaticRelease, isNull);
+    expect((await store.read()).isUpdateReminderEnabled, isFalse);
+
+    final checksBeforeThird = adapter.checks;
+    final third = UpdateController(
+      platform: platform,
+      service: UpdateService(dio: dio),
+      downloader: UpdateDownloader(dio: dio, cacheDirectory: () async => root),
+      settingsStore: store,
+      currentVersion: '1.0.0',
+    );
+    addTearDown(third.dispose);
+    await third.checkAtStartup();
+    expect(adapter.checks, checksBeforeThird);
+    expect(third.pendingAutomaticRelease, isNull);
+
+    // Manual check still works even when automatic reminders are disabled.
+    await third.check();
+    expect(third.checkPhase, UpdateCheckPhase.available);
+    expect(third.release?.version.toString(), '3.0.0');
+
+    await third.unignoreRelease();
+    expect(third.ignoredVersion, isNull);
+    expect((await store.read()).effectiveIgnoredUpdateVersion, isNull);
+  });
 }

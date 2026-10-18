@@ -256,6 +256,8 @@ Future<T?> showAppMenu<T>({
 }) => showAppDialog<T>(
   context: context,
   builder: (context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final anchored = position != null;
     final content = Column(
       key: const Key('app-menu-content'),
       mainAxisSize: MainAxisSize.min,
@@ -271,21 +273,38 @@ Future<T?> showAppMenu<T>({
             onPressed: entry.enabled
                 ? () => Navigator.of(context).pop(entry.value)
                 : null,
-            foregroundColor: entry.destructive
-                ? AppUiTheme.of(context).colorScheme.error
+            // 锚定菜单是一列左对齐的条目:正文用墨色,当前项用强调色浅底和勾,
+            // 不再整列染成蓝色链接。
+            color: anchored && entry.value == selected
+                ? scheme.primaryContainer
                 : null,
-            child: Row(
-              children: [
-                Expanded(child: entry.child),
-                if (entry.value == selected)
-                  const Icon(CupertinoIcons.check_mark, size: 18),
-              ],
+            foregroundColor: entry.destructive
+                ? scheme.error
+                : anchored
+                ? (entry.value == selected
+                      ? scheme.onPrimaryContainer
+                      : scheme.onSurface)
+                : null,
+            padding: anchored
+                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: DefaultTextStyle.merge(
+              textAlign: anchored ? TextAlign.start : null,
+              style: anchored && entry.value == selected
+                  ? const TextStyle(fontWeight: FontWeight.w600)
+                  : null,
+              child: Row(
+                children: [
+                  Expanded(child: entry.child),
+                  if (entry.value == selected)
+                    Icon(
+                      CupertinoIcons.check_mark,
+                      size: 16,
+                      color: anchored ? scheme.primary : null,
+                    ),
+                ],
+              ),
             ),
-          ),
-        if (position != null)
-          AppButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
           ),
       ],
     );
@@ -381,16 +400,25 @@ class AppMenuButton<T> extends StatelessWidget {
     this.selected,
     this.title,
     this.tooltip,
+    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    this.style,
   });
   final List<AppMenuEntry<T>> items;
   final Widget child;
   final ValueChanged<T>? onSelected;
   final T? selected;
   final String? title, tooltip;
+
+  /// 触发钮内边距。子组件自带胶囊外形时传 [EdgeInsets.zero],
+  /// 避免胶囊外再套一圈按钮底面。
+  final EdgeInsetsGeometry padding;
+  final AppButtonStyle? style;
   @override
   Widget build(BuildContext context) {
     final button = AppButton(
       semanticLabel: tooltip,
+      padding: padding,
+      style: style,
       onPressed: onSelected == null
           ? null
           : () async {

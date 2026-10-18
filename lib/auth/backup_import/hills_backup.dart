@@ -9,8 +9,10 @@ import '../server_import_models.dart';
 import 'backup_crypto.dart';
 import 'backup_import_models.dart';
 
-/// Parser for the Hills backup JSON (version 2). Hills Lite 1.5.4 and the
-/// Rodel "Hills" export use the same container, so both enter here.
+/// Parser for the Hills backup JSON (versions 2 and 3). Hills Lite 1.5.4 and
+/// the Rodel "Hills" export use the same container, so both enter here.
+/// Version 3 was verified in the field (2026-10-18) to keep the same key and
+/// decryption contract; its records only add fields, so they parse unchanged.
 ///
 /// Verified contract: the top-level `data` field holds
 /// `base64(IV(16) || AES-256-CBC(PKCS7))` whose plaintext is the server array
@@ -29,7 +31,10 @@ Future<BackupImportParseResult> parseHillsBackupJson(
   Map<String, dynamic> document,
   BackupImportKeys keys,
 ) async {
-  if (document['version'] != 2) {
+  final version = document['version'];
+  // v3 is structurally identical to v2 (same key, same container); the
+  // observed records only add fields the mapping below never reads.
+  if (version != 2 && version != 3) {
     return const BackupImportParseResult(
       format: BackupImportFormat.hillsBackupJson,
       status: BackupImportContainerStatus.unsupportedVersion,

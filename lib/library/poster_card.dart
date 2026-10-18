@@ -113,6 +113,12 @@ class PosterCard extends StatelessWidget {
                           playKey: PosterCard.playButtonKey(item.id),
                           onRemoveFromResume: onRemoveFromResume,
                         ),
+                        if (!wide && !highlighted)
+                          _PosterTopLeftBadges(
+                            item: item,
+                            l10n: l10n,
+                            showWatched: showProgress,
+                          ),
                         if (showProgress && item.canResume)
                           Align(
                             alignment: Alignment.bottomCenter,
@@ -135,7 +141,7 @@ class PosterCard extends StatelessWidget {
                 width: width,
                 style: AppUiTheme.of(context).textTheme.titleSmall,
               ),
-              if (subtitle.isNotEmpty)
+              if (wide && subtitle.isNotEmpty)
                 _Caption(
                   text: subtitle,
                   width: width,
@@ -143,10 +149,141 @@ class PosterCard extends StatelessWidget {
                     color: AppUiTheme.of(context).colorScheme.onSurface
                         .withValues(alpha: 0.72),
                   ),
-                ),
+                )
+              else if (!wide)
+                _PosterYearRatingMeta(item: item, width: width),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _PosterTopLeftBadges extends StatelessWidget {
+  const _PosterTopLeftBadges({
+    required this.item,
+    required this.l10n,
+    required this.showWatched,
+  });
+
+  final MediaItem item;
+  final AppLocalizations l10n;
+  final bool showWatched;
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = <String>[];
+    if (item.isSeries && (item.childCount ?? 0) > 0) {
+      labels.add(l10n.cardSeasonCount(item.childCount!));
+    }
+    if (showWatched && item.userData.played) {
+      labels.add(l10n.mobileWatched);
+    }
+    if (labels.isEmpty) return const SizedBox.shrink();
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final watchedText = l10n.mobileWatched;
+    return Positioned(
+      top: 6,
+      left: 6,
+      right: 6,
+      child: IgnorePointer(
+        child: Wrap(
+          key: Key('poster-card-badges-${item.id}'),
+          spacing: 4,
+          runSpacing: 4,
+          children: [
+            for (final label in labels)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: label == watchedText
+                      ? scheme.primary
+                      : const Color(0xff000000).withValues(alpha: 0.68),
+                  borderRadius: BorderRadius.circular(6),
+                  border: label == watchedText
+                      ? null
+                      : Border.all(
+                          color: const Color(0xffffffff)
+                              .withValues(alpha: 0.16),
+                          width: 0.6,
+                        ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: label == watchedText
+                          ? scheme.onPrimary
+                          : const Color(0xffffffff),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PosterYearRatingMeta extends StatelessWidget {
+  const _PosterYearRatingMeta({required this.item, required this.width});
+
+  final MediaItem item;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final year = item.productionYear;
+    final rating = item.communityRating;
+    final hasYear = year != null && year > 0;
+    final hasRating = rating != null && rating > 0;
+    final metaStyle = theme.textTheme.labelSmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    if (!hasYear && !hasRating) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: SizedBox(
+        width: width,
+        child: Row(
+          children: [
+            if (hasYear)
+              Flexible(
+                child: Text(
+                  '$year',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: metaStyle,
+                ),
+              ),
+            if (hasRating) ...[
+              if (hasYear) const SizedBox(width: 6),
+              Icon(
+                AppIcons.star,
+                fill: AppIcons.filled,
+                size: 11,
+                color: scheme.primary,
+              ),
+              const SizedBox(width: 2),
+              Text(rating.toStringAsFixed(1), maxLines: 1, style: metaStyle),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -511,7 +648,12 @@ class _PosterRevealOverlay extends StatelessWidget {
     final light = scheme.brightness == Brightness.light;
     final meta = <String>[
       ?seasonEpisodeCode(item),
-      if (item.productionYear != null && item.productionYear! > 0)
+      if (!showMeta && item.productionYear != null && item.productionYear! > 0)
+        '${item.productionYear}',
+      if (showMeta &&
+          revealed &&
+          item.productionYear != null &&
+          item.productionYear! > 0)
         '${item.productionYear}',
       ?runtimeLabel(l10n, item),
     ];

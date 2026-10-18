@@ -117,12 +117,13 @@ void main() {
     );
 
     expect(find.byKey(PosterCard.playButtonKey(_movie.id)), findsNothing);
-    expect(find.text('2020'), findsNothing);
+    expect(find.text('2020'), findsOneWidget);
+    expect(find.textContaining('45分钟'), findsNothing);
 
     await _hover(tester, find.byType(PosterCard));
 
     expect(find.byKey(PosterCard.playButtonKey(_movie.id)), findsOneWidget);
-    expect(find.textContaining('2020'), findsOneWidget);
+    expect(find.textContaining('2020'), findsWidgets);
     expect(find.textContaining('45分钟'), findsOneWidget);
     expect(find.text('可播电影'), findsWidgets);
     // 短标题不会被截断,不再挂 tooltip。
@@ -278,6 +279,38 @@ void main() {
       await tester.pump();
       expect(host.current?.itemId, _movie.id);
       expect(detailTaps, 0);
+    },
+  );
+
+  testWidgets(
+    'vertical poster card displays top-left season/watched badges and bottom year-rating line',
+    (tester) async {
+      const series = MediaItem(
+        id: 'series-sen',
+        name: '进击的巨人',
+        type: 'Series',
+        childCount: 4,
+        productionYear: 2013,
+        communityRating: 9.2,
+        userData: MediaUserData(played: true),
+      );
+      await tester.pumpWidget(
+        _wrap(
+          host: host,
+          child: PosterCard(item: series, showProgress: true, onTap: () {}),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('poster-card-badges-series-sen')),
+        findsOneWidget,
+      );
+      expect(find.text('4季'), findsOneWidget);
+      expect(find.text('已看'), findsOneWidget);
+      expect(find.text('2013'), findsOneWidget);
+      expect(find.text('9.2'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     },
   );
 }

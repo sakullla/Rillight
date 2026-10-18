@@ -45,9 +45,12 @@ jobs:
       - name: Test
         run: flutter test --no-pub
 
+      - name: Verify AOT backup key injection
+        run: python3 tool/backup_import_environment_test.py
+
       - name: Native package and Linux installer contracts
         run: |
-          python3 -m pip install Pillow==12.1.1
+          python3 -m pip install Pillow==12.1.1 PyYAML==6.0.3
           flutter test packages/rillight_player/test
           python3 tool/player_core_release_checks_test.py
           python3 tool/player_performance_checks_test.py

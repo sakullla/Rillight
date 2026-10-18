@@ -7,40 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'auth/login_widgets_test.dart',
-    caseEntrypoints['auth/login_widgets_cases.dart']!,
+    'auth/library_counts_test.dart',
+    caseEntrypoints['auth/library_counts_cases.dart']!,
   );
   group(
     'auth/phone_server_manager_test.dart',
     caseEntrypoints['auth/phone_server_manager_cases.dart']!,
   );
   group(
+    'home/hero_playback_actions_test.dart',
+    caseEntrypoints['home/hero_playback_actions_cases.dart']!,
+  );
+  group(
+    'library/episode_list_scroll_test.dart',
+    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
+  );
+  group(
     'mobile/phone_home_rails_test.dart',
     caseEntrypoints['mobile/phone_home_rails_cases.dart']!,
   );
   group(
-    'player/danmaku/danmaku_renderer_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
+    'mobile/phone_player_test.dart [part 4]',
+    caseEntrypoints['mobile/phone_player_cases.dart#3']!,
   );
   group(
-    'player/phone_presentation_lifecycle_test.dart',
-    caseEntrypoints['player/phone_presentation_lifecycle_cases.dart']!,
-  );
-  group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'player/player_window_test.dart',
+    caseEntrypoints['player/player_window_cases.dart']!,
   );
   group(
     'tv/tv_detail_test.dart [part 1]',
     caseEntrypoints['tv/tv_detail_cases.dart#0']!,
-  );
-  group(
-    'tv/tv_lan_pair_test.dart [part 3]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
-  );
-  group(
-    'widgets/artwork_crop_test.dart',
-    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
   );
   group(
     'widgets/scrim_icon_button_test.dart',

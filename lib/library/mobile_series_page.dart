@@ -51,6 +51,7 @@ class PhoneItemBanner extends StatelessWidget {
     this.titleWidget,
     this.meta = const [],
     this.pendingMeta,
+    this.statusActions,
     this.actions,
     this.onTitleTap,
     this.titleHint,
@@ -58,7 +59,6 @@ class PhoneItemBanner extends StatelessWidget {
     this.imagePrefersBackdrop,
     this.maxWidth = PhoneMotion.pageRequestWidth,
     this.posterItem,
-    this.hideTitle = false,
   });
 
   static const bannerKey = Key('phone-detail-banner');
@@ -80,6 +80,9 @@ class PhoneItemBanner extends StatelessWidget {
   final Widget? titleWidget;
   final List<PhoneMetaEntry> meta;
   final Widget? pendingMeta;
+
+  /// 头部右上角的状态操作（收藏、标记已看）：有海报时在海报右上方，单集在引导行右侧。
+  final Widget? statusActions;
   final Widget? actions;
 
   /// 单集标题进所属剧集。非空时标题上方带剧集名和箭头。
@@ -93,9 +96,6 @@ class PhoneItemBanner extends StatelessWidget {
   /// 背景就是点中的那一张。切换季时可以改成该季的横图，旧画面留到新图第一帧。
   final bool? imagePrefersBackdrop;
   final int maxWidth;
-
-  /// 顶栏已经变实并接管标题时隐藏横幅内的标题块，避免滚到半截出现双标题叠字。
-  final bool hideTitle;
 
   bool get _imagePrefersBackdrop => imagePrefersBackdrop ?? preferBackdrop;
 
@@ -158,7 +158,7 @@ class PhoneItemBanner extends StatelessWidget {
       );
     }
 
-    final rawTitleBlock = Column(
+    final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -167,6 +167,7 @@ class PhoneItemBanner extends StatelessWidget {
               title: title,
               hint: onTitleTap == null ? null : titleHint,
               onTap: onTitleTap,
+              trailing: showPoster ? null : statusActions,
               compact: showPoster,
             ),
         if (meta.isNotEmpty || pendingMeta != null) ...[
@@ -174,15 +175,6 @@ class PhoneItemBanner extends StatelessWidget {
           pendingMeta ?? _MetaLine(entries: meta),
         ],
       ],
-    );
-    final titleBlock = IgnorePointer(
-      ignoring: hideTitle,
-      child: AnimatedOpacity(
-        opacity: hideTitle ? 0.0 : 1.0,
-        duration: AppMotion.durationOf(context, AppMotion.fast),
-        curve: AppMotion.standard,
-        child: rawTitleBlock,
-      ),
     );
 
     return Column(
@@ -235,14 +227,19 @@ class PhoneItemBanner extends StatelessWidget {
                 ],
               ),
             ),
-            if (showPoster) ...[
-              // 海报行以底边定位：标题或元数据换行变高时向上长进画面下缘，
-              // 主操作的位置不随标题长短浮动。
-              SizedBox(height: imageHeight - rise + posterHeight),
-              Positioned(
-                left: AppSpacing.md,
-                right: AppSpacing.md,
-                bottom: 0,
+            if (showPoster)
+              // 海报行以底边定位：常规字号下主操作位置固定；超大字号时向下自然延展不裁顶。
+              Container(
+                constraints: BoxConstraints(
+                  minHeight: imageHeight - rise + posterHeight,
+                ),
+                alignment: Alignment.bottomCenter,
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  MediaQuery.paddingOf(context).top + 48,
+                  AppSpacing.md,
+                  0,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -256,15 +253,39 @@ class PhoneItemBanner extends StatelessWidget {
                     ),
                     const SizedBox(width: AppSpacing.md),
                     Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: titleBlock,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: posterHeight - 20,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisAlignment: statusActions != null
+                              ? MainAxisAlignment.spaceBetween
+                              : MainAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (statusActions != null)
+                              Align(
+                                alignment: Alignment.topRight,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: AppSpacing.xs,
+                                  ),
+                                  child: statusActions,
+                                ),
+                              ),
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: titleBlock,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ] else
+              )
+            else
               Padding(
                 padding: EdgeInsets.fromLTRB(
                   AppSpacing.md,
@@ -408,7 +429,7 @@ class _MetaLine extends StatelessWidget {
         color: theme.colorScheme.onSurfaceVariant,
       ),
     );
-    // 年份、时长、评分一行，用圆点隔开；画质/声道标签另起一行描边小牌。
+    // 年份、时长、评分用圆点隔开，画质/声道标签紧随其后同行流式排布，放不下再折行。
     final facts = <Widget>[];
     final badges = <Widget>[];
     for (final entry in entries) {
@@ -419,27 +440,12 @@ class _MetaLine extends StatelessWidget {
       if (facts.isNotEmpty) facts.add(dot);
       facts.add(_MetaChip(entry: entry));
     }
-    return Column(
+    return Wrap(
       key: PhoneItemBanner.metaKey,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (facts.isNotEmpty)
-          Wrap(
-            spacing: 6,
-            runSpacing: AppSpacing.xxs,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: facts,
-          ),
-        if (facts.isNotEmpty && badges.isNotEmpty) const SizedBox(height: 8),
-        if (badges.isNotEmpty)
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: badges,
-          ),
-      ],
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [...facts, ...badges],
     );
   }
 }
@@ -449,12 +455,14 @@ class _BannerTitle extends StatelessWidget {
     required this.title,
     this.hint,
     this.onTap,
+    this.trailing,
     this.compact = false,
   });
 
   final String title;
   final String? hint;
   final VoidCallback? onTap;
+  final Widget? trailing;
   final bool compact;
 
   @override
@@ -471,53 +479,76 @@ class _BannerTitle extends StatelessWidget {
       ),
     );
     final hint = this.hint;
-    if (hint == null || hint.isEmpty) {
+    final trailing = this.trailing;
+    if ((hint == null || hint.isEmpty) && trailing == null) {
       return heading;
     }
-    // 单集：所属剧集名作为标题上方的引导行，点按回到剧集页。
-    final overline = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(
-          child: Text(
-            hint,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        if (onTap != null)
-          Icon(
-            AppIcons.chevronRight,
-            fill: AppIcons.filled,
-            size: 20,
-            color: theme.colorScheme.primary,
-          ),
-      ],
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (onTap == null)
-          overline
-        else
-          AppSurfaceAction(
-            key: CatalogKeys.seriesLink,
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(AppRadii.sm),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 32),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                widthFactor: 1,
-                child: overline,
+    Widget? overlineWidget;
+    if (hint != null && hint.isNotEmpty) {
+      final overline = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              hint,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
-        const SizedBox(height: 2),
+          if (onTap != null)
+            Icon(
+              AppIcons.chevronRight,
+              fill: AppIcons.filled,
+              size: 20,
+              color: theme.colorScheme.primary,
+            ),
+        ],
+      );
+      overlineWidget = onTap == null
+          ? overline
+          : AppSurfaceAction(
+              key: CatalogKeys.seriesLink,
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 34),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: 1,
+                  child: overline,
+                ),
+              ),
+            );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (overlineWidget != null && trailing != null)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Flexible(child: overlineWidget),
+              const SizedBox(width: AppSpacing.xs),
+              Flexible(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  widthFactor: 1,
+                  child: trailing,
+                ),
+              ),
+            ],
+          )
+        else if (overlineWidget != null)
+          overlineWidget
+        else if (trailing != null)
+          Align(alignment: Alignment.centerRight, child: trailing),
+        const SizedBox(height: 4),
         heading,
       ],
     );

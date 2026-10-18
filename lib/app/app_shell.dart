@@ -749,13 +749,17 @@ class _NavTextButton extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
     final fg = selected ? colorScheme.onSurface : colorScheme.onSurfaceVariant;
+    final light = colorScheme.brightness == Brightness.light;
     return AppButton(
       key: buttonKey,
       onPressed: onPressed,
       style: AppButtonStyle(
         foregroundColor: fg,
-        // 选中底由内部 pill 表达,整钮的悬停/焦点面不再叠一层。
-        hoverColor: const Color(0x00000000),
+        // 选中底由内部 pill 表达,选中项悬停不再叠一层;未选中项悬停给一层
+        // 极浅的底面,作为唯一的可点反馈。
+        hoverColor: selected
+            ? const Color(0x00000000)
+            : colorScheme.onSurface.withValues(alpha: 0.05),
         textStyle: theme.textTheme.titleMedium?.copyWith(
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
@@ -770,11 +774,27 @@ class _NavTextButton extends StatelessWidget {
           horizontal: AppSpacing.sm,
           vertical: AppSpacing.xxs,
         ),
+        // 浅色顶栏是纸面:选中项用白色药丸加细边与轻影,像分段控件一样
+        // 浮起来;深色保持抬高一档的表面色。
         decoration: BoxDecoration(
           color: selected
-              ? colorScheme.surfaceContainerHigh
+              ? (light
+                    ? colorScheme.surfaceContainerLowest
+                    : colorScheme.surfaceContainerHigh)
               : const Color(0x00000000),
           borderRadius: BorderRadius.circular(AppRadii.md),
+          border: selected && light
+              ? Border.all(color: colorScheme.outlineVariant)
+              : null,
+          boxShadow: selected && light
+              ? const [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 1),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

@@ -1706,6 +1706,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: ScrimIconButton(
+                      paperInLight: true,
                       key: CatalogKeys.shelfScrollLeft(
                         CatalogKeys.shelfChapters,
                       ),
@@ -1718,6 +1719,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: ScrimIconButton(
+                      paperInLight: true,
                       key: CatalogKeys.shelfScrollRight(
                         CatalogKeys.shelfChapters,
                       ),
@@ -1931,6 +1933,10 @@ class _EpisodeShelfActions extends StatelessWidget {
               size: 18,
             ),
             label: Text(l10n.pickEpisode),
+            // 与选季、更多同一层级:中性墨色,不单独染强调色。
+            style: AppButtonStyle(
+              foregroundColor: AppUiTheme.of(context).colorScheme.onSurface,
+            ),
             variant: AppButtonVariant.plain,
           ),
       ],
@@ -2154,7 +2160,12 @@ class _SeasonJump extends StatelessWidget {
               current.name,
               style: AppUiTheme.of(context).textTheme.labelLarge,
             ),
-            const Icon(CupertinoIcons.chevron_down, size: 20),
+            const SizedBox(width: AppSpacing.xxs),
+            Icon(
+              CupertinoIcons.chevron_down,
+              size: 14,
+              color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ],
         ),
       ),
@@ -2186,7 +2197,7 @@ class _SeriesLink extends StatelessWidget {
     }
     return AppTooltip(
       message: AppLocalizations.of(context).viewSeries,
-      child: AppButton.icon(
+      child: AppButton(
         key: CatalogKeys.seriesLink,
         onPressed: () => context.push(
           DetailSourceScope.itemLocation(
@@ -2205,14 +2216,27 @@ class _SeriesLink extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
           minimumSize: Size.zero,
         ),
-        icon: const Icon(CupertinoIcons.chevron_right, size: 18),
-        label: Text(
-          name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: style,
-        ),
+        // 面包屑:剧名在前、箭头在后,读作「老友记 ›」,点开回到整部剧。
         variant: AppButtonVariant.plain,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xxs),
+            Icon(
+              CupertinoIcons.chevron_right,
+              size: 14,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
       ),
     );
   }

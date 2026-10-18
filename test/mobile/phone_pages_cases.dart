@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/rendering.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -1601,6 +1602,16 @@ void main() {
           findsNothing,
         );
         final play = find.byKey(const Key('mobile-detail-play'));
+        final seriesPoster = tester.getRect(
+          find.byKey(PhoneItemBanner.posterKey),
+        );
+        final seriesFavorite = tester.getRect(
+          find.byKey(const Key('phone-detail-favorite')),
+        );
+        final seriesPlay = tester.getRect(play);
+        expect(seriesFavorite.left, greaterThan(seriesPoster.right));
+        expect(seriesFavorite.bottom, lessThan(seriesPlay.top));
+        expect(seriesPlay.width, closeTo(360 - 32, 1));
         expect(
           tester
               .widget<AppTooltip>(
@@ -1638,6 +1649,32 @@ void main() {
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
         expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
         expect(findAppTooltip('下一集'), findsOneWidget);
+        final episodePlay = tester.getRect(
+          find.byKey(const Key('mobile-detail-play')),
+        );
+        final episodeFavorite = tester.getRect(
+          find.byKey(const Key('phone-detail-favorite')),
+        );
+        final episodePlayed = tester.getRect(
+          find.byKey(CatalogKeys.playedToggle),
+        );
+        final episodeRestart = tester.getRect(
+          find.byKey(const Key('phone-detail-play-start')),
+        );
+        final episodeNext = tester.getRect(find.byKey(CatalogKeys.nextEpisode));
+        expect(episodeFavorite.bottom, lessThan(episodePlay.top));
+        expect(episodePlayed.bottom, lessThan(episodePlay.top));
+        expect(episodeRestart.top, greaterThan(episodePlay.bottom));
+        expect(episodeNext.top, closeTo(episodeRestart.top, 1));
+        for (final text in ['收藏', '标记已看', '从头播放', '下一集']) {
+          expect(
+            tester
+                .renderObject<RenderParagraph>(find.text(text))
+                .didExceedMaxLines,
+            isFalse,
+            reason: text,
+          );
+        }
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await settle(tester);
         expect(find.text('The next night.'), findsOneWidget);
@@ -2232,7 +2269,7 @@ void main() {
             ),
         ];
         final width = arts.first.size.width;
-        expect(width, closeTo((360 - 32 - 12) / 2, 1));
+        expect(width, closeTo((360 - 32 - 24) / 3, 1));
         expect(
           arts.every((box) => (box.size.width - width).abs() < 0.5),
           isTrue,
@@ -2244,7 +2281,7 @@ void main() {
         final columns = arts
             .map((box) => box.localToGlobal(Offset.zero).dx.round())
             .toSet();
-        expect(columns.length, 2);
+        expect(columns.length, 3);
         expect(find.byType(MobilePressable), findsWidgets);
         // 网格卡不再有投影(ADR-2),图区圆角统一 AppRadii.md。
         final inception = find.byKey(
@@ -2293,7 +2330,7 @@ void main() {
         expect(find.text('出品年份'), findsOneWidget);
         expect(find.text('IMDb评分'), findsOneWidget);
         expect(find.text('随机'), findsOneWidget);
-        expect(find.text('首映日期'), findsNothing);
+        expect(find.text('首映日期'), findsOneWidget);
         expect(
           find.byKey(const Key('phone-library-section-year')),
           findsOneWidget,
@@ -2365,6 +2402,23 @@ void main() {
         expect(cleared, contains('IncludeItemTypes=Movie'));
         expect(cleared, isNot(contains('Years=')));
         expect(cleared, isNot(contains('Filters=')));
+
+        // Toggle sort order and in-library search on MobileLibraryPage.
+        await _libraryTap(tester, const Key('phone-library-sort-order'));
+        expect(
+          _lastItemsQuery(harness.server),
+          contains('SortOrder=Ascending'),
+        );
+        await _libraryTap(tester, const Key('phone-library-search-toggle'));
+        await tester.enterText(
+          find.byKey(const Key('phone-library-search-field')),
+          'Inception',
+        );
+        await settle(tester);
+        expect(
+          _lastItemsQuery(harness.server),
+          contains('SearchTerm=Inception'),
+        );
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],

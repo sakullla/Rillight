@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -21,7 +22,12 @@ extension UpdateCaptures on CaptureSession {
     // that its named state or operation is actually on screen.
     await Scrollable.ensureVisible(
       tester.element(finder),
-      alignment: action == 'app-update-open' ? .6 : .35,
+      alignment:
+          action == 'app-update-open' ||
+              (action == 'app-update-install' &&
+                  target == 'app-update-install-result')
+          ? .6
+          : .35,
     );
     await advance(450);
     final height =
@@ -52,6 +58,8 @@ extension UpdateCaptures on CaptureSession {
       app.router.go('/');
       await advance(700);
       await tap(const ValueKey('tv-nav-3'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await advance(300);
     } else if (platform == 'phone') {
       app.router.go('/mine');
       await advance(700);
@@ -65,6 +73,17 @@ extension UpdateCaptures on CaptureSession {
     );
     await advance(300);
     await _updateFrame('settings-update', action: 'app-update-check-button');
+    await tester.ensureVisible(
+      find.byKey(const Key('app-update-auto-reminder')),
+    );
+    await advance(200);
+    await tap(const Key('app-update-auto-reminder'));
+    await _updateFrame(
+      'settings-update-auto-disabled',
+      target: 'app-update-auto-reminder',
+      action: 'app-update-auto-reminder',
+    );
+    await tap(const Key('app-update-auto-reminder'));
     fixture.service.gate = Completer<void>();
     await tap(const Key('app-update-check-button'));
     await _updateFrame('settings-update-checking');
@@ -74,6 +93,36 @@ extension UpdateCaptures on CaptureSession {
       'settings-update-available',
       action: 'app-update-download',
     );
+    await tester.ensureVisible(
+      find.byKey(const Key('app-update-ignore-version')),
+    );
+    await advance(200);
+    await tap(const Key('app-update-ignore-version'));
+    await _updateFrame(
+      'settings-update-ignored',
+      target: 'app-update-ignored-badge',
+      action: 'app-update-ignore-version',
+    );
+    await tap(const Key('app-update-ignore-version'));
+    await fixture.controller.check(automatic: true);
+    await advance(350);
+    expect(find.byKey(const Key('app-update-reminder')), findsOneWidget);
+    expect(
+      find.byKey(const Key('app-update-reminder-ignore-version')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('app-update-reminder-disable')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('app-update-reminder-close')).hitTestable(),
+      findsOneWidget,
+    );
+    await save('settings-update-reminder');
+    await tap(const Key('app-update-reminder-close'));
+    await advance(300);
+    expect(find.byKey(const Key('app-update-reminder')), findsNothing);
     fixture.platform.noPackage = true;
     await tap(const Key('app-update-check-button'));
     await tester.ensureVisible(find.byKey(const Key('app-update-no-package')));
@@ -157,6 +206,11 @@ extension UpdateCaptures on CaptureSession {
       UpdateActionStatus.failed,
       failure: UpdateActionFailure.unavailable,
     );
+    await Scrollable.ensureVisible(
+      tester.element(find.byKey(const Key('app-update-install'))),
+      alignment: .35,
+    );
+    await advance(200);
     await tap(const Key('app-update-install'));
     await tester.ensureVisible(
       find.byKey(const Key('app-update-install-result')),

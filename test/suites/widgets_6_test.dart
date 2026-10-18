@@ -7,36 +7,37 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/presentation_test.dart [part 1]',
-    caseEntrypoints['aggregation/presentation_cases.dart#0']!,
+    'app/android_bootstrap_test.dart',
+    caseEntrypoints['app/android_bootstrap_cases.dart']!,
   );
   group(
-    'app/browsing_polish_test.dart',
-    caseEntrypoints['app/browsing_polish_cases.dart']!,
+    'app/startup_history_recovery_test.dart',
+    caseEntrypoints['app/startup_history_recovery_cases.dart']!,
   );
   group(
-    'auth/backup_import/backup_import_flow_test.dart',
-    caseEntrypoints['auth/backup_import/backup_import_flow_cases.dart']!,
+    'catalog/desktop_provider_filter_test.dart',
+    caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
   );
   group(
-    'library/episode_list_scroll_test.dart',
-    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
+    'catalog/filter_panel_test.dart',
+    caseEntrypoints['catalog/filter_panel_cases.dart']!,
   );
   group(
-    'library/external_link_test.dart',
-    caseEntrypoints['library/external_link_cases.dart']!,
+    'mobile/motion_behaviors_test.dart',
+    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 3]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#2']!,
+    'mobile/phone_player_test.dart [part 1]',
+    caseEntrypoints['mobile/phone_player_cases.dart#0']!,
   );
   group(
-    'mobile/phone_player_interaction_test.dart',
-    caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
+    'player/player_controls_test.dart',
+    caseEntrypoints['player/player_controls_cases.dart']!,
   );
-  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
+  group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
+  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
   group(
-    'tv/tv_home_featured_test.dart',
-    caseEntrypoints['tv/tv_home_featured_cases.dart']!,
+    'widgets/desktop_back_button_test.dart',
+    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
   );
 }

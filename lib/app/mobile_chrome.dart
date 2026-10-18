@@ -156,7 +156,7 @@ class PhoneTopBar extends StatelessWidget
         ),
         if (trailing != null)
           Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.xxs),
+            padding: const EdgeInsets.only(right: AppSpacing.xs),
             child: trailing,
           ),
       ],

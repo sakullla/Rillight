@@ -339,4 +339,48 @@ void main() {
       tags: ['integration'],
     );
   }
+
+  testWidgets(
+    'reminder dialog supports ignoring current version and disabling auto reminders',
+    (tester) async {
+      final fixture = UpdateUiFixture();
+      final router = GoRouter(
+        routes: [GoRoute(path: '/', builder: (_, _) => const SizedBox())],
+      );
+      final app = RillightApp(
+        router: router,
+        appearance: AppearanceController(store: MemoryPlayerSettingsStore()),
+        updateController: fixture.controller,
+        enableUpdates: true,
+      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        router.dispose();
+        app.auth.dispose();
+        app.appearance.dispose();
+        app.windowHost.dispose();
+        fixture.dispose();
+      });
+      await tester.pumpWidget(app);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app-update-reminder')), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('app-update-reminder-ignore-version')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app-update-reminder')), findsNothing);
+      expect(fixture.controller.ignoredVersion, '99.0.0');
+
+      await fixture.controller.unignoreRelease();
+      await fixture.controller.check(automatic: true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app-update-reminder')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('app-update-reminder-disable')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app-update-reminder')), findsNothing);
+      expect(fixture.controller.autoReminderEnabled, isFalse);
+    },
+    tags: ['integration'],
+  );
 }

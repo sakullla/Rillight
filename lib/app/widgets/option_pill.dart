@@ -18,9 +18,7 @@ class OptionPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
-    final foreground = selected
-        ? (light ? scheme.onPrimaryContainer : scheme.onPrimaryContainer)
-        : scheme.onSurface;
+    final foreground = selected ? scheme.onPrimaryContainer : scheme.onSurface;
     return Opacity(
       opacity: onPressed == null ? .45 : 1,
       child: Semantics(
@@ -34,12 +32,19 @@ class OptionPill extends StatelessWidget {
             duration: AppMotion.durationOf(context, AppMotion.fast),
             curve: AppMotion.standard,
             decoration: ShapeDecoration(
+              // 浅色:未选是白底细边,与浅灰页面/白色面板都分得开;选中换强调色。
               color: selected
                   ? scheme.primaryContainer
-                  : scheme.surfaceContainerHigh,
+                  : (light
+                        ? scheme.surfaceContainerLowest
+                        : scheme.surfaceContainerHigh),
               shape: StadiumBorder(
                 side: BorderSide(
-                  color: selected ? scheme.primary : scheme.outlineVariant,
+                  color: selected
+                      ? scheme.primary
+                      : (light
+                            ? scheme.onSurface.withValues(alpha: .14)
+                            : scheme.outlineVariant),
                   width: selected ? 1.5 : 1,
                 ),
               ),

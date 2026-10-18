@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../player/player_window_host.dart';
 import '../l10n/app_localizations.dart';
+import '../ui/app_icons.dart';
 import '../ui/ui.dart';
 import 'update_check.dart';
 import 'update_controller.dart';
@@ -158,24 +159,85 @@ class _UpdateReminderHostState extends State<UpdateReminderHost>
                   },
                 ),
               },
-              child: AppDialog(
-                key: const Key('app-update-reminder'),
-                title: Text(
-                  AppLocalizations.of(dialogContext).updateReminderTitle,
-                ),
-                content: UpdateCheck(
-                  controller: controller,
-                  showCheckButton: false,
-                  expandNotes: true,
-                ),
-                actions: [
-                  AppButton(
-                    key: const Key('app-update-reminder-close'),
-                    autofocus: true,
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: Text(AppLocalizations.of(dialogContext).updateLater),
-                  ),
-                ],
+              child: Builder(
+                builder: (dialogContext) {
+                  final l = AppLocalizations.of(dialogContext);
+                  final dialogTheme = AppUiTheme.of(dialogContext);
+                  final scheme = dialogTheme.colorScheme;
+                  return AppDialog(
+                    key: const Key('app-update-reminder'),
+                    maxWidth: 540,
+                    title: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(AppRadii.md),
+                          ),
+                          child: Icon(
+                            AppIcons.download,
+                            fill: AppIcons.filled,
+                            size: 22,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(l.updateReminderTitle),
+                              const SizedBox(height: 2),
+                              Text(
+                                l.updateReminderSubtitle,
+                                style: dialogTheme.textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    content: UpdateCheck(
+                      controller: controller,
+                      showCheckButton: false,
+                      expandNotes: true,
+                    ),
+                    actions: [
+                      AppButton(
+                        key: const Key('app-update-reminder-ignore-version'),
+                        variant: AppButtonVariant.plain,
+                        onPressed: () {
+                          unawaited(controller!.ignoreRelease(candidate));
+                          Navigator.of(dialogContext).pop();
+                        },
+                        child: Text(l.updateIgnoreVersion),
+                      ),
+                      AppButton(
+                        key: const Key('app-update-reminder-disable'),
+                        variant: AppButtonVariant.plain,
+                        onPressed: () {
+                          unawaited(controller!.setAutoReminderEnabled(false));
+                          Navigator.of(dialogContext).pop();
+                        },
+                        child: Text(l.updateDisableReminder),
+                      ),
+                      AppButton(
+                        key: const Key('app-update-reminder-close'),
+                        variant: AppButtonVariant.tinted,
+                        autofocus: true,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: Text(l.updateLater),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),

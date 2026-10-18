@@ -3,6 +3,7 @@ import 'dart:io';
 import 'startup_recovery.dart';
 export 'startup_recovery.dart';
 
+import 'backup_import/environment_keys.dart';
 import 'cloud_credentials.dart';
 import 'provider_identity.dart';
 import 'server_access_credentials.dart';
@@ -91,6 +92,7 @@ Future<AuthController> createProductionAuth() async {
         MediaServerProviders.create(type, client.device),
     serverAccess: access,
   );
+  controller.backupImportKeys = defaultBackupImportKeys;
   await controller.restore();
   return controller;
 }

@@ -301,7 +301,7 @@ class _TvActionState extends State<TvAction>
     }
   }
 
-  /// 目标已完整落在屏内(避开顶部导航与底部安全区)时不滚动:
+  /// 目标已完整落在屏内(避开顶部导航与底部安全区)且落在所属垂直可滚动视口内时不滚动:
   /// 在 hero 按钮间移动不会把舞台推走,只有越界时才把目标移到视口中央。
   bool _comfortablyVisible() {
     final box = context.findRenderObject();
@@ -309,6 +309,15 @@ class _TvActionState extends State<TvAction>
     final size = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     final rect = box.localToGlobal(Offset.zero) & box.size;
+    final scrollable = Scrollable.maybeOf(context, axis: Axis.vertical);
+    final scrollBox = scrollable?.context.findRenderObject();
+    if (scrollBox is RenderBox && scrollBox.hasSize && scrollBox.attached) {
+      final scrollRect = scrollBox.localToGlobal(Offset.zero) & scrollBox.size;
+      if (rect.top < scrollRect.top + 8 * s ||
+          rect.bottom > scrollRect.bottom - 8 * s) {
+        return false;
+      }
+    }
     return rect.top >= 64 * s &&
         rect.bottom <= size.height - 20 * s &&
         rect.left >= 0 &&
@@ -887,16 +896,15 @@ class TvCardMetrics {
     BuildContext context, {
     bool wide = false,
     double? width,
-    bool subtitle = false,
+    bool? subtitle,
   }) {
     final s = TvDesign.scaleOf(context);
     final theme = AppUiTheme.of(context);
     final w = width ?? (wide ? TvDesign.wideWidth : TvDesign.posterWidth) * s;
     final image = wide ? w * 9 / 16 : w * 1.5;
     final title = _lineHeight(context, theme.textTheme.bodyMedium);
-    final sub = subtitle
-        ? _lineHeight(context, theme.textTheme.labelMedium)
-        : 0;
+    final hasSub = subtitle ?? !wide;
+    final sub = hasSub ? _lineHeight(context, theme.textTheme.labelMedium) : 0;
     return TvCardMetrics(
       width: w,
       imageHeight: image,
@@ -954,7 +962,7 @@ class TvCard extends StatefulWidget {
   /// 当前播放集:封面中央显示播放图标。
   final bool current;
 
-  /// 卡片默认文字。横版剧集卡主标题为剧名,副标题为季集与集名。
+  /// 卡片默认文字。横版剧集卡主标题为剧名,副标题为季集与集名；竖版海报副标题为「年份 ★ 评分」。
   static (String, String?) labelsFor(MediaItem item, {required bool wide}) {
     if (wide && item.isEpisode) {
       final series = item.seriesName;
@@ -963,6 +971,15 @@ class TvCard extends StatefulWidget {
         return (series, detail.isEmpty ? null : detail);
       }
       return (episodeLabel(item), null);
+    }
+    if (!wide) {
+      final year = item.productionYear;
+      final rating = item.communityRating;
+      final parts = <String>[
+        if (year != null && year > 0) '$year',
+        if (rating != null && rating > 0) '★ ${rating.toStringAsFixed(1)}',
+      ];
+      return (item.name, parts.isEmpty ? null : parts.join(' '));
     }
     return (item.name, null);
   }
@@ -1088,6 +1105,42 @@ class _TvCardState extends State<TvCard> {
                       right: 6 * s,
                       bottom: (progress > 0 && !played ? 9 : 6) * s,
                       child: EpisodeThumbBadge(label: badge),
+                    ),
+                  if (!widget.wide &&
+                      item.isSeries &&
+                      (item.childCount ?? 0) > 0)
+                    Positioned(
+                      left: 6 * s,
+                      top: 6 * s,
+                      child: DecoratedBox(
+                        key: Key('tv-card-season-${item.id}'),
+                        decoration: BoxDecoration(
+                          color: const Color(0xff000000).withValues(alpha: .72),
+                          borderRadius: BorderRadius.circular(5 * s),
+                          border: Border.all(
+                            color: const Color(0xffffffff)
+                                .withValues(alpha: .16),
+                            width: .6 * s,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 5 * s,
+                            vertical: 2 * s,
+                          ),
+                          child: Text(
+                            AppLocalizations.of(context)
+                                .cardSeasonCount(item.childCount!),
+                            maxLines: 1,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: const Color(0xffffffff),
+                              fontSize: 10 * s,
+                              fontWeight: FontWeight.w700,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   if (played)
                     Positioned(
@@ -1340,7 +1393,7 @@ class _TvItemRowState extends State<TvItemRow> {
     final wide = widget.wide;
     final s = TvDesign.scaleOf(context);
     final hasSubtitle =
-        widget.subtitle ?? (wide && widget.items.any((i) => i.isEpisode));
+        widget.subtitle ?? (!wide || widget.items.any((i) => i.isEpisode));
     final metrics = TvCardMetrics.of(
       context,
       wide: wide,
