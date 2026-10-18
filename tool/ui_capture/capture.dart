@@ -788,13 +788,16 @@ void main() {
           );
         }
         await tester.pumpWidget(const SizedBox.shrink());
-        await capture.advance(500);
+        // 提示条等延时 4s 的计时器在界面销毁后仍会挂着,推进到它们走完再收尾。
+        await capture.advance(6000);
         await history.close();
         app.router.dispose();
         updates.dispose();
         auth.dispose();
         appearance.dispose();
         CaptureProviders.closeClients();
+        // dispose 过程中新建的延时计时器也要走完,否则测试收尾断言会失败。
+        await tester.pump(const Duration(seconds: 30));
       }, tags: ['integration']);
     }
   }
