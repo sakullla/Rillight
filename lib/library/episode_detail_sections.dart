@@ -37,28 +37,14 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final phone = PresentationScope.isPhoneOf(context);
     final gutter = PresentationScope.pageGutterOf(context);
+    // 分区之间留 32;标题与内容之间留 12。
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        gutter,
-        phone ? AppSpacing.xl : AppSpacing.md,
-        gutter,
-        AppSpacing.sm,
-      ),
+      padding: EdgeInsets.fromLTRB(gutter, AppSpacing.xxl, gutter, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: phone
-                ? theme.textTheme.titleMedium?.copyWith(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.2,
-                  )
-                : theme.textTheme.titleMedium,
-          ),
+          Text(title, style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           child,
         ],
@@ -445,10 +431,7 @@ _PersonMetrics _personMetrics(BuildContext context) {
       imageGap: 6,
       radius: AppRadii.md,
       surface: scheme.surfaceContainerLow,
-      titleStyle: theme.textTheme.bodyMedium?.copyWith(
-        fontWeight: FontWeight.w600,
-        height: 1.2,
-      ),
+      titleStyle: theme.textTheme.labelLarge?.copyWith(height: 1.2),
       roleStyle: theme.textTheme.labelSmall?.copyWith(
         color: scheme.onSurfaceVariant,
         height: 1.2,
@@ -492,7 +475,7 @@ _PersonMetrics _personMetrics(BuildContext context) {
     imageGap: AppSpacing.sm,
     radius: width / 2,
     surface: scheme.surfaceContainerHigh,
-    titleStyle: theme.textTheme.titleSmall,
+    titleStyle: theme.textTheme.labelLarge,
     roleStyle: theme.textTheme.bodySmall?.copyWith(
       color: scheme.onSurfaceVariant,
     ),
@@ -1100,7 +1083,6 @@ class _PersonPosterState extends State<_PersonPoster> {
             name.isEmpty ? '?' : name.characters.first,
             style: theme.textTheme.headlineMedium?.copyWith(
               fontSize: widget.metrics.width * 0.3,
-              fontWeight: FontWeight.w600,
               color: scheme.onSurface.withValues(alpha: 0.86),
             ),
           ),
@@ -1615,7 +1597,6 @@ class _PhoneSelectorRow extends StatelessWidget {
               title,
               style: theme.textTheme.labelLarge?.copyWith(
                 color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
               ),
             ),
             if (count > 1) ...[
@@ -1635,7 +1616,6 @@ class _PhoneSelectorRow extends StatelessWidget {
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                       fontSize: 11,
-                      fontWeight: FontWeight.w700,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -1653,7 +1633,6 @@ class _PhoneSelectorRow extends StatelessWidget {
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurface,
                   fontSize: 14,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -1733,12 +1712,7 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Text(
-                title,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              Text(title, style: theme.textTheme.titleMedium),
               const SizedBox(width: AppSpacing.xs),
               DecoratedBox(
                 decoration: BoxDecoration(
@@ -1754,7 +1728,6 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                     '${options.length}',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -1819,7 +1792,7 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                                     fontSize: 15,
                                     fontWeight: isSelected
                                         ? FontWeight.w700
-                                        : FontWeight.w600,
+                                        : null,
                                   ),
                                 ),
                                 if (subtitle != null &&
@@ -2148,7 +2121,6 @@ class EpisodeMetadataSection extends StatelessWidget {
       color: scheme.onSurfaceVariant,
     );
     final valueStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w600,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
     return _Section(
@@ -2269,7 +2241,6 @@ class ChapterFallbackArt extends StatelessWidget {
               (index + 1).toString().padLeft(2, '0'),
               style: theme.textTheme.headlineLarge?.copyWith(
                 color: scheme.onPrimaryContainer.withValues(alpha: .28),
-                fontWeight: FontWeight.w800,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
