@@ -463,7 +463,10 @@ void main() {
     await f.query.start(QueryScope());
     expect(f.query.items, hasLength(1));
     expect(f.query.summary, QuerySummary.partialFailure);
-    expect(f.query.sources.last.status, SourceQueryStatus.needsLogin);
+    expect(
+      f.query.sources.singleWhere((s) => s.key.serverId == 'b').status,
+      SourceQueryStatus.needsLogin,
+    );
     final aRequests = f.a.requests.length;
     f.b.status = 200;
     f.b.items = (_) async => _page([_movie('two')], total: 1);
@@ -484,7 +487,10 @@ void main() {
         return _page([_movie('late', provider: '5')], total: 1);
       };
       await f.query.start(QueryScope());
-      expect(f.query.sources.last.status, SourceQueryStatus.timeout);
+      expect(
+        f.query.sources.singleWhere((s) => s.key.serverId == 'b').status,
+        SourceQueryStatus.timeout,
+      );
       expect(f.query.items, hasLength(1));
       f.b.items = (_) async => _page([_movie('retry')], total: 1);
       await f.query.retry(const QuerySourceKey('b', 'library'));

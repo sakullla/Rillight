@@ -182,9 +182,19 @@ void main() {
     );
     final gate = server.holdItemGet = Completer<void>();
     server.itemStatus = 503;
-    final before = DateTime.now().toUtc();
+    server.requests.clear();
     try {
       final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      // The recovery budget starts after asynchronous host preparation. Measure
+      // from the held metadata request, not before that preparation is scheduled.
+      await Future.doWhile(() async {
+        if (server.requests.any((r) => r.contains('/Items/movie-up'))) {
+          return false;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+        return true;
+      }).timeout(const Duration(seconds: 2));
+      final before = DateTime.now().toUtc();
       await Future<void>.delayed(const Duration(milliseconds: 80));
       gate.complete();
       await opening;
