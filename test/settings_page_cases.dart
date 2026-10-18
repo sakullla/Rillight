@@ -688,13 +688,21 @@ void main() {
     await expandSection(tester, '备份与同步');
 
     // 采集链在真实事件循环里跑到本地损坏分支。
-    await runInRealLoop(
-      tester,
+    await tester.runAsync<void>(
       () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
-      budget: const Duration(milliseconds: 500),
     );
+    // 不能用固定预算等待:CI 慢机上真实文件 IO 后的反馈渲染晚于预算耗尽,
+    // 需逐轮"真实 IO 窗口 + 帧推进"直到文案出现。
+    const corruptionNotice = '本地配置文件损坏，本次操作已取消';
+    for (var i = 0; i < 100; i++) {
+      await tester.runAsync<void>(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await settle(tester);
+      if (find.text(corruptionNotice).evaluate().isNotEmpty) break;
+    }
 
-    expect(find.text('本地配置文件损坏，本次操作已取消'), findsOneWidget);
+    expect(find.text(corruptionNotice), findsOneWidget);
     expect(fake.uploadedBytes, isNull);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
