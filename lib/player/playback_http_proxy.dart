@@ -1514,6 +1514,8 @@ class PlaybackHttpProxy {
     if (pending != null) {
       try {
         await pending;
+      } on _MediaAuthenticationFailure {
+        rethrow;
       } catch (_) {
         // Another reader may have cancelled the optional import.
       }
@@ -1541,6 +1543,7 @@ class PlaybackHttpProxy {
           'if-modified-since': null,
         },
       );
+      _checkAuthorization(response.statusCode);
       final range = MediaContentRange.parse(
         response.headers.value('content-range'),
       );
@@ -1592,6 +1595,8 @@ class PlaybackHttpProxy {
     _warmImport = task;
     try {
       await task;
+    } on _MediaAuthenticationFailure {
+      rethrow;
     } catch (_) {
       read.check();
       // Optional prefetch cannot block normal cold-start recovery.
@@ -1814,6 +1819,15 @@ class PlaybackHttpProxy {
   static bool _retryableStatus(int status) =>
       status == 408 || status == 429 || status >= 500 && status <= 599;
 
+  static bool _authorizationStatus(int status) =>
+      status == HttpStatus.unauthorized || status == HttpStatus.forbidden;
+
+  static void _checkAuthorization(int status) {
+    if (_authorizationStatus(status)) {
+      throw _MediaAuthenticationFailure(status);
+    }
+  }
+
   Future<void> _retireRejectedResponse(
     HttpClientResponse response,
     _ProxyRead read,
@@ -1973,10 +1987,9 @@ class PlaybackHttpProxy {
         if (media && response.statusCode >= 200 && response.statusCode < 300) {
           _mediaResponseHeaders++;
         }
-        // A demuxer/index request can be the connection rejected by the origin,
-        // not just a speculative lane. Resolve that contention before exposing
-        // 403 as authentication failure to the player. A serial retry's genuine
-        // 403 still follows the normal authentication path.
+        // A demuxer/index request can also encounter the origin's stream limit.
+        // Only recognized contention statuses permit a serial retry; ordinary
+        // permission failures must reach the authentication path unchanged.
         if (!read.readAheadProducer &&
             !_serialUpstream &&
             const [409, 429, 503].contains(response.statusCode) &&
@@ -2367,14 +2380,11 @@ class PlaybackHttpProxy {
                   );
                   if (response.statusCode != 200 &&
                       response.statusCode != 206) {
-                    if (const [
-                      403,
-                      409,
-                      429,
-                      503,
-                    ].contains(response.statusCode)) {
+                    final denied = _authorizationStatus(response.statusCode);
+                    if (denied ||
+                        const [409, 429, 503].contains(response.statusCode)) {
                       _segmentPrefetchRefusal = response.statusCode;
-                      _useSerialUpstream();
+                      if (!denied) _useSerialUpstream();
                       _cancelSegmentPrefetch(clearPending: true);
                     }
                     return;
@@ -2592,10 +2602,7 @@ class PlaybackHttpProxy {
           'if-modified-since': null,
         },
       );
-      if (probe.statusCode == HttpStatus.unauthorized ||
-          probe.statusCode == HttpStatus.forbidden) {
-        throw _MediaAuthenticationFailure(probe.statusCode);
-      }
+      _checkAuthorization(probe.statusCode);
       final range = MediaContentRange.parse(
         probe.headers.value('content-range'),
       );
@@ -3009,10 +3016,15 @@ class PlaybackHttpProxy {
                               'if-modified-since': null,
                             },
                           );
+                    if (_authorizationStatus(response.statusCode)) {
+                      _prefetchAuthenticationStatus = response.statusCode;
+                      // Optional future bytes must not expire verified cached
+                      // playback. Surface denial only when those bytes are read.
+                      throw _MediaAuthenticationFailure(response.statusCode);
+                    }
                     if (ahead?.hasParallelTransfers == true &&
                         const [
                           200,
-                          403,
                           409,
                           429,
                           503,
@@ -3038,14 +3050,6 @@ class PlaybackHttpProxy {
                       throw ReadAheadConcurrencyRejected(
                         'http-${response.statusCode}',
                       );
-                    }
-                    if (response.statusCode == HttpStatus.unauthorized ||
-                        response.statusCode == HttpStatus.forbidden) {
-                      _prefetchAuthenticationStatus = response.statusCode;
-                      // An optional future range may be rejected while the
-                      // player is still consuming valid cached bytes. Preserve
-                      // those bytes and surface authentication only on demand.
-                      throw _MediaAuthenticationFailure(response.statusCode);
                     }
                     final range = MediaContentRange.parse(
                       response.headers.value('content-range'),
@@ -4186,6 +4190,7 @@ class PlaybackHttpProxy {
                   throw StateError('Media recovery budget exhausted');
                 },
               );
+              _checkAuthorization(candidate.statusCode);
               if (_retryableStatus(candidate.statusCode)) {
                 prefixRetryAfter = candidate.statusCode == 429
                     ? _retryAfter(candidate.headers.value('retry-after'))
@@ -4630,6 +4635,7 @@ class PlaybackHttpProxy {
                           throw StateError('Media recovery budget exhausted');
                         },
                       );
+                      _checkAuthorization(candidate.statusCode);
                       if (_retryableStatus(candidate.statusCode)) {
                         retryAfter = candidate.statusCode == 429
                             ? _retryAfter(

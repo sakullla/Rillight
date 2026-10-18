@@ -162,31 +162,35 @@ void main() {
     },
   );
 
-  test(
-    '403 disables rolling speculation while foreground remains playable',
-    () async {
-      final fixture = await _SlowHls.open(
-        sessionBuffering: true,
-        nextFailures: 1,
-        failureStatus: 403,
-      );
-      try {
-        final segments = await fixture.playlist();
-        final first = await fixture.start(segments.first);
-        await fixture.nextEntered.future;
-        await fixture.waitPrefetch();
-        expect(fixture.counts['/c.ts'], isNull);
-        fixture.currentReleased.complete();
-        await first.done;
-        expect(await fixture.read(segments[1]), 16 * 1024);
-        await fixture.waitPrefetch();
-        expect(fixture.counts['/c.ts'], isNull);
-        expect(fixture.proxy.diagnostics['serialUpstream'], isTrue);
-      } finally {
-        await fixture.close();
-      }
-    },
-  );
+  for (final status in [401, 403]) {
+    test(
+      '$status disables rolling speculation while foreground remains playable',
+      () async {
+        final fixture = await _SlowHls.open(
+          sessionBuffering: true,
+          nextFailures: 1,
+          failureStatus: status,
+        );
+        try {
+          final segments = await fixture.playlist();
+          final first = await fixture.start(segments.first);
+          await fixture.nextEntered.future;
+          await fixture.waitPrefetch();
+          expect(fixture.counts['/c.ts'], isNull);
+          fixture.currentReleased.complete();
+          await first.done;
+          expect(await fixture.read(segments[1]), 16 * 1024);
+          await fixture.waitPrefetch();
+          expect(fixture.counts['/c.ts'], isNull);
+          expect(fixture.proxy.diagnostics['segmentPrefetchRefusal'], status);
+          expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+          expect(fixture.proxy.diagnostics['serialUpstream'], isFalse);
+        } finally {
+          await fixture.close();
+        }
+      },
+    );
+  }
 
   test(
     'foreground reuses a next segment that finishes during bounded handoff',
