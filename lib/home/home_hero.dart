@@ -329,15 +329,14 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         ),
         HeroScrim(
           top: _fadesIntoPage && !_gallery,
-          leading: !_gallery,
+          leading: true,
           fadeTo: fade,
           gallery: _gallery,
         ),
         if (_gallery)
           Positioned(
-            // 卡片内边距让出后,说明文字仍落在页边线上。
-            left: inset - AppSpacing.md,
-            right: inset - AppSpacing.md,
+            left: inset,
+            right: inset,
             bottom: AppSpacing.lg,
             child: _galleryCaption(
               item: item,
@@ -406,7 +405,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     );
   }
 
-  /// 浅色说明:白卡片承接墨色文字,切换控件贴在卡片右侧、与按钮底对齐。
+  /// 浅色说明:文字直接落在纸色渐变上(遮罩从左下融进页面),切换控件贴右、与按钮底对齐。
   Widget _galleryCaption({
     required MediaItem item,
     required double textWidth,
@@ -421,17 +420,13 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
       children: [
         Flexible(
           child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: textWidth + AppSpacing.md * 2,
-            ),
-            child: _paperFrame(
-              _captionSwitcher(
-                item: item,
-                large: large,
-                logoWidth: logoWidth,
-                showOverview: showOverview,
-                compact: compact,
-              ),
+            constraints: BoxConstraints(maxWidth: textWidth),
+            child: _captionSwitcher(
+              item: item,
+              large: large,
+              logoWidth: logoWidth,
+              showOverview: showOverview,
+              compact: compact,
             ),
           ),
         ),
@@ -472,19 +467,17 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
           ),
         ),
         const SizedBox(width: AppSpacing.xxs),
-        _dotPill(
-          HeroDots(
-            index: index,
-            count: items.length,
-            // A continuous countdown keeps the whole desktop window waking
-            // at the display refresh rate even when no one is interacting.
-            // Keep the selected dot static; the rotation timer still works.
-            onSelect: (i) => _select(i, items.length),
-            onScrim: !_gallery,
-            activeColor: _gallery
-                ? AppUiTheme.of(context).colorScheme.primary
-                : null,
-          ),
+        HeroDots(
+          index: index,
+          count: items.length,
+          // A continuous countdown keeps the whole desktop window waking
+          // at the display refresh rate even when no one is interacting.
+          // Keep the selected dot static; the rotation timer still works.
+          onSelect: (i) => _select(i, items.length),
+          onScrim: !_gallery,
+          activeColor: _gallery
+              ? AppUiTheme.of(context).colorScheme.primary
+              : null,
         ),
         const SizedBox(width: AppSpacing.xxs),
         arrow(
@@ -537,12 +530,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
                 onResolved: (data) => _onArtworkResolved(item, artwork, data),
               ),
               HeroScrim(top: _stage && !light, fadeTo: fade, gallery: light),
-              Positioned(
-                left: light ? 4 : 20,
-                right: light ? 4 : 20,
-                bottom: light ? 12 : 20,
-                child: light ? _paperFrame(text) : text,
-              ),
+              Positioned(left: 20, right: 20, bottom: 20, child: text),
             ],
           )
         : HeroPosterSpotlight(
@@ -610,16 +598,14 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
       Positioned(
         right: 20,
         bottom: 16,
-        child: _dotPill(
-          HeroDots(
-            index: index,
-            count: items.length,
-            onSelect: (i) => _select(i, items.length),
-            onScrim: !_gallery,
-            activeColor: _gallery
-                ? AppUiTheme.of(context).colorScheme.primary
-                : null,
-          ),
+        child: HeroDots(
+          index: index,
+          count: items.length,
+          onSelect: (i) => _select(i, items.length),
+          onScrim: !_gallery,
+          activeColor: _gallery
+              ? AppUiTheme.of(context).colorScheme.primary
+              : null,
         ),
       ),
     ];
@@ -657,48 +643,6 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         ),
       ),
       icon: Icon(icon),
-    );
-  }
-
-  Widget _paperFrame(Widget child) {
-    final scheme = AppUiTheme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLowest.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.65),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.shadow.withValues(alpha: 0.10),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: child,
-      ),
-    );
-  }
-
-  Widget _dotPill(Widget dots) {
-    final scheme = AppUiTheme.of(context).colorScheme;
-    final light = _gallery;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: light
-            ? scheme.surfaceContainerLowest
-            : const Color(0xff000000).withValues(alpha: .32),
-        borderRadius: BorderRadius.circular(99),
-        border: light ? Border.all(color: scheme.outlineVariant) : null,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: dots,
-      ),
     );
   }
 }

@@ -226,7 +226,16 @@ class _SeekPreviewState extends State<SeekPreview> {
                     clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
                       color: scheme.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                      border: Border.all(
+                        color: AppEdge.of(
+                          AppUiTheme.of(context).brightness,
+                          strong: true,
+                        ),
+                      ),
+                      boxShadow: AppShadow.cardHover(
+                        AppUiTheme.of(context).brightness,
+                      ),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

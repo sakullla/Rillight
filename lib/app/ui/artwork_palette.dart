@@ -63,15 +63,13 @@ Future<AppColorScheme> contentPaletteFromBytes(
   }
 }
 
-/// Keep neutral surfaces and semantic errors while deriving a contrasting
-/// action pair from the artwork hue. Foregrounds keep the app's AA contrast.
+/// Artwork sets the mood, not the actions: surfaces and tonal containers take
+/// a light tint of the artwork hue, while primary actions keep the brand pair
+/// so a play button never turns green or brown next to the brand accent.
+/// Neutral foregrounds and semantic errors keep the app's AA contrast.
 AppColorScheme composeContentPalette(AppColorScheme base, Color seed) {
   final dark = base.brightness == Brightness.dark;
   final hsl = HSLColor.fromColor(seed);
-  final primary = hsl
-      .withSaturation(hsl.saturation.clamp(.45, .8))
-      .withLightness(dark ? .74 : .34)
-      .toColor();
   Color on(Color color) => color.computeLuminance() > .179
       ? const Color(0xff000000)
       : const Color(0xffffffff);
@@ -82,8 +80,6 @@ AppColorScheme composeContentPalette(AppColorScheme base, Color seed) {
   final tint = hsl.withSaturation(.2).withLightness(dark ? .22 : .88).toColor();
   Color surface(Color neutral) => Color.lerp(neutral, tint, .16)!;
   return base.copyWith(
-    primary: primary,
-    onPrimary: on(primary),
     primaryContainer: container,
     onPrimaryContainer: on(container),
     surface: surface(base.surface),

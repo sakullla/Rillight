@@ -114,7 +114,7 @@ class SettingsPage extends StatefulWidget {
   static const double navWidth = 280;
 
   /// 设置正文限宽,避免标签贴左、控件贴窗沿。
-  static const double columnMaxWidth = 680;
+  static const double columnMaxWidth = 800;
 
   /// 可选的磁盘缓冲上限档位(MiB)。
   static const diskCacheLimitChoices = <int>[512, 1024, 2048, 4096, 8192];
@@ -1180,12 +1180,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 children: [
                   if (showPageTitle) ...[
-                    Text(
-                      l10n.settings,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    Text(l10n.settings, style: theme.textTheme.headlineSmall),
                     const SizedBox(height: AppSpacing.lg),
                   ],
                   for (final section in ordered) ...[
@@ -1224,9 +1219,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           children: [
                             Text(
                               selected.title,
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: theme.textTheme.headlineSmall,
                             ),
                             if (selected.subtitle != null) ...[
                               const SizedBox(height: AppSpacing.xxs),
@@ -1256,9 +1249,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       decoration: BoxDecoration(
                         color: scheme.surfaceContainerLow,
                         borderRadius: BorderRadius.circular(AppRadii.lg),
-                        border: Border.all(
-                          color: scheme.outlineVariant.withValues(alpha: 0.48),
-                        ),
+                        border: Border.all(color: AppEdge.of(theme.brightness)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1268,7 +1259,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             i < selected.children.length;
                             i++
                           ) ...[
-                            if (i > 0) const SizedBox(height: AppSpacing.sm),
+                            if (i > 0) const AppDivider(height: AppSpacing.sm),
                             selected.children[i],
                           ],
                         ],
@@ -1744,9 +1735,7 @@ class _SettingsSection extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.48),
-        ),
+        border: Border.all(color: AppEdge.of(theme.brightness)),
       ),
       clipBehavior: Clip.antiAlias,
       child: AppDisclosure(
@@ -1792,7 +1781,7 @@ class _SettingsSection extends StatelessWidget {
                 Align(alignment: Alignment.centerRight, child: trailing),
               const SizedBox(height: AppSpacing.xs),
               for (var i = 0; i < children.length; i++) ...[
-                if (i > 0) const SizedBox(height: AppSpacing.sm),
+                if (i > 0) const AppDivider(height: AppSpacing.sm),
                 children[i],
               ],
             ],

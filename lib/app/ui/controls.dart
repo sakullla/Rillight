@@ -9,15 +9,19 @@ import 'theme.dart';
 enum AppButtonVariant { plain, filled, tinted, outlined }
 
 /// One corner radius per emphasis level, shared by desktop, phone and TV.
+/// 有底色或描边的按钮是胶囊;纯文本/图标按钮保持圆角矩形,悬停底色更收敛。
 double _buttonRadius(AppButtonVariant variant) => switch (variant) {
   AppButtonVariant.plain => AppRadii.md,
-  AppButtonVariant.filled => AppRadii.md,
-  AppButtonVariant.tinted => AppRadii.md,
-  AppButtonVariant.outlined => AppRadii.md,
+  AppButtonVariant.filled => AppRadii.pill,
+  AppButtonVariant.tinted => AppRadii.pill,
+  AppButtonVariant.outlined => AppRadii.pill,
 };
 
 const _tvFocusScale = 1.04;
 const _tvPressScale = 0.96;
+
+/// 指针/触控按下时的轻微回弹。TV 另有焦点缩放档。
+const _pressScale = 0.97;
 
 /// Laid-out hit box on each axis. Style sizes and icon constraints can ask
 /// for less; they cannot shrink the control below this.
@@ -272,7 +276,9 @@ class _AppButtonState extends State<AppButton> {
               colors.inverseSurface,
             )
           : _stateFill(colors, resting, customFill != null, _PressKind.pressed);
-      scale = theme.tv && _focused ? _tvPressScale : 1;
+      scale = theme.tv
+          ? (_focused ? _tvPressScale : 1)
+          : (widget.variant == AppButtonVariant.plain ? 1 : _pressScale);
       // 按下只压暗底色;键盘焦点保留焦点环,不再叠一圈强调色边。
       if (_focused) side = BorderSide(color: colors.primary, width: 2);
     } else if (_focused) {
@@ -292,13 +298,30 @@ class _AppButtonState extends State<AppButton> {
           _stateFill(colors, resting, customFill != null, _PressKind.hover);
     }
 
+    // 品牌主按钮:未自定义底色的实底按钮铺品牌渐变(主色向次强调色偏移,
+    // 与图标的粉紫渐变同源),并带同色光晕。
+    // TV 焦点是反相实底,禁用态是中性底,两者都不走渐变。
+    final brand =
+        widget.variant == AppButtonVariant.filled &&
+        enabled &&
+        customFill == null &&
+        !tvFocus;
     return _ButtonFace(
       fill: fill,
+      gradient: brand
+          ? LinearGradient(
+              colors: [fill, Color.lerp(fill, colors.secondary, .55)!],
+            )
+          : null,
       foreground: _foreground(colors, enabled, tvFocus),
       side: side,
       radius: _buttonRadius(widget.variant),
       scale: scale,
-      shadow: widget.style?.boxShadow,
+      shadow:
+          widget.style?.boxShadow ??
+          (brand && !_pressed
+              ? AppShadow.glow(colors.primary, theme.brightness)
+              : null),
     );
   }
 
@@ -422,7 +445,8 @@ class _AppButtonState extends State<AppButton> {
                   ? null
                   : BoxConstraints.tight(_fixedHitSize(fixedSize, minimumSize)),
               decoration: ShapeDecoration(
-                color: face.fill,
+                color: face.gradient == null ? face.fill : null,
+                gradient: face.gradient,
                 shape: shape,
                 shadows: face.shadow,
               ),
@@ -436,7 +460,12 @@ class _AppButtonState extends State<AppButton> {
                     child: DefaultTextStyle(
                       style:
                           (widget.style?.textStyle ??
-                                  theme.textTheme.labelLarge!)
+                                  (widget.variant == AppButtonVariant.filled
+                                      // 实底主按钮的字压在饱和色上,需要半粗才立得住。
+                                      ? theme.textTheme.labelLarge!.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        )
+                                      : theme.textTheme.labelLarge!))
                               .copyWith(color: face.foreground),
                       textAlign: TextAlign.center,
                       child: widget.child,
@@ -475,9 +504,11 @@ class _ButtonFace {
     required this.side,
     required this.radius,
     required this.scale,
+    this.gradient,
     this.shadow,
   });
   final Color fill, foreground;
+  final Gradient? gradient;
   final BorderSide side;
   final double radius, scale;
   final List<BoxShadow>? shadow;
@@ -717,7 +748,6 @@ class AppTextField extends FormField<String> {
                        color: focused
                            ? colors.primary
                            : colors.onSurfaceVariant,
-                       fontWeight: FontWeight.w600,
                      ),
                    ),
                  ),
@@ -910,16 +940,17 @@ class AppChoiceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppUiTheme.of(context).colorScheme;
+    // 选中只用实底强调色表达,不叠描边;未选是安静的中性底。
     return Semantics(
       selected: selected,
       child: AppButton(
         focusNode: focusNode,
         onPressed: onSelected == null ? null : () => onSelected!(!selected),
-        color: selected ? colors.primaryContainer : colors.surfaceContainerHigh,
-        foregroundColor: selected
-            ? colors.onPrimaryContainer
-            : colors.onSurface,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        variant: AppButtonVariant.tinted,
+        color: selected ? colors.primary : colors.surfaceContainerHigh,
+        foregroundColor: selected ? colors.onPrimary : colors.onSurface,
+        style: const AppButtonStyle(side: BorderSide(color: Color(0x00000000))),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

@@ -220,7 +220,7 @@ class _PlayerSliderState extends State<PlayerSlider> {
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             color: CupertinoColors.white,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(AppRadii.md),
                           ),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
@@ -233,7 +233,7 @@ class _PlayerSliderState extends State<PlayerSlider> {
                               style: const TextStyle(
                                 color: CupertinoColors.black,
                                 fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ),

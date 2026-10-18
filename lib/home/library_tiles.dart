@@ -108,7 +108,7 @@ class _LibraryTilesState extends State<LibraryTiles> {
     final delta = position.viewportDimension * 0.9 * direction;
     _controller.animateTo(
       (position.pixels + delta).clamp(0.0, position.maxScrollExtent),
-      duration: const Duration(milliseconds: 220),
+      duration: AppMotion.durationOf(context, AppMotion.normal),
       curve: Curves.easeOut,
     );
   }
@@ -127,7 +127,10 @@ class _LibraryTilesState extends State<LibraryTiles> {
     final hoverInset = cardHeight * (MediaShelf.hoverScale - 1) / 2;
     return Padding(
       key: CatalogKeys.librariesMenu,
-      padding: const EdgeInsets.only(top: AppSpacing.sm, bottom: AppSpacing.md),
+      padding: const EdgeInsets.only(
+        top: AppSpacing.sm,
+        bottom: AppSpacing.xxl,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -333,7 +336,6 @@ class LibraryCardFace extends StatelessWidget {
                           textAlign: TextAlign.start,
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: const Color(0xffffffff),
-                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),

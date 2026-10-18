@@ -196,13 +196,9 @@ class ProviderSwitcher extends StatelessWidget {
         height: height,
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: dark
-              ? scheme.surfaceContainerHighest.withValues(alpha: .55)
-              : scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppRadii.md + 2),
-          border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: .5),
-          ),
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(color: AppEdge.of(theme.brightness)),
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -218,10 +214,12 @@ class ProviderSwitcher extends StatelessWidget {
                   width: segment,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: dark ? scheme.surfaceBright : scheme.surface,
-                      borderRadius: BorderRadius.circular(AppRadii.md - 2),
+                      color: dark
+                          ? scheme.surfaceBright
+                          : scheme.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
                       border: Border.all(
-                        color: value.brandColor.withValues(alpha: .55),
+                        color: AppEdge.of(theme.brightness, strong: true),
                       ),
                       boxShadow: [
                         BoxShadow(
@@ -285,7 +283,7 @@ class _ProviderSegment extends StatelessWidget {
         decoration: BoxDecoration(),
         child: AppSurfaceAction(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.md - 2),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
           child: Opacity(
             opacity: enabled || selected ? 1 : .5,
             child: Center(
@@ -306,7 +304,7 @@ class _ProviderSegment extends StatelessWidget {
                         type.label,
                         style: theme.textTheme.labelLarge?.copyWith(
                           fontWeight: selected
-                              ? FontWeight.w700
+                              ? FontWeight.w600
                               : FontWeight.w500,
                           color: selected
                               ? scheme.onSurface

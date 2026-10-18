@@ -2102,7 +2102,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                           leading: Text(
                             '$number',
                             style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
+                              fontWeight: selected ? FontWeight.w700 : null,
                             ),
                           ),
                           title: Text(
@@ -2185,7 +2185,6 @@ class _SeriesLink extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final style = theme.textTheme.titleSmall?.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
-      fontWeight: FontWeight.w600,
     );
     if (seriesId == null || seriesId!.isEmpty) {
       return Text(
@@ -2662,10 +2661,7 @@ class _DetailInfo extends StatelessWidget {
               (compact
                       ? theme.textTheme.headlineLarge
                       : theme.textTheme.displaySmall)
-                  ?.copyWith(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  ?.copyWith(color: theme.colorScheme.onSurface),
         ),
         const SizedBox(height: AppSpacing.xs),
         _MetaRow(
@@ -2697,7 +2693,7 @@ class _DetailInfo extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
-                height: 1.45,
+                height: 1.5,
               ),
             ),
           ),
@@ -2738,17 +2734,18 @@ class _MetaRow extends StatelessWidget {
     // 改用半透明前景色底，压在任何剧照上都读得出。
     final style = theme.textTheme.labelMedium?.copyWith(
       color: scheme.onSurface,
-      fontWeight: FontWeight.w600,
       letterSpacing: 0.2,
     );
     Widget chip(String text) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        height: AppControlHeight.sm,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
         decoration: BoxDecoration(
           color: scheme.onSurface.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(color: AppEdge.of(theme.brightness, strong: true)),
         ),
-        child: Text(text, style: style),
+        child: Align(widthFactor: 1, child: Text(text, style: style)),
       );
     }
 
@@ -2767,7 +2764,7 @@ class _MetaRow extends StatelessWidget {
         child: AppSurfaceAction(
           key: key ?? CatalogKeys.locateEpisode,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
           child: body,
         ),
       );
@@ -2805,20 +2802,20 @@ class _MetaRow extends StatelessWidget {
     ];
     final factStyle = theme.textTheme.bodyMedium?.copyWith(
       color: scheme.onSurface.withValues(alpha: .78),
-      height: 1.45,
+      height: 1.5,
     );
+    // 画质/声道标签:发丝描边的安静小标,不抢事实文字。
     Widget badge(String text) => DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: scheme.onSurface.withValues(alpha: .45)),
+        borderRadius: BorderRadius.circular(AppRadii.xs),
+        border: Border.all(color: AppEdge.of(theme.brightness, strong: true)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Text(
           text,
           style: theme.textTheme.labelSmall?.copyWith(
             color: scheme.onSurface.withValues(alpha: .85),
-            fontWeight: FontWeight.w700,
             letterSpacing: .3,
           ),
         ),

@@ -89,7 +89,6 @@ class HeroKicker extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelMedium?.copyWith(
                 color: color,
-                fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
                 height: 1.2,
               ),
@@ -147,7 +146,6 @@ class HeroRatingBadge extends StatelessWidget {
                 color: onScrim
                     ? const Color(0xffffffff)
                     : theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w700,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
@@ -178,7 +176,7 @@ class HeroScrim extends StatelessWidget {
   /// 底缘融进的页面底色,消掉图片与页面之间的硬边。
   final Color? fadeTo;
 
-  /// 浅色页面:说明文字改由纸色卡片承接,遮罩只把画面融进纸色,
+  /// 浅色页面:说明文字直接压在纸色渐变上(无卡片),遮罩从左下把画面融进纸色,
   /// 不再在底缘铺一条近乎不透明的黑带。
   final bool gallery;
 
@@ -190,15 +188,30 @@ class HeroScrim extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            if (leading)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    stops: const [0, .42, .8],
+                    colors: [
+                      fade.withValues(alpha: .92),
+                      fade.withValues(alpha: .68),
+                      fade.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  stops: const [0.38, 0.72, 0.96],
+                  stops: const [0.3, 0.66, 0.96],
                   colors: [
                     fade.withValues(alpha: 0),
-                    fade.withValues(alpha: 0.56),
+                    fade.withValues(alpha: 0.7),
                     fade,
                   ],
                 ),
@@ -462,7 +475,7 @@ class HeroDots extends StatelessWidget {
   final ValueListenable<int?>? cycle;
   final Duration interval;
 
-  static const double _activeWidth = 22;
+  static const double _activeWidth = 20;
   static const double _restWidth = 6;
   static const double _thickness = 6;
 
@@ -503,7 +516,7 @@ class HeroDots extends StatelessWidget {
                       : AnimatedContainer(
                           duration: AppMotion.durationOf(
                             context,
-                            AppMotion.normal,
+                            AppMotion.fast,
                           ),
                           curve: AppMotion.standard,
                           width: _restWidth,
@@ -585,7 +598,7 @@ class _ActivePill extends StatelessWidget {
 
 /// 轮播倒计时填充:每前进一个物理像素才重建一次。
 ///
-/// 22 逻辑像素宽的进度条在 7 秒里只有几十个可见状态。逐帧补间会让首页
+/// 20 逻辑像素宽的进度条在 7 秒里只有几十个可见状态。逐帧补间会让首页
 /// 在没有任何交互时仍按屏幕刷新率(手机常见 90/120Hz)持续出帧,
 /// CPU/GPU 与显示控制器都无法降频。这里改用按像素步进的计时器:
 /// 外观相同,空闲首页的出帧次数降到每秒约 10 次以内。

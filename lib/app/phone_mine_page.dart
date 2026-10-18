@@ -82,19 +82,16 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.xs),
             child: Text(
               title,
-              style: theme.textTheme.labelLarge?.copyWith(
+              style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
               ),
             ),
           ),
         Container(
           decoration: BoxDecoration(
-            color: scheme.surfaceContainer,
+            color: scheme.surfaceContainerLow,
             borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.45),
-            ),
+            border: Border.all(color: AppEdge.of(theme.brightness)),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -104,7 +101,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   AppDivider(
                     height: 1,
                     indent: 56,
-                    color: scheme.onSurface.withValues(alpha: .06),
+                    color: AppEdge.of(theme.brightness, strong: true),
                   ),
                 children[i],
               ],
@@ -187,7 +184,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                               initial,
                               style: theme.textTheme.headlineMedium?.copyWith(
                                 color: scheme.onPrimary,
-                                fontWeight: FontWeight.w800,
                               ),
                             ),
                     ),
@@ -201,9 +197,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                             key: PhoneMinePage.userKey,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
+                            style: theme.textTheme.headlineSmall,
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -213,9 +207,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                             key: PhoneMinePage.serverKey,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: theme.textTheme.bodyMedium,
                           ),
                           if (lineLabel.isNotEmpty) ...[
                             const SizedBox(height: 4),
@@ -394,17 +386,15 @@ class _MineTile extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainer,
+        color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.45),
-        ),
+        border: Border.all(color: AppEdge.of(theme.brightness)),
       ),
       clipBehavior: Clip.antiAlias,
       child: AppSurfaceAction(
         onTap: onTap,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 64),
+          constraints: const BoxConstraints(minHeight: 56),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
@@ -432,7 +422,6 @@ class _MineTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelLarge?.copyWith(
                       color: scheme.onSurface,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),

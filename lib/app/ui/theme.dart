@@ -363,13 +363,24 @@ class AppTextTheme {
   final TextStyle? labelLarge;
   final TextStyle? labelMedium;
   final TextStyle? labelSmall;
+
+  /// 字阶靠字号和颜色分层,粗体只留给标题。
+  ///
+  /// 微软雅黑只有常规与粗体两档:w600 及以上落到粗体,w500 及以下落到常规。
+  /// 因此卡片标题、按钮、标签用 w500(Windows 上是常规、Android/macOS 上是中黑),
+  /// 只有页面与分区标题、实底主按钮用 w600/w700。大字号收紧字距,让标题更挺括。
   factory AppTextTheme.standard(Color color, {bool phone = false}) {
-    TextStyle style(double size, FontWeight weight, double height) => TextStyle(
+    TextStyle style(
+      double size,
+      FontWeight weight,
+      double height, [
+      double letterSpacing = 0,
+    ]) => TextStyle(
       color: color,
       fontSize: size,
       fontWeight: weight,
       height: height,
-      letterSpacing: 0,
+      letterSpacing: letterSpacing,
       fontFamily: "Segoe UI",
       fontFamilyFallback: const [
         "Microsoft YaHei UI",
@@ -379,21 +390,22 @@ class AppTextTheme {
       ],
     );
     return AppTextTheme(
-      displayLarge: style(44, FontWeight.w700, 1.12),
-      displayMedium: style(36, FontWeight.w700, 1.18),
-      displaySmall: style(28, FontWeight.w600, 1.22),
-      headlineLarge: style(28, FontWeight.w600, 1.22),
-      headlineMedium: style(22, FontWeight.w600, 1.28),
-      headlineSmall: style(20, FontWeight.w600, 1.3),
-      titleLarge: style(phone ? 22 : 20, FontWeight.w700, 1.28),
-      titleMedium: style(phone ? 17 : 16, FontWeight.w600, 1.32),
-      titleSmall: style(phone ? 15 : 14, FontWeight.w600, 1.32),
-      bodyLarge: style(phone ? 16 : 16, FontWeight.w400, 1.48),
-      bodyMedium: style(phone ? 15 : 14, FontWeight.w400, 1.42),
-      bodySmall: style(13, FontWeight.w400, 1.38),
-      labelLarge: style(14, FontWeight.w600, 1.2),
+      displayLarge: style(44, FontWeight.w700, 1.1, -0.8),
+      displayMedium: style(36, FontWeight.w700, 1.14, -0.6),
+      displaySmall: style(28, FontWeight.w600, 1.2, -0.3),
+      headlineLarge: style(28, FontWeight.w600, 1.2, -0.3),
+      headlineMedium: style(22, FontWeight.w600, 1.27, -0.2),
+      headlineSmall: style(20, FontWeight.w600, 1.3, -0.1),
+      titleLarge: style(phone ? 22 : 20, FontWeight.w600, 1.28, -0.2),
+      // titleMedium 是各页的分区标题,保持粗体;卡片标题用 titleSmall。
+      titleMedium: style(phone ? 17 : 16, FontWeight.w600, 1.34),
+      titleSmall: style(phone ? 15 : 14, FontWeight.w500, 1.34),
+      bodyLarge: style(phone ? 16 : 16, FontWeight.w400, 1.5),
+      bodyMedium: style(phone ? 15 : 14, FontWeight.w400, 1.45),
+      bodySmall: style(13, FontWeight.w400, 1.4),
+      labelLarge: style(14, FontWeight.w500, 1.2),
       labelMedium: style(13, FontWeight.w500, 1.2),
-      labelSmall: style(12, FontWeight.w500, 1.2),
+      labelSmall: style(12, FontWeight.w500, 1.2, 0.1),
     );
   }
   AppTextTheme copyWith({
