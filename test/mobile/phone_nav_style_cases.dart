@@ -95,7 +95,7 @@ void main() {
     expect(fallback, isFalse);
   });
 
-  testWidgets('bottom bar keeps home, library, aggregation and search', (
+  testWidgets('bottom bar keeps home, aggregation and search without library', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -121,7 +121,7 @@ void main() {
     );
     expect(find.byType(CupertinoTabBar), findsOneWidget);
     expect(find.text('首页'), findsOneWidget);
-    expect(find.text('媒体库'), findsOneWidget);
+    expect(find.text('媒体库'), findsNothing);
     expect(find.text('聚合'), findsOneWidget);
     expect(find.text('搜索'), findsOneWidget);
   });

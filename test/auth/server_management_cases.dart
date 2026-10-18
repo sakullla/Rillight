@@ -204,6 +204,7 @@ void main() {
           );
           final auth = controller(access: access);
           addTearDown(auth.dispose);
+          late String current;
           await tester.runAsync(() async {
             for (final remote in [second, server]) {
               await auth.connect(
@@ -212,6 +213,7 @@ void main() {
                 password: 'correct-horse',
               );
               final saved = auth.session!.server;
+              current = saved.id;
               await access.register(saved);
               await access.setPassword(
                 saved.id,
@@ -222,9 +224,9 @@ void main() {
               );
             }
             await auth.refreshServers();
-            await access.unlock(auth.session!.server.id, 'local');
+            await access.unlock(current, 'local');
+            await auth.switchTo(current);
           });
-          final current = auth.session!.server.id;
           final other = auth.savedServers.firstWhere((s) => s.id != current);
           final permit = access.permit(current)!;
           if (offline) second.publicInfoStatus = 503;
@@ -416,7 +418,8 @@ void main() {
       auth.serverAccess.protectionRef(original.id),
     );
     expect((await store.load()).servers.single.protectionRef, isNotNull);
-    expect(auth.session!.accessToken, token);
+    expect(auth.session, isNull);
+    expect((await auth.credentials.read(original.id))?.accessToken, token);
     expect(auth.serverAccess.allows(original.id), isFalse);
   });
 

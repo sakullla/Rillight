@@ -1,3 +1,4 @@
+import '../helpers/authenticated_image_fixture.dart';
 import '../helpers/cupertino_test_app.dart';
 
 import 'package:rillight/app/ui/ui.dart' as ui;
@@ -116,9 +117,12 @@ void main() {
     expect(find.byKey(const Key('fallback')), findsOneWidget);
   });
 
-  Future<(AuthController, _LogoClient)> session(Uint8List logo) async {
+  Future<(AuthController, _LogoClient)> session(
+    WidgetTester tester,
+    Uint8List logo,
+  ) async {
     final client = _LogoClient(logo);
-    final auth = AuthController.memory(client: client);
+    final auth = await authenticatedImageFixture(tester, client);
     addTearDown(auth.dispose);
     return (auth, client);
   }
@@ -154,7 +158,7 @@ void main() {
     addTearDown(MediaImage.debugClearCache);
     addTearDown(MediaImage.debugResetCacheConfiguration);
     final bytes = (await tester.runAsync(() => _png(800, 200)))!;
-    final (auth, client) = await session(bytes);
+    final (auth, client) = await session(tester, bytes);
     await tester.pumpWidget(subject(auth));
     // While loading, the slot reserves space instead of flashing the text.
     expect(find.byKey(const Key('fallback')), findsNothing);
@@ -177,7 +181,7 @@ void main() {
     addTearDown(MediaImage.debugClearCache);
     addTearDown(MediaImage.debugResetCacheConfiguration);
     final bytes = (await tester.runAsync(() => _png(300, 300)))!;
-    final (auth, _) = await session(bytes);
+    final (auth, _) = await session(tester, bytes);
     await tester.pumpWidget(subject(auth));
     await _pumpUntil(tester, () => find.byType(Image).evaluate().isNotEmpty);
     expect(tester.getSize(find.byType(Image)), const Size(120, 120));
@@ -190,7 +194,7 @@ void main() {
     isolateImageCache();
     addTearDown(MediaImage.debugClearCache);
     addTearDown(MediaImage.debugResetCacheConfiguration);
-    final (auth, _) = await session(Uint8List.fromList([1, 2, 3]));
+    final (auth, _) = await session(tester, Uint8List.fromList([1, 2, 3]));
     await tester.pumpWidget(subject(auth));
     await _pumpUntil(
       tester,
@@ -200,7 +204,7 @@ void main() {
 
     MediaImage.debugClearCache();
     final sliver = (await tester.runAsync(() => _png(40, 400)))!;
-    final (tall, _) = await session(sliver);
+    final (tall, _) = await session(tester, sliver);
     await tester.pumpWidget(subject(tall));
     await _pumpUntil(
       tester,
@@ -214,10 +218,10 @@ void main() {
     addTearDown(MediaImage.debugClearCache);
     addTearDown(MediaImage.debugResetCacheConfiguration);
     final bytes = (await tester.runAsync(() => _png(800, 200)))!;
-    final (auth, client) = await session(bytes);
+    final (auth, client) = await session(tester, bytes);
     await tester.pumpWidget(subject(auth, prefetch: true));
     await _pumpUntil(tester, () => client.requests.isNotEmpty);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(Image), findsNothing);
     expect(find.byKey(const Key('fallback')), findsNothing);
     await tester.pumpWidget(const SizedBox());
@@ -240,7 +244,7 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() ready) async {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
   }
   expect(ready(), isTrue);
 }

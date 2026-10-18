@@ -1,3 +1,4 @@
+import 'playback_entry_access.dart';
 import 'playback_line_recovery_ui.dart';
 import 'source_switch_menu.dart';
 
@@ -423,7 +424,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
         // Revocation must clear playback/history using that actual controller,
         // not wait for the original detail gate's unrelated source lease.
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) GoRouter.of(context).go('/', extra: null);
+          if (mounted) unawaited(_close());
         });
       }
       _danmaku?.removeListener(_onDanmaku);
@@ -573,6 +574,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {
     if (_closing) return;
     _closing = true;
+    final actualOrigin = controller?.origin;
     final command = controller?.endedSeriesCommand;
     final lease = controller?.origin?.permit;
     final sourceBound =
@@ -603,6 +605,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     // pop can let a predictive back gesture pop the following detail route.
     // A tracks sheet may cover this route when authentication changes. Remove
     // its overlays first, then pop the route whose session we actually closed.
+    if (controller?.permissionRevoked == true &&
+        !playbackEntryStillAllowed(_auth!, actualOrigin)) {
+      GoRouter.of(context).go(AppRoutes.home, extra: null);
+      return;
+    }
     navigator.popUntil((candidate) => identical(candidate, route));
     navigator.pop();
     if (router != null &&

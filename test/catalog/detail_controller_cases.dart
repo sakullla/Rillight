@@ -229,7 +229,7 @@ void main() {
         if (!releaseLiveSeasons.isCompleted) releaseLiveSeasons.complete();
         if (!releaseOldEpisodes.isCompleted) releaseOldEpisodes.complete();
       });
-      dio.interceptors.add(
+      fakeEmbyTransport(dio).interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
             final query = options.uri.queryParameters;

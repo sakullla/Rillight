@@ -26,7 +26,6 @@ import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/app/window_geometry.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -2258,10 +2257,14 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       userId: launch.userId,
       userAgent: launch.userAgent,
     );
-    return AuthController(
+    return AuthController.forPlayback(
       client: client,
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+      account: launch.request.source?.account,
+      isAuthorized: () =>
+          mounted &&
+          _closing == null &&
+          identical(_launch, launch) &&
+          _playerKey.currentState?.controller?.permissionRevoked != true,
     );
   }
 

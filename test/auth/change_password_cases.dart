@@ -98,6 +98,7 @@ void main() {
       expect(auth.passwordChangeFailure, isNull);
       // 服务器端密码已被替换。
       expect(server.effectivePassword('user-alice'), 'new-horse');
+      expect(await auth.client.getViews(), isNotEmpty);
     },
   );
 

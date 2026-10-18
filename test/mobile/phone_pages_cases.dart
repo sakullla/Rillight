@@ -2669,15 +2669,17 @@ void main() {
 
       final backend = FakeVideoBackend();
       final window = PlayerWindow();
-      final controller = PlayerController(
-        client: auth.client,
-        itemId: 'movie-inception',
-        backend: backend,
-        window: window,
-        settingsStore: store,
-        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-        stoppedTimeout: const Duration(milliseconds: 20),
-      );
+      final controller = (await tester.runAsync(
+        () async => PlayerController(
+          client: auth.client,
+          itemId: 'movie-inception',
+          backend: backend,
+          window: window,
+          settingsStore: store,
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          stoppedTimeout: const Duration(milliseconds: 20),
+        ),
+      ))!;
       addTearDown(
         () => tester.runAsync(() async {
           await controller.disposeAsync();

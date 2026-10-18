@@ -7,84 +7,92 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/history_store_test.dart',
-    caseEntrypoints['aggregation/history_store_cases.dart']!,
-  );
-  group(
     'aggregation/query_test.dart',
     caseEntrypoints['aggregation/query_cases.dart']!,
   );
   group(
-    'app/source_route_extra_codec_test.dart',
-    caseEntrypoints['app/source_route_extra_codec_cases.dart']!,
+    'aggregation/server_sections_test.dart',
+    caseEntrypoints['aggregation/server_sections_cases.dart']!,
   );
   group(
-    'auth/provider_connect_controller_test.dart',
-    caseEntrypoints['auth/provider_connect_controller_cases.dart']!,
+    'auth/auth_controller_test.dart',
+    caseEntrypoints['auth/auth_controller_cases.dart']!,
   );
   group(
-    'auth/provider_session_ownership_test.dart',
-    caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
+    'auth/playback_cleanup_authority_test.dart',
+    caseEntrypoints['auth/playback_cleanup_authority_cases.dart']!,
   );
   group(
-    'auth/provider_user_agent_test.dart',
-    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
-  );
-  group(
-    'auth/server_configuration_migration_test.dart',
-    caseEntrypoints['auth/server_configuration_migration_cases.dart']!,
+    'auth/provider_selection_test.dart',
+    caseEntrypoints['auth/provider_selection_cases.dart']!,
   );
   group(
     'auth/server_import_test.dart',
     caseEntrypoints['auth/server_import_cases.dart']!,
   );
   group(
-    'auth/server_mutation_test.dart',
-    caseEntrypoints['auth/server_mutation_cases.dart']!,
-  );
-  group(
     'catalog/emby_catalog_client_test.dart',
     caseEntrypoints['catalog/emby_catalog_client_cases.dart']!,
   );
   group(
-    'emby/aggregation_metadata_test.dart',
-    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
+    'emby/emby_url_test.dart',
+    caseEntrypoints['emby/emby_url_cases.dart']!,
   );
   group(
-    'media_server/contract_test.dart',
-    caseEntrypoints['media_server/contract_cases.dart']!,
+    'helpers/synthetic_mailbox_test.dart',
+    caseEntrypoints['helpers/synthetic_mailbox_cases.dart']!,
+  );
+  group(
+    'library/item_format_test.dart',
+    caseEntrypoints['library/item_format_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 1]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#0']!,
   );
   group(
-    'player/cache_crc32_test.dart',
-    caseEntrypoints['player/cache_crc32_cases.dart']!,
+    'player/capability_record_test.dart',
+    caseEntrypoints['player/capability_record_cases.dart']!,
   );
   group(
-    'player/danmaku/danmaku_settings_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_settings_cases.dart']!,
+    'player/catalog_preference_negotiation_test.dart',
+    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
+  );
+  group(
+    'player/playback_check_in_test.dart',
+    caseEntrypoints['player/playback_check_in_cases.dart']!,
   );
   group(
     'player/playback_http_proxy_test.dart [part 2]',
     caseEntrypoints['player/playback_http_proxy_cases.dart#1']!,
   );
   group(
+    'player/playback_metadata_test.dart',
+    caseEntrypoints['player/playback_metadata_cases.dart']!,
+  );
+  group(
     'player/playback_resolver_test.dart',
     caseEntrypoints['player/playback_resolver_cases.dart']!,
   );
   group(
-    'player/player_runtime_options_test.dart',
-    caseEntrypoints['player/player_runtime_options_cases.dart']!,
+    'player/player_process_protocol_test.dart',
+    caseEntrypoints['player/player_process_protocol_cases.dart']!,
   );
   group(
     'player/player_settings_test.dart',
     caseEntrypoints['player/player_settings_cases.dart']!,
   );
   group(
-    'player/provider_process_boundary_test.dart',
-    caseEntrypoints['player/provider_process_boundary_cases.dart']!,
+    'player/player_startup_test.dart',
+    caseEntrypoints['player/player_startup_cases.dart']!,
+  );
+  group(
+    'player/provider_failed_preparation_recovery_test.dart',
+    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
+  );
+  group(
+    'player/provider_scoped_preference_test.dart',
+    caseEntrypoints['player/provider_scoped_preference_cases.dart']!,
   );
   group(
     'player/response_read_ahead_test.dart [part 1]',
@@ -93,10 +101,6 @@ void main() {
   group(
     'player/rillight_video_backend_test.dart [part 1]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#0']!,
-  );
-  group(
-    'player/strm_quality_confirmation_test.dart',
-    caseEntrypoints['player/strm_quality_confirmation_cases.dart']!,
   );
   group(
     'plex/plex_provider_test.dart',

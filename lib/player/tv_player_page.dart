@@ -1,3 +1,4 @@
+import 'playback_entry_access.dart';
 import 'playback_line_recovery_ui.dart';
 
 import 'dart:async';
@@ -130,9 +131,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     if (c.permissionRevoked) {
       if (!_revocationExitScheduled) {
         _revocationExitScheduled = true;
-        final router = GoRouter.maybeOf(context);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) router?.go('/', extra: null);
+          if (mounted) unawaited(_close());
         });
         WidgetsBinding.instance.ensureVisualUpdate();
       }
@@ -250,6 +250,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {
     if (_closing) return;
     _closing = true;
+    final actualOrigin = controller?.origin;
     final command = controller?.endedSeriesCommand;
     final lease = controller?.origin?.permit;
     final sourceBound =
@@ -271,6 +272,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     // pop can let a predictive back gesture pop the following detail route.
     // A tracks sheet may cover this route when authentication changes. Remove
     // its overlays first, then pop the route whose session we actually closed.
+    if (controller?.permissionRevoked == true &&
+        !playbackEntryStillAllowed(_auth!, actualOrigin)) {
+      GoRouter.of(context).go(AppRoutes.home, extra: null);
+      return;
+    }
     navigator.popUntil((candidate) => identical(candidate, route));
     navigator.pop();
     if (router != null &&

@@ -1,3 +1,5 @@
+import '../helpers/authenticated_image_fixture.dart';
+
 import 'package:rillight/player/buffered_ranges_track.dart';
 
 import '../helpers/widget_harness.dart';
@@ -84,12 +86,14 @@ void main() {
   late PlayerController controller;
   late AuthController auth;
   late double selected;
+  var entered = false;
 
   setUp(() {
     isolateImageCache();
     selected = 0;
+    entered = false;
     client = _PreviewClient();
-    auth = AuthController.memory(client: client);
+    auth = AuthController.memory();
     controller = PlayerController(
       client: client,
       itemId: 'first',
@@ -103,6 +107,7 @@ void main() {
   tearDown(() {
     controller.dispose();
     auth.dispose();
+    client.clearSession();
     expect(client.hasSession, isFalse);
     expect(client.userId, isNull);
     expect(client.baseUrl, isNull);
@@ -132,6 +137,11 @@ void main() {
   );
 
   Future<void> moveTo(WidgetTester tester, double fraction) async {
+    if (!entered) {
+      auth.dispose();
+      auth = await authenticatedImageFixture(tester, client);
+      entered = true;
+    }
     await tester.pumpWidget(subject(fraction));
     await tester.pump(const Duration(milliseconds: 151));
     // Tile decoding completes through the engine outside the fake clock.
@@ -236,6 +246,7 @@ void main() {
     final pending = Completer<PreviewFrame?>();
     preview.read = (_) => pending.future;
     await moveTo(tester, .5);
+    await tester.runAsync(auth.logout);
     client.clearSession();
     pending.completeError(StateError('Session ended'));
     await settle(tester);

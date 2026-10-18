@@ -1,3 +1,4 @@
+import '../helpers/authenticated_image_fixture.dart';
 import '../helpers/cupertino_test_app.dart';
 
 import 'package:rillight/app/ui/ui.dart' as ui;
@@ -43,7 +44,7 @@ void main() {
       addTearDown(MediaImage.debugResetCacheConfiguration);
       final poster = (await tester.runAsync(() => _imageBytes(320, 480)))!;
       final client = _HeroImageClient(poster);
-      final imageAuth = AuthController.memory(client: client);
+      final imageAuth = await authenticatedImageFixture(tester, client);
       addTearDown(imageAuth.dispose);
       HeroArtworkData? resolved;
       final sources = HeroArtworkSources(
@@ -99,7 +100,7 @@ void main() {
     addTearDown(MediaImage.debugResetCacheConfiguration);
     final bytes = (await tester.runAsync(() => _imageBytes(800, 450)))!;
     final client = _HeroImageClient(bytes, backdrop: bytes);
-    final imageAuth = AuthController.memory(client: client);
+    final imageAuth = await authenticatedImageFixture(tester, client);
     addTearDown(imageAuth.dispose);
     HeroArtworkData? resolved;
     Widget subject({bool prefetch = false}) => CupertinoTestApp(
@@ -139,7 +140,7 @@ void main() {
     resolved = null;
     await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(subject(prefetch: true));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(Image), findsNothing);
     expect(resolved, isNull);
     await tester.pumpWidget(const SizedBox());
@@ -579,7 +580,7 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() ready) async {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
   }
   expect(ready(), isTrue);
 }

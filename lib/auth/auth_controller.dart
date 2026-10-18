@@ -116,6 +116,37 @@ class AuthController extends ChangeNotifier {
     );
   }
 
+  /// The independent playback process receives an already authorized launch,
+  /// not a persisted local login. Its owner must revoke image access alongside
+  /// that launch; ordinary attached clients never acquire this permission.
+  factory AuthController.forPlayback({
+    required MediaServerClient client,
+    required bool Function() isAuthorized,
+    SourceAccount? account,
+  }) {
+    final auth = AuthController.memory(client: client);
+    auth._playbackImageAccess = isAuthorized;
+    auth._playbackImageAccount = account;
+    return auth;
+  }
+
+  bool Function()? _playbackImageAccess;
+  SourceAccount? _playbackImageAccount;
+  MediaServerClient? _playbackImageClient;
+  bool get hasImageAccess =>
+      !_disposed &&
+      _client.hasSession &&
+      (session != null || _playbackImageAccess?.call() == true);
+  SourceAccount? get playbackImageAccount =>
+      hasImageAccess ? _playbackImageAccount : null;
+  MediaServerClient get imageClient => _playbackImageAccess == null
+      ? client
+      : _playbackImageClient ??= _client.withRequestGuard(() {
+          if (!hasImageAccess) {
+            throw StateError('Playback image access revoked');
+          }
+        });
+
   MediaServerClient _client;
   MediaServerClient? _guardedClient;
   Object _contentOwner = Object();
@@ -983,6 +1014,12 @@ class AuthController extends ChangeNotifier {
           authMaterial: stored?.authMaterial ?? const {},
         ),
       );
+      // Saving the new password retires credential leases, even though this
+      // account and its remote token remain the same. Renew the selected lease
+      // before probing that token; a retired guard would mask a real 401.
+      if (identical(_session, session)) {
+        _selectionGuard = sources.selectedSessionGuard(session.server.id);
+      }
       await _verifySessionAfterPasswordChange();
       return true;
     } on MediaServerException catch (error) {
@@ -1223,9 +1260,22 @@ class AuthController extends ChangeNotifier {
       attached.onSessionExpired = expired;
       attached.onRefreshSession = refresh;
       final published = _guardedClient!;
-      published.onSessionExpired = expired;
+      bool ownsContent() =>
+          identical(_contentOwner, contentOwner) &&
+          _session?.server.id == server.id &&
+          _session?.userId == stored.userId &&
+          accessGeneration == serverAccess.generation(server.id) &&
+          serverAccess.allows(server.id);
+      published.onSessionExpired = () {
+        if (ownsContent()) _client.onSessionExpired?.call();
+      };
       published.onRefreshSession = () async {
-        if (!await refresh()) return false;
+        // Long-lived consumers may retain this facade after token renewal.
+        // Delegate to the current session owner, while retaining its original
+        // account and entry lease, so a second renewal is still authorized.
+        if (!ownsContent()) return false;
+        final renew = _client.onRefreshSession;
+        if (renew == null || !await renew()) return false;
         final renewed = _session;
         if (!identical(_contentOwner, contentOwner) ||
             renewed == null ||
@@ -1395,6 +1445,7 @@ class AuthController extends ChangeNotifier {
     _guardedClient?.clearSession();
     _resetLibraryCounts();
     connectDraft = null;
+    _playbackImageClient?.clearSession();
     sources.removeMembershipCleanup(_clearSourceContribution);
     sources.removeSourceRevocation(_sourceChanged);
     sources.dispose();

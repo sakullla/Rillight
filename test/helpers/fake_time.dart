@@ -8,7 +8,7 @@ Future<void> withFakeTime(Future<void> Function() action) async {
   var finished = false;
   final clock = FakeAsync();
   clock.run((_) {
-    action().then(
+    action().then<void>(
       (_) => finished = true,
       onError: (Object error, StackTrace stack) {
         failure = error;

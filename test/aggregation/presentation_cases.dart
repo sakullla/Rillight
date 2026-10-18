@@ -2754,7 +2754,12 @@ void main() {
           f.history.records().single.source.account.configuredServerId,
           f.bId,
         );
-        expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+        if (environment.isTv) {
+          expect(
+            find.byKey(const Key('player-playback-lines')),
+            findsOneWidget,
+          );
+        }
         expect(find.byKey(const Key('player-lock-private')), findsNothing);
         expect(find.text('手动切换'), findsNothing);
         final c = environment.isTv

@@ -7,6 +7,10 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'auth/connect_page_test.dart',
+    caseEntrypoints['auth/connect_page_cases.dart']!,
+  );
+  group(
     'auth/line_management_test.dart',
     caseEntrypoints['auth/line_management_cases.dart']!,
   );
@@ -31,11 +35,7 @@ void main() {
     caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
   );
   group(
-    'mobile/phone_player_interaction_test.dart',
-    caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
-  );
-  group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'mobile/tv_shelf_focus_test.dart',
+    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
   );
 }

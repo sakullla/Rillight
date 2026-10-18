@@ -277,6 +277,55 @@ void main() {
     expect(auth.failure, isNull);
   });
 
+  for (final boundary in ['lock', 'another account']) {
+    test(
+      'retained facade renews repeatedly but cannot cross $boundary',
+      () async {
+        final auth = controller();
+        addTearDown(auth.dispose);
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        final retained = auth.client;
+        for (var renewal = 0; renewal < 3; renewal++) {
+          server.issuedTokens.clear();
+          final oldToken = auth.session!.accessToken;
+          expect(await retained.getViews(), isNotEmpty);
+          expect(auth.session!.accessToken, isNot(oldToken));
+        }
+        if (boundary == 'lock') {
+          final id = auth.session!.server.id;
+          await auth.serverAccess.setPassword(
+            id,
+            'local',
+            'local',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(id, ref),
+          );
+        } else {
+          final other = FakeEmbyServer(
+            baseUrl: Uri.parse('http://other.test:8096'),
+            serverId: 'other-server',
+          );
+          adapter.add(other);
+          await auth.connect(
+            address: other.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+        }
+        // Let the current session's independent library-count request finish.
+        await Future<void>.delayed(Duration.zero);
+        final before = server.requests.length;
+        expect(await retained.onRefreshSession!(), isFalse);
+        await expectLater(retained.getViews(), throwsA(anything));
+        expect(server.requests.length, before);
+      },
+    );
+  }
+
   test('401 without a stored password signs out to the connect form', () async {
     final credentials = MemoryCredentialStore();
     final auth = controller(credentials: credentials);

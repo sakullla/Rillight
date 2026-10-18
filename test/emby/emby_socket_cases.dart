@@ -187,9 +187,7 @@ void main() {
       expect(await cache.lookup(request), isNull, reason: '会话前缀缓存已失效');
       expect(
         store.removedPrefixes,
-        contains(
-          '["emby","ordinary","server-id-1",null,"user-alice",null,null]|',
-        ),
+        contains('["emby","server-id-1",null,"user-alice",null,null]|'),
       );
       expect(store.data, isEmpty);
 
@@ -202,9 +200,7 @@ void main() {
       expect(fullRefreshes, 1);
       expect(
         store.removedPrefixes,
-        contains(
-          '["emby","ordinary","server-id-1",null,"user-alice",null,null]|',
-        ),
+        contains('["emby","server-id-1",null,"user-alice",null,null]|'),
       );
       await socket.stop();
     }),

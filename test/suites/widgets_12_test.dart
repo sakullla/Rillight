@@ -7,31 +7,38 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'app/android_bootstrap_test.dart',
+    caseEntrypoints['app/android_bootstrap_cases.dart']!,
+  );
+  group(
     'app/desktop_scroll_test.dart',
     caseEntrypoints['app/desktop_scroll_cases.dart']!,
   );
   group(
-    'auth/library_counts_test.dart',
-    caseEntrypoints['auth/library_counts_cases.dart']!,
+    'app/startup_history_recovery_test.dart',
+    caseEntrypoints['app/startup_history_recovery_cases.dart']!,
   );
   group(
-    'library/episode_list_scroll_test.dart',
-    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
+    'auth/provider_connect_dialog_test.dart',
+    caseEntrypoints['auth/provider_connect_dialog_cases.dart']!,
+  );
+  group(
+    'auth/provider_connect_routing_test.dart',
+    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
+  );
+  group(
+    'mobile/motion_behaviors_test.dart',
+    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 3]',
     caseEntrypoints['mobile/phone_pages_cases.dart#2']!,
   );
+  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
   group(
-    'mobile/tv_shell_navigation_test.dart',
-    caseEntrypoints['mobile/tv_shell_navigation_cases.dart']!,
+    'widgets/app_empty_view_test.dart',
+    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
   );
-  group(
-    'tv/tv_detail_test.dart [part 1]',
-    caseEntrypoints['tv/tv_detail_cases.dart#0']!,
-  );
-  group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
-  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
   group(
     'widgets/app_hover_card_test.dart',
     caseEntrypoints['widgets/app_hover_card_cases.dart']!,

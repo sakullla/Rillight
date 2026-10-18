@@ -474,7 +474,13 @@ void main() {
       await tvPress(tester, const Key('server-more-remove'));
       await tvPress(tester, const Key('server-remove-confirm'));
       expect(auth.savedServers.any((s) => s.id == id), isFalse);
-      expect(find.byKey(const Key('tv-connect-servers')), findsOneWidget);
+      expect(auth.isLoggedIn, isFalse);
+      expect(find.byType(TvServerSelectionPage), findsOneWidget);
+      final remaining = auth.savedServers.single.id;
+      expect(find.byKey(Key('server-enter-$remaining')), findsOneWidget);
+      await tvPress(tester, Key('server-enter-$remaining'));
+      expect(auth.session!.server.id, remaining);
+      expect(find.byKey(const Key('tv-nav-user')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

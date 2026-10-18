@@ -68,7 +68,14 @@ class DetailController extends ChangeNotifier {
           _sourceClient.accessToken,
         );
   void _onAuth() {
-    if (_identity == _currentIdentity) return;
+    if (_identity == _currentIdentity) {
+      // A renewed token publishes a new guarded facade without changing the
+      // displayed account or item. Future operations use that current facade.
+      if (_sourceClient == null && !identical(repository.client, auth.client)) {
+        repository = DetailRepository(auth.client, _cache);
+      }
+      return;
+    }
     _resumeCancel?.cancel('detail-identity-changed');
     _identity = _currentIdentity;
     if (_sourceClient == null) {

@@ -12,16 +12,8 @@ void main() {
   );
   group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
-    'catalog/catalog_browse_test.dart',
-    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
-  );
-  group(
     'library/episode_row_test.dart',
     caseEntrypoints['library/episode_row_cases.dart']!,
-  );
-  group(
-    'library/source_detail_route_test.dart [part 2]',
-    caseEntrypoints['library/source_detail_route_cases.dart#1']!,
   );
   group(
     'mobile/phone_detail_redesign_test.dart',
@@ -32,15 +24,23 @@ void main() {
     caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'mobile/search_cached_refresh_test.dart',
-    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
-  );
-  group(
     'player/playback_overlay_widgets_test.dart',
     caseEntrypoints['player/playback_overlay_widgets_cases.dart']!,
   );
   group(
-    'widgets/liquid_glass_test.dart',
-    caseEntrypoints['widgets/liquid_glass_cases.dart']!,
+    'player/subtitle_menu_test.dart',
+    caseEntrypoints['player/subtitle_menu_cases.dart']!,
+  );
+  group(
+    'tv/tv_detail_test.dart [part 1]',
+    caseEntrypoints['tv/tv_detail_cases.dart#0']!,
+  );
+  group(
+    'tv/tv_lan_pair_test.dart [part 2]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
+  );
+  group(
+    'widgets/artwork_crop_test.dart',
+    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
   );
 }

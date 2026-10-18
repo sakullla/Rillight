@@ -98,6 +98,13 @@ void main() {
             findsNothing,
           );
           expect(find.byType(ui.AppDialog), findsNothing);
+          if (!environment.isTv) {
+            await tester.ensureVisible(
+              find.byKey(const Key('provider-advanced')),
+            );
+            await tester.tap(find.byKey(const Key('provider-advanced')));
+            await settle(tester);
+          }
           final input = find.byKey(const Key('provider-user-agent'));
           expect(input, findsOneWidget);
           final controller =

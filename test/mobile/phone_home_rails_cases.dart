@@ -958,7 +958,7 @@ void main() {
         );
         expect(find.byType(CupertinoNavigationBar), findsNothing);
         expect(
-          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'),
+          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。'),
           findsOneWidget,
         );
 
@@ -1169,7 +1169,7 @@ Future<_ShelfHarness> _pumpShelf(
   );
   final inner = FakeEmbyAdapter([server]);
   final hold = _HoldAdapter(inner);
-  final dio = dioForFakeEmby(inner);
+  final dio = dioForFakeEmby(inner)..httpClientAdapter = hold;
   final auth = AuthController.memory(
     client: EmbyClient(device: _device, dio: dio),
   );
@@ -1182,7 +1182,6 @@ Future<_ShelfHarness> _pumpShelf(
       password: 'correct-horse',
     );
   });
-  dio.httpClientAdapter = hold;
   hold.holdLists = true;
   await tester.pumpWidget(
     AuthScope(

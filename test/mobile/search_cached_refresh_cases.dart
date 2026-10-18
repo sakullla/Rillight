@@ -91,7 +91,7 @@ void main() {
         addTearDown(() {
           if (!release.isCompleted) release.complete();
         });
-        dio.interceptors.add(
+        fakeEmbyTransport(dio).interceptors.add(
           InterceptorsWrapper(
             onRequest: (options, handler) async {
               if (!held &&

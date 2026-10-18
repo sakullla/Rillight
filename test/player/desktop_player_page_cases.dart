@@ -1,3 +1,5 @@
+import 'package:rillight/media_image/media_image.dart';
+
 import '../helpers/widget_harness.dart';
 
 import 'package:rillight/media_server/device.dart';
@@ -150,6 +152,36 @@ void main() {
     }
     return ready;
   }
+
+  testWidgets('independent player authorizes images only for its live launch', (
+    tester,
+  ) async {
+    try {
+      final current = await openPlayer(
+        tester,
+        FakeVideoBackend(),
+        itemId: 'movie-inception',
+        independentWindow: true,
+      );
+      final auth = AuthScope.of(tester.element(find.byType(PlayerPage)));
+      expect(auth.session, isNull);
+      expect(mediaImageAccountScope(auth), isNotNull);
+      final bytes = await tester.runAsync(
+        () => auth.imageClient.getItemImage('movie-inception'),
+      );
+      expect(bytes, kTinyPng);
+      await tester.runAsync(() => current.revokeFromHost(reportStopped: false));
+      expect(mediaImageAccountScope(auth), isNull);
+      await tester.runAsync(() async {
+        await expectLater(
+          auth.imageClient.getItemImage('movie-inception'),
+          throwsA(anything),
+        );
+      });
+    } finally {
+      clearDesktopOverrides();
+    }
+  }, tags: ['integration']);
 
   testWidgets('independent Cupertino player edits saved danmaku keywords', (
     tester,
