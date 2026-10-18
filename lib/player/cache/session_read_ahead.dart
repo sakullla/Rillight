@@ -107,6 +107,13 @@ class SessionReadAhead {
       maxConcurrentTransfers > 1 ? blockBytes ~/ 2 : blockBytes;
   bool get hasParallelTransfers => _concurrency > 1 && _jobs.length > 1;
 
+  /// A rate-limited origin can finish existing lanes on the serialized client;
+  /// only one lane may be scheduled afterwards. Keep all published bytes.
+  void limitConcurrency(String reason) {
+    _concurrency = 1;
+    _concurrencyFallback = reason;
+  }
+
   /// Let an uncached index/subtitle request use a single-stream server. Keep
   /// playback readers alive; the pool queues the restarted producer behind it.
   Future<void Function()> yieldToForeground({String? refusal}) async {
@@ -395,6 +402,7 @@ class SessionReadAhead {
       while (_active &&
           !_closed &&
           !_failed &&
+          lane < _concurrency &&
           reader == _producerEpoch &&
           (_prefetchAllowed || _readerWaiting)) {
         await _reclaimConsumed();

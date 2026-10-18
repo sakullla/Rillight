@@ -1111,9 +1111,7 @@ void main() {
               : event.kind == VideoEventKind.error &&
                     event.value is PlaybackRecoveryFailure &&
                     (event.value as PlaybackRecoveryFailure).kind ==
-                        (status == 403
-                            ? PlaybackRecoveryFailureKind.forbidden
-                            : PlaybackRecoveryFailureKind.rateLimited),
+                        PlaybackRecoveryFailureKind.rateLimited,
         );
         final opening = backend.open(
           VideoOpenRequest(
@@ -1141,6 +1139,71 @@ void main() {
       },
     );
   }
+  cases.test(
+    'transient 403 backoff does not emit permission or rate-limit failure',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var requests = 0;
+      final waiting = Completer<void>();
+      final release = Completer<void>();
+      upstream.listen((request) async {
+        requests++;
+        if (requests == 2) {
+          waiting.complete();
+          await release.future;
+        }
+        request.response.statusCode = requests == 1 ? 403 : 200;
+        if (requests > 1) request.response.add(List<int>.filled(1024, 7));
+        await request.response.close();
+      });
+      final driver = _PendingOpenCoreDriver();
+      final backend = RillightVideoBackend(
+        waitForRetry: _retryImmediately,
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      final failures = <VideoBackendEvent>[];
+      final events = backend.events.listen((event) {
+        if (event.kind == VideoEventKind.error ||
+            event.kind == VideoEventKind.authenticationRequired ||
+            event.kind == VideoEventKind.sourceRefreshRequired) {
+          failures.add(event);
+        }
+      });
+      final opening = backend.open(
+        VideoOpenRequest(
+          sessionId: 81,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/media'),
+        ),
+      );
+      try {
+        await waiting.future.timeout(const Duration(seconds: 3));
+        // Leave the second response pending across diagnostic timer polls.
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        final data = await backend.diagnostics();
+        expect(data['lastMediaUpstreamStatus'], 403);
+        expect(data['authenticationStatus'], isNull);
+        expect(data['rateLimitStatus'], isNull);
+        expect(requests, 2);
+        expect(failures, isEmpty);
+        release.complete();
+        driver.releaseOpen.complete();
+        await opening.timeout(const Duration(seconds: 3));
+        expect(requests, 2);
+        expect(failures, isEmpty);
+        expect((await backend.diagnostics())['authenticationStatus'], isNull);
+      } finally {
+        if (!release.isCompleted) release.complete();
+        if (!driver.releaseOpen.isCompleted) driver.releaseOpen.complete();
+        await opening;
+        await events.cancel();
+        await backend.dispose();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
   cases.test(
     'session reset clears stale cache speed before open failure',
     () async {

@@ -1284,7 +1284,7 @@ void main() {
         if (status == 403) {
           expect(
             PlaybackRecoveryCoordinator.classify(player.loadFailure!),
-            PlaybackRecoveryFailureKind.forbidden,
+            PlaybackRecoveryFailureKind.rateLimited,
           );
         }
         expect(backend.opens, [a.baseUrl.host]);

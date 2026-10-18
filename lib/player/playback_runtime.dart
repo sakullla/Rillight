@@ -714,6 +714,7 @@ class PlaybackRuntime {
         !canRecoverSnapshot(value) ||
         error is PlaybackCleanupRevoked ||
         (error is MediaServerException &&
+            error.statusCode != 403 &&
             const {
               MediaServerFailureKind.forbidden,
               MediaServerFailureKind.invalidCredentials,

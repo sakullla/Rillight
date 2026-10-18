@@ -184,7 +184,7 @@ void main() {
           expect(fixture.counts['/c.ts'], isNull);
           expect(fixture.proxy.diagnostics['segmentPrefetchRefusal'], status);
           expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
-          expect(fixture.proxy.diagnostics['serialUpstream'], isFalse);
+          expect(fixture.proxy.diagnostics['serialUpstream'], status == 403);
         } finally {
           await fixture.close();
         }

@@ -249,7 +249,7 @@ void main() {
   );
 
   cases.test(
-    'untagged foreground 403 preserves permission failure without retry',
+    'untagged foreground 403 retries serially and resumes the requested range',
     () async {
       final fixture = await _Direct.open(refuseSecond: true);
       try {
@@ -258,10 +258,11 @@ void main() {
         final request = await fixture.client.getUrl(fixture.uri);
         request.headers.set('range', 'bytes=${12 * _mib}-');
         final response = await request.close();
-        expect(response.statusCode, 403);
+        expect(response.statusCode, 206);
         await response.drain<void>();
-        expect(fixture.requests, 2);
-        expect(fixture.proxy.diagnostics['authenticationStatus'], 403);
+        expect(fixture.requests, 3);
+        expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+        expect(fixture.proxy.diagnostics['serialUpstream'], true);
         await first.cancel();
       } finally {
         await fixture.close();

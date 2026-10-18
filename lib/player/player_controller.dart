@@ -564,7 +564,19 @@ class PlayerController extends ChangeNotifier {
   DateTime? _slowSince;
   DateTime _lastPlaybackUi = DateTime.fromMillisecondsSinceEpoch(0);
   PlayerErrorKind? error;
-  MediaServerException? loadFailure;
+  MediaServerException? _loadFailure;
+  MediaServerException? get loadFailure => _loadFailure;
+  set loadFailure(MediaServerException? value) {
+    _loadFailure = value?.statusCode == 403
+        ? MediaServerException(
+            MediaServerFailureKind.rateLimited,
+            statusCode: 403,
+            detail: value!.detail,
+            cause: value,
+          )
+        : value;
+  }
+
   SubtitleNoticeKind? subtitleNotice;
   NextEpisodeOffer? nextEpisode;
   bool playbackEnded = false;

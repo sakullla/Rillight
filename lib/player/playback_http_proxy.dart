@@ -248,6 +248,8 @@ class PlaybackHttpProxy {
   int _mediaResponseHeaders = 0;
   DateTime? _retryAfterDeadline;
   int? _authenticationStatus;
+  int? _rateLimitStatus;
+  int? _prefetchRateLimitStatus;
   String? _terminalRecoveryFailure;
   int? _prefetchAuthenticationStatus;
   int _inFlight = 0;
@@ -292,12 +294,13 @@ class PlaybackHttpProxy {
       _discardBufferedResponse();
     }
     _prefetchAuthenticationStatus = null;
+    _prefetchRateLimitStatus = null;
+    _rateLimitStatus = null;
     if (_lastMediaUpstreamStatus == 403) _lastMediaUpstreamStatus = null;
     if (_warmIdentity == resource.identity) {
       _warmPrefix = null;
       _warmIdentity = null;
     }
-    if (_authenticationStatus == 403) _authenticationStatus = null;
     _readAheadBypass.remove(resource.identity);
     _readAheadBypassReason = null;
     if (_readAhead?.resource == resource.identity) {
@@ -561,6 +564,8 @@ class PlaybackHttpProxy {
               _retryAfterDeadline!.difference(DateTime.now()).inMilliseconds,
             ),
       'authenticationStatus': _authenticationStatus,
+      'rateLimitStatus': _rateLimitStatus,
+      'prefetchRateLimitStatus': _prefetchRateLimitStatus,
       'terminalRecoveryFailure': _terminalRecoveryFailure,
       'prefetchAuthenticationStatus': _prefetchAuthenticationStatus,
       'hlsResourceExpiries': _hlsResourceExpiries,
@@ -1516,6 +1521,8 @@ class PlaybackHttpProxy {
         await pending;
       } on _MediaAuthenticationFailure {
         rethrow;
+      } on _MediaRateLimitedFailure {
+        rethrow;
       } catch (_) {
         // Another reader may have cancelled the optional import.
       }
@@ -1596,6 +1603,8 @@ class PlaybackHttpProxy {
     try {
       await task;
     } on _MediaAuthenticationFailure {
+      rethrow;
+    } on _MediaRateLimitedFailure {
       rethrow;
     } catch (_) {
       read.check();
@@ -1820,7 +1829,7 @@ class PlaybackHttpProxy {
       status == 408 || status == 429 || status >= 500 && status <= 599;
 
   static bool _authorizationStatus(int status) =>
-      status == HttpStatus.unauthorized || status == HttpStatus.forbidden;
+      status == HttpStatus.unauthorized;
 
   static void _checkAuthorization(int status) {
     if (_authorizationStatus(status)) {
@@ -1889,6 +1898,78 @@ class PlaybackHttpProxy {
   }
 
   Future<(HttpClientResponse, Uri)> _fetchOnce(
+    HttpRequest incoming,
+    Uri url, {
+    required bool allowRange,
+    required _ProxyRead read,
+    String? method,
+    required Map<String, String?> overrides,
+    bool reportAuthentication = true,
+  }) async {
+    final speculative =
+        read.readAheadProducer ||
+        incoming.headers.value('x-rillight-prefetch') == '1';
+    for (var attempt = 0; ; attempt++) {
+      final result = await _fetchAttempt(
+        incoming,
+        url,
+        allowRange: allowRange,
+        read: read,
+        method: method,
+        overrides: overrides,
+        reportAuthentication: reportAuthentication,
+      );
+      final response = result.$1;
+      // HEAD compatibility is validated separately by a tiny conditional GET.
+      if (response.statusCode != HttpStatus.forbidden ||
+          (method ?? incoming.method) == 'HEAD') {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          if (attempt > 0) _recoveries++;
+          if (speculative) {
+            _prefetchRateLimitStatus = null;
+          } else {
+            _rateLimitStatus = null;
+          }
+        }
+        return result;
+      }
+      _useSerialUpstream();
+      _readAhead?.limitConcurrency('http-403');
+      if (speculative) _prefetchRateLimitStatus = 403;
+      // Stop optional HLS speculation. A foreground demand gets its own bounded
+      // retry, without competing with a speculative request for the same bytes.
+      if (incoming.headers.value('x-rillight-prefetch') == '1') return result;
+      await _retireRejectedResponse(response, read);
+      for (final request in read.requests.toList()) {
+        request.abort();
+      }
+      read.requests.clear();
+      try {
+        // Only a recognized expired signature permits the provider's one-shot
+        // renewal. Unknown 403 responses follow this server's rate-limit policy.
+        if (attempt == 5 || isExpiredPlaybackUrl(result.$2)) {
+          throw const _MediaRecoveryExhausted();
+        }
+        await _backoff(
+          attempt,
+          DateTime.now(),
+          read,
+          retryAfter: _retryAfter(response.headers.value('retry-after')),
+        );
+        _recoveryAttempts++;
+      } on _MediaRecoveryExhausted {
+        if (!speculative) _rateLimitStatus = 403;
+        _recoveryFailures++;
+        throw const _MediaRateLimitedFailure();
+      } on TimeoutException {
+        if (!speculative) _rateLimitStatus = 403;
+        _recoveryFailures++;
+        throw const _MediaRateLimitedFailure();
+      }
+    }
+  }
+
+  Future<(HttpClientResponse, Uri)> _fetchAttempt(
     HttpRequest incoming,
     Uri url, {
     required bool allowRange,
@@ -2022,7 +2103,8 @@ class PlaybackHttpProxy {
         }
         // A bare 403 is not evidence of an expired URL. Only the provider's
         // coordinator may classify and refresh a temporary playback URL.
-        if (response.statusCode == HttpStatus.tooManyRequests) {
+        if (response.statusCode == HttpStatus.tooManyRequests ||
+            response.statusCode == HttpStatus.forbidden) {
           final delay = _retryAfter(response.headers.value('retry-after'));
           _retryAfterDeadline = delay == null
               ? null
@@ -2041,8 +2123,7 @@ class PlaybackHttpProxy {
         if (reportAuthentication &&
             !speculative &&
             role != PlaybackResourceRole.subtitle &&
-            (response.statusCode == HttpStatus.unauthorized ||
-                response.statusCode == HttpStatus.forbidden)) {
+            _authorizationStatus(response.statusCode)) {
           _authenticationStatus = response.statusCode;
         }
         final location = response.headers.value(HttpHeaders.locationHeader);
@@ -2382,7 +2463,12 @@ class PlaybackHttpProxy {
                       response.statusCode != 206) {
                     final denied = _authorizationStatus(response.statusCode);
                     if (denied ||
-                        const [409, 429, 503].contains(response.statusCode)) {
+                        const [
+                          403,
+                          409,
+                          429,
+                          503,
+                        ].contains(response.statusCode)) {
                       _segmentPrefetchRefusal = response.statusCode;
                       if (!denied) _useSerialUpstream();
                       _cancelSegmentPrefetch(clearPending: true);
@@ -2750,8 +2836,7 @@ class PlaybackHttpProxy {
                 'if-modified-since': null,
               },
             );
-            if (response.statusCode == HttpStatus.unauthorized ||
-                response.statusCode == HttpStatus.forbidden) {
+            if (_authorizationStatus(response.statusCode)) {
               // A denied cache gap is still the foreground request. Do not
               // turn it into a second request through the uncached fallback.
               throw _MediaAuthenticationFailure(response.statusCode);
@@ -3275,6 +3360,9 @@ class PlaybackHttpProxy {
         } on _MediaAuthenticationFailure catch (failure) {
           _authenticationStatus = failure.status;
           rethrow;
+        } on _MediaRateLimitedFailure {
+          _rateLimitStatus = 403;
+          rethrow;
         }
       }
 
@@ -3286,7 +3374,10 @@ class PlaybackHttpProxy {
         read.cancel();
         rethrow;
       } catch (error) {
-        if (error is _MediaAuthenticationFailure) rethrow;
+        if (error is _MediaAuthenticationFailure ||
+            error is _MediaRateLimitedFailure) {
+          rethrow;
+        }
         if (!read.outputStarted && !read.cancelled) {
           if (error is TimeoutException && !ahead.failed) {
             // A foreground deadline is not evidence that this representation
@@ -4836,6 +4927,8 @@ class PlaybackHttpProxy {
           output.headers.removeAll('content-range');
           output.statusCode = error is _MediaAuthenticationFailure
               ? error.status
+              : error is _MediaRateLimitedFailure
+              ? HttpStatus.forbidden
               : HttpStatus.badGateway;
         }
       } catch (_) {}
@@ -5245,6 +5338,10 @@ class _MediaAuthenticationFailure implements Exception {
   final int status;
 }
 
+class _MediaRateLimitedFailure implements Exception {
+  const _MediaRateLimitedFailure();
+}
+
 class _Representation {
   _Representation({
     required this.generation,
@@ -5558,7 +5655,17 @@ class _ForegroundResponse extends StreamView<List<int>>
   @override
   HttpConnectionInfo? get connectionInfo => response.connectionInfo;
   @override
-  Future<Socket> detachSocket() => response.detachSocket();
+  Future<Socket> detachSocket() async {
+    try {
+      return await response.detachSocket();
+    } finally {
+      // Rejected responses retire their socket without subscribing to _body.
+      // Release that foreground lease as well, so bounded retries cannot keep
+      // read-ahead suspended after the server becomes available again.
+      releaseReadAhead();
+    }
+  }
+
   @override
   Future<HttpClientResponse> redirect([
     String? method,

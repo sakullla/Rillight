@@ -4,7 +4,7 @@ import 'dart:io';
 import '../media_server/errors.dart';
 
 /// A bare HTTP 403 cannot prove URL expiry. Recognize only signed URL formats
-/// with an explicit elapsed deadline; unknown formats keep permission semantics.
+/// with an explicit elapsed deadline; unknown formats follow rate-limit policy.
 bool isExpiredPlaybackUrl(Uri? url, {DateTime? now}) {
   if (url == null) return false;
   final query = url.queryParameters;
@@ -301,6 +301,9 @@ class PlaybackRecoveryCoordinator {
     if (error is MediaServerException) {
       if (error.statusCode == 401) {
         return PlaybackRecoveryFailureKind.unauthorized;
+      }
+      if (error.statusCode == 403) {
+        return PlaybackRecoveryFailureKind.rateLimited;
       }
       return switch (error.kind) {
         MediaServerFailureKind.authorizationExpired ||

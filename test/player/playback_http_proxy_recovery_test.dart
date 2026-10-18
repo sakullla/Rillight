@@ -167,7 +167,9 @@ void main() {
         server.listen((request) async {
           requests++;
           request.response.statusCode = status;
-          if (status == 429) request.response.headers.set('retry-after', '90');
+          if (status == 403 || status == 429) {
+            request.response.headers.set('retry-after', '90');
+          }
           await request.response.close();
         });
         final proxy = await PlaybackHttpProxy.create(
@@ -218,4 +220,42 @@ void main() {
       }
     },
   );
+
+  test('403 backoff cancellation prevents another upstream request', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    var requests = 0;
+    server.listen((request) async {
+      requests++;
+      request.response.statusCode = 403;
+      await request.response.close();
+    });
+    final waiting = Completer<void>();
+    final release = Completer<void>();
+    final budget = PlaybackRecoveryBudget();
+    final proxy = await PlaybackHttpProxy.create(
+      recoveryBudget: budget,
+      waitForRetry: (_) {
+        if (!waiting.isCompleted) waiting.complete();
+        return release.future;
+      },
+    );
+    final client = HttpClient();
+    try {
+      final read = _read(
+        client,
+        proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+      );
+      await waiting.future.timeout(const Duration(seconds: 2));
+      budget.cancel();
+      await read.timeout(const Duration(seconds: 1));
+      expect(requests, 1);
+      expect(proxy.diagnostics['authenticationStatus'], isNull);
+      expect(proxy.diagnostics['serialUpstream'], true);
+    } finally {
+      release.complete();
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
 }

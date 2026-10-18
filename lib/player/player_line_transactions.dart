@@ -1097,6 +1097,9 @@ extension PlayerLineTransactions on PlayerController {
   }
 
   String _lineFailureText(Object failure) {
+    if (failure is MediaServerException && failure.statusCode == 403) {
+      return '服务器请求过多，请稍后重试';
+    }
     if (failure is _PlaybackContentFailure) {
       return failure.error == PlayerErrorKind.noStream ? '没有可播放的流' : '此项目无法播放';
     }

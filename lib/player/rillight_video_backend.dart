@@ -993,7 +993,11 @@ class RillightVideoBackend extends VideoBackend
     }
     final status =
         data['authenticationStatus'] ?? data['lastMediaUpstreamStatus'];
-    if (status == 429) {
+    if (status == 429 ||
+        status == 403 && !isExpiredPlaybackUrl(_lastOpenRequest?.url)) {
+      // A diagnostic poll may observe a transient 403 while transport is still
+      // backing off. Only exhaustion/demand failure ends playback recovery.
+      if (status == 403 && data['rateLimitStatus'] != 403) return;
       _authenticationReported = true;
       _emit(
         VideoEventKind.error,
@@ -1019,13 +1023,6 @@ class RillightVideoBackend extends VideoBackend
             generation,
           );
         }
-      } else {
-        _authenticationReported = true;
-        _emit(
-          VideoEventKind.error,
-          const PlaybackRecoveryFailure(PlaybackRecoveryFailureKind.forbidden),
-          generation,
-        );
       }
       return;
     }
@@ -1063,7 +1060,7 @@ class RillightVideoBackend extends VideoBackend
     }
     final rejectedSource =
         data['readAheadFailed'] == true &&
-        ((data['prefetchAuthenticationStatus'] == 403 &&
+        ((data['prefetchRateLimitStatus'] == 403 &&
                 isExpiredPlaybackUrl(_lastOpenRequest?.url)) ||
             const {
               'producer:HttpException',
