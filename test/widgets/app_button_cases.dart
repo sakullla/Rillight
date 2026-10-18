@@ -42,7 +42,13 @@ void main() {
           final resolved = _radius(tester);
           radius ??= resolved;
           expect(resolved, radius);
-          expect(resolved, BorderRadius.circular(AppRadii.md));
+          // 纯文本/图标按钮是圆角矩形,有底色或描边的按钮是胶囊。
+          expect(
+            resolved,
+            BorderRadius.circular(
+              variant == AppButtonVariant.plain ? AppRadii.md : AppRadii.pill,
+            ),
+          );
         }
       }
     }
@@ -433,7 +439,12 @@ AppButton _withFocus(AppButton button, FocusNode node) {
   );
 }
 
-Color _fill(WidgetTester tester) => _decoration(tester).color!;
+/// 实底主按钮铺品牌渐变,以渐变起点作为它的底色。
+Color _fill(WidgetTester tester) {
+  final decoration = _decoration(tester);
+  return decoration.color ??
+      (decoration.gradient! as LinearGradient).colors.first;
+}
 
 BorderSide _side(WidgetTester tester) =>
     (_decoration(tester).shape as OutlinedBorder).side;

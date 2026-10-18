@@ -459,11 +459,13 @@ extension PageCaptures on CaptureSession {
           final base = scheme.brightness == Brightness.dark
               ? AppUiTheme.dark().colorScheme
               : AppUiTheme.light().colorScheme;
+          // 海报取色只染表面与色调容器,主操作保持品牌色。
           expect(
-            scheme.primary,
-            isNot(base.primary),
+            scheme.primaryContainer,
+            isNot(base.primaryContainer),
             reason: 'The $tone genre capture must show resolved artwork colors',
           );
+          expect(scheme.primary, base.primary);
           await save('detail-genres-$tone');
           server.items.removeWhere((item) => item.id == id);
         }

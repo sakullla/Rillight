@@ -2079,7 +2079,7 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('phone detail play button follows the artwork palette', (
+  testWidgets('phone detail play button keeps the brand color over artwork', (
     tester,
   ) async {
     ContentTheme.debugClear();
@@ -2109,15 +2109,21 @@ void main() {
     }
 
     final phone = AppUiTheme.phoneLight().colorScheme;
-    for (var i = 0; i < 20 && buttonColor() == phone.primary; i++) {
+    AppColorScheme themed() => AppUiTheme.of(tester.element(play)).colorScheme;
+    for (
+      var i = 0;
+      i < 20 && themed().primaryContainer == phone.primaryContainer;
+      i++
+    ) {
       await tester.pump(const Duration(milliseconds: 50));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 10)),
       );
     }
-    final themed = AppUiTheme.of(tester.element(play)).colorScheme;
-    expect(buttonColor(), themed.primary);
-    expect(themed.primary, isNot(phone.primary));
+    // 海报取色已生效(色调容器换了),主播放钮仍是品牌色。
+    expect(themed().primaryContainer, isNot(phone.primaryContainer));
+    expect(buttonColor(), themed().primary);
+    expect(themed().primary, phone.primary);
     expect(buttonColor(), isNot(phone.inverseSurface));
     expect(
       tester

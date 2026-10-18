@@ -35,8 +35,13 @@ void main() {
             await app_ui.contentPaletteFromBytes(Uint8List(0), base),
           ],
         );
-        expect(schemes!.take(3).map((s) => s.primary).toSet(), hasLength(3));
+        // 海报只染表面与色调容器;主操作色保持品牌色。
+        expect(
+          schemes!.take(3).map((s) => s.primaryContainer).toSet(),
+          hasLength(3),
+        );
         for (final scheme in schemes) {
+          expect(scheme.primary, base.primary);
           expect(scheme.error, base.error);
           expect(scheme.brightness, base.brightness);
           expect(_contrast(scheme.onPrimary, scheme.primary), greaterThan(4.5));
@@ -86,7 +91,10 @@ void main() {
     report.report('episode-1', 'shared-backdrop', bytes);
     await _settlePalette(tester);
     final resolved = scheme;
-    expect(resolved.primary, isNot(AppUiTheme.dark().colorScheme.primary));
+    expect(
+      resolved.primaryContainer,
+      isNot(AppUiTheme.dark().colorScheme.primaryContainer),
+    );
     await tester.pumpWidget(page('episode-2', 'shared'));
     expect(scheme, resolved);
     await tester.pumpWidget(page('episode-2', 'replacement'));
@@ -127,7 +135,10 @@ void main() {
     expect(scheme, AppUiTheme.dark().colorScheme);
     expect(builds, before);
     await _settlePalette(tester);
-    expect(scheme.primary, isNot(AppUiTheme.dark().colorScheme.primary));
+    expect(
+      scheme.primaryContainer,
+      isNot(AppUiTheme.dark().colorScheme.primaryContainer),
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -208,8 +219,9 @@ void main() {
         expect(background, scheme.surfaceContainerHigh);
         expect(labelColor('动作冒险'), scheme.onSurface);
         expect(_contrast(labelColor('动作冒险'), background), greaterThan(4.5));
-        expect(chipDecoration('已选择').color, scheme.primaryContainer);
-        expect(labelColor('已选择'), scheme.onPrimaryContainer);
+        // 选中统一用实底主色表达。
+        expect(chipDecoration('已选择').color, scheme.primary);
+        expect(labelColor('已选择'), scheme.onPrimary);
         expect(chipDecoration('不可用').color, scheme.surfaceContainerHigh);
         focus.requestFocus();
         await settle(tester);
@@ -278,7 +290,11 @@ void main() {
       });
       expect(schemes!.take(3).map((s) => s.surface).toSet(), hasLength(3));
       expect(schemes.first.brightness, brightness);
-      expect(schemes.first.primary.r, greaterThan(schemes.first.primary.b));
+      expect(
+        schemes.first.primaryContainer.r,
+        greaterThan(schemes.first.primaryContainer.b),
+      );
+      expect(schemes.first.primary, base.primary);
       expect(schemes.first.error, base.error);
       expect(schemes.first.surfaceTint, const Color(0x00000000));
       expect(
