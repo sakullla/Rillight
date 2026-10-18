@@ -496,8 +496,8 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
             widget.child,
             if (widget.showComparison)
               Positioned(
-                right: 16,
-                bottom: 24,
+                right: AppSpacing.page,
+                bottom: AppSpacing.xl,
                 child: SourceSelectionAction(itemId: widget.itemId),
               ),
           ],
@@ -527,8 +527,8 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
           widget.child,
           if (widget.showComparison)
             const Positioned(
-              right: 16,
-              bottom: 24,
+              right: AppSpacing.page,
+              bottom: AppSpacing.xl,
               child: SourceSelectionAction(),
             ),
         ],

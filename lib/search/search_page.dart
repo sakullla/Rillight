@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
@@ -255,14 +257,30 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _buildBody(AppLocalizations l10n, double screenWidth) {
     if (_search.refreshingFirstPage && _items.isEmpty) {
-      return SkeletonPosterGrid(
-        maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(screenWidth),
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.page,
-          AppSpacing.xs,
-          AppSpacing.page,
-          AppSpacing.xxl,
-        ),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // 与结果网格同一几何:同列数、同行高,消除骨架→结果的跳动。
+          final geometry = ShelfGridPage.gridGeometryFor(
+            screenWidth: screenWidth,
+            availableWidth: math.max(
+              1,
+              constraints.maxWidth - AppSpacing.page * 2,
+            ),
+            labelExtent: MediaShelf.posterLabelExtentFor(context),
+          );
+          return SkeletonPosterGrid(
+            key: const Key('desktop-search-loading'),
+            crossAxisCount: geometry.crossAxisCount,
+            mainAxisExtent: geometry.mainAxisExtent,
+            radius: BorderRadius.circular(AppRadii.card),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              AppSpacing.xs,
+              AppSpacing.page,
+              AppSpacing.xxl,
+            ),
+          );
+        },
       );
     }
     if (_error != null && _items.isEmpty) {

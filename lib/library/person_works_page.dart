@@ -179,17 +179,29 @@ class _PersonDesktopWorks extends StatelessWidget {
 
   Widget _body(BuildContext context, AppLocalizations l10n) {
     if (works.loading && works.items.isEmpty) {
-      return SkeletonPosterGrid(
-        key: PersonWorksPage.loadingKey,
-        maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(
-          MediaQuery.sizeOf(context).width,
-        ),
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.page,
-          AppSpacing.xs,
-          AppSpacing.page,
-          AppSpacing.xxl,
-        ),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final geometry = ShelfGridPage.gridGeometryFor(
+            screenWidth: MediaQuery.sizeOf(context).width,
+            availableWidth: math.max(
+              1,
+              constraints.maxWidth - AppSpacing.page * 2,
+            ),
+            labelExtent: MediaShelf.posterLabelExtentFor(context),
+          );
+          return SkeletonPosterGrid(
+            key: PersonWorksPage.loadingKey,
+            crossAxisCount: geometry.crossAxisCount,
+            mainAxisExtent: geometry.mainAxisExtent,
+            radius: BorderRadius.circular(AppRadii.card),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              AppSpacing.xs,
+              AppSpacing.page,
+              AppSpacing.xxl,
+            ),
+          );
+        },
       );
     }
     if (works.error != null && works.items.isEmpty) {

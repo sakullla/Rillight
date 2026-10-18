@@ -7,9 +7,44 @@ import 'login_widgets.dart';
 import 'server_list_store.dart';
 import 'server_ui.dart';
 
-String serverLineLabel(ServerLine line) =>
-    line.nickname?.trim().isNotEmpty == true ? line.nickname! : line.hostLabel;
+/// 列表里的紧凑主机名:超长时省略中间的主机部分并加省略号,
+/// 避免整串地址把线路芯片撑爆成 "captur…"。完整地址仍见于编辑页。
+String serverLineHostLabel(ServerLine line) {
+  final uri = Uri.tryParse(line.address);
+  final host = (uri?.host.isNotEmpty == true ? uri!.host : line.hostLabel)
+      .trim();
+  final port = uri?.hasPort == true ? uri!.port : null;
+  // 默认端口不重复显示;hostLabel 本身已带端口时也不再追加。
+  final tail = (port == null || port == 80 || port == 443) ? '' : ':$port';
+  final bare = tail.isEmpty ? host : host.replaceFirst(RegExp(r':\d+$'), '');
+  final labels = bare.split('.').where((part) => part.isNotEmpty).toList();
+  // 域名比预算长时保留最后两段(capture-mirror.test → mirror.test),
+  // 去掉没有辨识价值的前导子域;仍超长才省略前缀。
+  String name;
+  if (labels.length > 2 &&
+      (bare.length + tail.length) > _serverLineHostBudget) {
+    name = labels.sublist(labels.length - 2).join('.');
+  } else {
+    name = bare;
+  }
+  final withPort = '$name$tail';
+  if (withPort.length <= _serverLineHostBudget) return withPort;
+  final keep = _serverLineHostBudget - tail.length - 1;
+  if (keep <= 1) return withPort;
+  return '${withPort.substring(0, keep)}…$tail';
+}
 
+/// 线路芯片里主机名连端口的显示预算,超出即省略。
+///
+/// 无昵称时标签就是主机名本身,芯片里约 130px 可用,约合 22 个西文字符。
+/// 取 22 让"capture-mirror.test:8096"这类常见地址完整显示,
+/// 只把真正超长的多级子域收成省略号。
+const int _serverLineHostBudget = 22;
+
+String serverLineLabel(ServerLine line) =>
+    line.nickname?.trim().isNotEmpty == true
+    ? line.nickname!
+    : serverLineHostLabel(line);
 String serverSafeAddress(String address) {
   final uri = Uri.tryParse(address);
   if (uri == null || uri.host.isEmpty) return '';
@@ -23,10 +58,17 @@ String serverSafeAddress(String address) {
 
 String serverLineSummary(AppLocalizations l, SavedServer server) {
   final active = server.activeLine;
-  final label = active == null ? '—' : serverLineLabel(active);
-  return server.lineSelection.isAutomatic
-      ? '${l.serversAutomatic} · $label'
-      : label;
+  if (active == null) return '—';
+  if (!server.lineSelection.isAutomatic) return serverLineLabel(active);
+  // 昵称是用户自己起的短名字,照常显示,只在前面标出当前模式。
+  final nickname = active.nickname?.trim();
+  if (nickname != null && nickname.isNotEmpty) {
+    return '${l.serversAutomatic} · $nickname';
+  }
+  // 没有昵称时只显示紧凑主机名:"自动选择 · "这六个字在 360dp 上要占掉
+  // 半个芯片,后面真正有用的主机名就会被 ellipsis 砍成"captur…"。
+  // 自动模式由芯片上的闪电图标表达,文字里不必重复。
+  return serverLineHostLabel(active);
 }
 
 String serverOperationFailure(
@@ -283,18 +325,23 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
                                   ],
                                 ),
                                 const SizedBox(height: 10),
-                                _ServerLineChip(
-                                  key: Key('server-lines-${server.id}'),
-                                  label: widget.locked
-                                      ? l.serversLines
-                                      : serverLineSummary(l, server),
-                                  icon: widget.locked
-                                      ? AppIcons.lock
-                                      : server.lineSelection.isAutomatic
-                                      ? AppIcons.bolt
-                                      : AppIcons.route,
-                                  health: health,
-                                  onTap: widget.busy ? null : widget.onLines,
+                                // 横向撑满内容列:Column 是 start 对齐,芯片按内容
+                                // 收缩时 Flexible 只拿到很小的宽度,长线路名被截断。
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: _ServerLineChip(
+                                    key: Key('server-lines-${server.id}'),
+                                    label: widget.locked
+                                        ? l.serversLines
+                                        : serverLineSummary(l, server),
+                                    icon: widget.locked
+                                        ? AppIcons.lock
+                                        : server.lineSelection.isAutomatic
+                                        ? AppIcons.bolt
+                                        : AppIcons.route,
+                                    health: health,
+                                    onTap: widget.busy ? null : widget.onLines,
+                                  ),
                                 ),
                               ],
                             ),
@@ -417,7 +464,6 @@ class _ServerLineChipState extends State<_ServerLineChip> {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               widget.icon,

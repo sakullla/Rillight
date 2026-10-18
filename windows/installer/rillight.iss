@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "0.1.78"
+#define AppVersion "0.1.79"
 #endif
 
 #define MyAppName "Rillight"

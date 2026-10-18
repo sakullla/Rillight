@@ -165,6 +165,15 @@ class SkeletonShelfRow extends StatelessWidget {
 }
 
 /// 网格骨架,用于媒体库/shelf 全集页加载占位。
+///
+/// 调用方应传入与结果网格**同一套**列数与单元格几何([crossAxisCount] +
+/// [mainAxisExtent]),否则骨架→结果切换会跳列、错高。列数由
+/// [ShelfGridPage.gridDelegateFor] 推导时,骨架走同一公式:
+///
+/// ```dart
+/// final available = math.max(1, width - AppSpacing.page * 2);
+/// final count = (available / ShelfGridPage.maxCrossAxisExtentFor(width)).ceil();
+/// ```
 class SkeletonPosterGrid extends StatelessWidget {
   const SkeletonPosterGrid({
     super.key,
@@ -172,8 +181,10 @@ class SkeletonPosterGrid extends StatelessWidget {
     this.maxCrossAxisExtent = 180,
     this.crossAxisCount,
     this.childAspectRatio = 2 / 3,
+    this.mainAxisExtent,
     this.spacing = AppSpacing.md,
     this.padding = const EdgeInsets.all(AppSpacing.md),
+    this.radius,
   });
 
   final int itemCount;
@@ -183,14 +194,24 @@ class SkeletonPosterGrid extends StatelessWidget {
   /// (固定列数的 SliverGridDelegate)逐列对齐。
   final int? crossAxisCount;
 
-  /// 网格项宽高比(宽/高),默认竖版 2:3。
+  /// 网格项宽高比(宽/高),默认竖版 2:3。[mainAxisExtent] 非空时忽略。
   final double childAspectRatio;
+
+  /// 单元格固定高度(海报 + 标题行),与结果网格的 `mainAxisExtent` 相同。
+  /// 优先于 [childAspectRatio],让骨架行高与真实卡片逐行对齐。
+  final double? mainAxisExtent;
+
   final double spacing;
   final EdgeInsetsGeometry padding;
+
+  /// 骨架块圆角;默认 [AppRadii.sm]。与海报卡一致时传 [AppRadii.card]。
+  final BorderRadius? radius;
 
   @override
   Widget build(BuildContext context) {
     final columns = crossAxisCount;
+    final extent = mainAxisExtent;
+    final blockRadius = radius ?? BorderRadius.circular(AppRadii.sm);
     return GridView.builder(
       padding: padding,
       itemCount: itemCount,
@@ -205,9 +226,10 @@ class SkeletonPosterGrid extends StatelessWidget {
               crossAxisCount: columns,
               mainAxisSpacing: spacing,
               crossAxisSpacing: spacing,
-              childAspectRatio: childAspectRatio,
+              mainAxisExtent: extent,
+              childAspectRatio: extent == null ? childAspectRatio : 1,
             ),
-      itemBuilder: (context, index) => const SkeletonBlock(),
+      itemBuilder: (context, index) => SkeletonBlock(borderRadius: blockRadius),
     );
   }
 }

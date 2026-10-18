@@ -94,6 +94,29 @@ class ShelfItemOpen extends InheritedWidget {
       onOpen != oldWidget.onOpen;
 }
 
+/// 海报网格的一次性布局解算结果。骨架屏与结果网格共用同一公式,
+/// 加载完成时列数、行高与卡片位置都不跳动。
+class GridGeometry {
+  const GridGeometry({
+    required this.crossAxisCount,
+    required this.cellWidth,
+    required this.mainAxisExtent,
+    required this.spacing,
+  });
+
+  /// 列数。
+  final int crossAxisCount;
+
+  /// 单列宽度(已扣列间距)。
+  final double cellWidth;
+
+  /// 单行高度 = 封面高 + 标题行高。
+  final double mainAxisExtent;
+
+  /// 行列间距。
+  final double spacing;
+}
+
 class ShelfGridPage extends StatefulWidget {
   const ShelfGridPage({
     super.key,
@@ -165,6 +188,29 @@ class ShelfGridPage extends StatefulWidget {
     bool wide = false,
     double labelExtent = 54.0,
   }) {
+    final geometry = gridGeometryFor(
+      screenWidth: screenWidth,
+      availableWidth: availableWidth,
+      episodes: episodes,
+      wide: wide,
+      labelExtent: labelExtent,
+    );
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: geometry.crossAxisCount,
+      mainAxisSpacing: geometry.spacing,
+      crossAxisSpacing: geometry.spacing,
+      mainAxisExtent: geometry.mainAxisExtent,
+    );
+  }
+
+  /// 列数、列宽与行高。骨架屏与结果网格共用,避免加载完成时跳列、错高。
+  static GridGeometry gridGeometryFor({
+    required double screenWidth,
+    required double availableWidth,
+    bool episodes = false,
+    bool wide = false,
+    double labelExtent = 54.0,
+  }) {
     const spacing = AppSpacing.md;
     final landscape = episodes || wide;
     final maxExtent = landscape
@@ -173,11 +219,11 @@ class ShelfGridPage extends StatefulWidget {
     final count = math.max(1, (availableWidth / maxExtent).ceil());
     final cellWidth = (availableWidth - (count - 1) * spacing) / count;
     final imageHeight = landscape ? cellWidth * 9 / 16 : cellWidth * 1.5;
-    return SliverGridDelegateWithFixedCrossAxisCount(
+    return GridGeometry(
       crossAxisCount: count,
-      mainAxisSpacing: spacing,
-      crossAxisSpacing: spacing,
+      cellWidth: cellWidth,
       mainAxisExtent: (imageHeight + labelExtent).ceilToDouble(),
+      spacing: spacing,
     );
   }
 
@@ -867,16 +913,31 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             onSearchChanged: _filterable ? _setSearchTerm : null,
           ),
           Expanded(
-            child: SkeletonPosterGrid(
-              maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(
-                screenWidth,
-              ),
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.page,
-                AppSpacing.xs,
-                AppSpacing.page,
-                AppSpacing.xxl,
-              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final geometry = ShelfGridPage.gridGeometryFor(
+                  screenWidth: screenWidth,
+                  availableWidth: math.max(
+                    1,
+                    constraints.maxWidth - AppSpacing.page * 2,
+                  ),
+                  episodes: _episodes,
+                  wide: _wideGrid,
+                  labelExtent: MediaShelf.posterLabelExtentFor(context),
+                );
+                return SkeletonPosterGrid(
+                  key: const Key('shelf-grid-loading'),
+                  crossAxisCount: geometry.crossAxisCount,
+                  mainAxisExtent: geometry.mainAxisExtent,
+                  radius: BorderRadius.circular(AppRadii.card),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.page,
+                    AppSpacing.xs,
+                    AppSpacing.page,
+                    AppSpacing.xxl,
+                  ),
+                );
+              },
             ),
           ),
         ],

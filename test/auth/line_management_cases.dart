@@ -893,4 +893,110 @@ void main() {
     expect(find.textContaining('连接失败，原连接已保留'), findsOneWidget);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets('narrow phone keeps the whole line label readable', (
+    tester,
+  ) async {
+    // 线路摘要曾被 MainAxisSize.min + Flexible 压成 "captur…"：
+    // 收缩行里 Flexible 拿到的剩余宽度太小，线路名读不出来。
+    // 截图中被截断的是真实长标签：自动 + 一条长线路地址。
+    final remote = FakeEmbyServer();
+    final relay = FakeEmbyServer(
+      serverId: remote.serverId,
+      baseUrl: Uri.parse('http://capture-relay-tunnel-node.example.test:8096'),
+    );
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(_SameServerAdapter([remote, relay])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(
+      () => auth.connect(
+        address: remote.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    // 再加一条长地址线路,并选为当前,复现手机列表里被截断的长文案。
+    await tester.runAsync(
+      () => auth.addLine(
+        auth.savedServers.single.id,
+        'http://capture-relay-tunnel-node.example.test:8096',
+      ),
+    );
+    final relayLine = auth.savedServers.single.lines.last;
+    await tester.runAsync(
+      () => auth.selectLine(
+        auth.savedServers.single.id,
+        LineSelection.fixed(relayLine.id),
+      ),
+    );
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await pumpServerSelection(tester, auth, phone: true, dark: true);
+    final id = auth.savedServers.single.id;
+    final chip = find.byKey(Key('server-lines-$id'));
+    final label = find.descendant(
+      of: find.descendant(of: chip, matching: find.byType(Flexible)),
+      matching: find.byType(Text),
+    );
+    expect(label, findsOneWidget);
+    // 自动模式下没有昵称时,主机名只是排查线索,不该与"自动选择"前缀
+    // 抢宽度——超出的部分会被 ellipsis 砍成"captur…",读不出线路。
+    final labelWidget = tester.widget<Text>(label);
+    expect(labelWidget.data, isNot(contains('capture-relay')));
+    expect(labelWidget.data!.length, lessThanOrEqualTo(24));
+    // 芯片横向撑满内容列,拿到的是整行的可变宽度。
+    final chipWidth = tester.getSize(chip).width;
+    final cardWidth = tester.getSize(find.byKey(Key('server-enter-$id'))).width;
+    expect(
+      chipWidth,
+      greaterThan(cardWidth - 100),
+      reason: '芯片($chipWidth)没有撑满卡片($cardWidth)的内容列',
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('a named line keeps its nickname next to the mode', (
+    tester,
+  ) async {
+    // 收窄主机名不能误伤用户自己起的昵称。
+    final remote = FakeEmbyServer();
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(_SameServerAdapter([remote])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(
+      () => auth.connect(
+        address: remote.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    final serverId = auth.savedServers.single.id;
+    await tester.runAsync(
+      () => auth.saveConfiguration(
+        serverId,
+        nickname: auth.sources.server(serverId).displayName,
+        userAgent: auth.sources.server(serverId).userAgent ?? '',
+        lines: [
+          auth.savedServers.single.lines.first.copyWith(nickname: '家庭直连'),
+        ],
+      ),
+    );
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await pumpServerSelection(tester, auth, phone: true, dark: true);
+    expect(find.text('自动选择 · 家庭直连'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
