@@ -148,6 +148,8 @@ class PlayerSettings {
     this.appearanceStyle,
     this.skipIntroEnabled,
     this.skipOutroEnabled,
+    this.updateReminderEnabled,
+    this.ignoredUpdateVersion,
   });
 
   /// 音量百分比;100 为原片 0 dB,超过 100 为额外增益。
@@ -205,6 +207,17 @@ class PlayerSettings {
   bool get isSkipIntroEnabled => skipIntroEnabled ?? true;
   bool get isSkipOutroEnabled => skipOutroEnabled ?? true;
 
+  /// 是否在启动时自动检查并弹窗提醒新版本；null 表示未配置，默认开启。
+  final bool? updateReminderEnabled;
+  bool get isUpdateReminderEnabled => updateReminderEnabled ?? true;
+
+  /// 用户选择「此版本不再提醒」的版本号（不含构建号）；空串表示已清除忽略。
+  final String? ignoredUpdateVersion;
+  String? get effectiveIgnoredUpdateVersion {
+    final value = ignoredUpdateVersion?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
   int get clampedVolume => (volume ?? 100).clamp(0, volumeMax);
 
   double get effectivePlaybackRate {
@@ -251,6 +264,10 @@ class PlayerSettings {
     if (appearanceStyle != null) 'appearanceStyle': appearanceStyle,
     if (skipIntroEnabled != null) 'skipIntroEnabled': skipIntroEnabled,
     if (skipOutroEnabled != null) 'skipOutroEnabled': skipOutroEnabled,
+    if (updateReminderEnabled != null)
+      'updateReminderEnabled': updateReminderEnabled,
+    if (ignoredUpdateVersion != null)
+      'ignoredUpdateVersion': ignoredUpdateVersion,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
@@ -309,6 +326,12 @@ class PlayerSettings {
       ),
       appearanceStyle: json['appearanceStyle'] is String
           ? json['appearanceStyle'] as String
+          : null,
+      updateReminderEnabled: json['updateReminderEnabled'] is bool
+          ? json['updateReminderEnabled'] as bool
+          : null,
+      ignoredUpdateVersion: json['ignoredUpdateVersion'] is String
+          ? json['ignoredUpdateVersion'] as String
           : null,
     );
   }

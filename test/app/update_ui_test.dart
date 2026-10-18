@@ -154,4 +154,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(fixture.controller.checkPhase, UpdateCheckPhase.available);
   });
+  testWidgets(
+    'can ignore and restore version reminder and toggle automatic startup reminders',
+    (tester) async {
+      await pump(tester);
+      expect(fixture.controller.autoReminderEnabled, isTrue);
+      await tap(tester, 'app-update-auto-reminder');
+      await tester.pumpAndSettle();
+      expect(fixture.controller.autoReminderEnabled, isFalse);
+      await tap(tester, 'app-update-auto-reminder');
+      await tester.pumpAndSettle();
+      expect(fixture.controller.autoReminderEnabled, isTrue);
+
+      await tap(tester, 'app-update-check-button');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app-update-ignored-badge')), findsNothing);
+      await tap(tester, 'app-update-ignore-version');
+      await tester.pumpAndSettle();
+      expect(fixture.controller.ignoredVersion, '99.0.0');
+      expect(find.byKey(const Key('app-update-ignored-badge')), findsOneWidget);
+      expect(find.text('恢复此版本提醒'), findsOneWidget);
+
+      await tap(tester, 'app-update-ignore-version');
+      await tester.pumpAndSettle();
+      expect(fixture.controller.ignoredVersion, isNull);
+      expect(find.byKey(const Key('app-update-ignored-badge')), findsNothing);
+    },
+  );
 }

@@ -2283,5 +2283,26 @@
   "updateLocalPackage": "本地安装包：{path}",
   "@updateLocalPackage": {"placeholders": {"path": {"type": "String"}}},
   "updateReminderTitle": "应用更新",
+  "updateReminderSubtitle": "发现可用更新，可直接在应用内下载校验并安装",
+  "updateVersionTransition": "当前 v{current} → 最新 v{target}",
+  "@updateVersionTransition": {
+    "placeholders": {
+      "current": {"type": "String"},
+      "target": {"type": "String"}
+    }
+  },
+  "updateCurrentBadge": "已是最新",
+  "updateNewBadge": "可更新",
+  "updateIgnoreVersion": "此版本不再提醒",
+  "updateUnignoreVersion": "恢复此版本提醒",
+  "updateIgnoredBadge": "已忽略 v{version} 提醒",
+  "@updateIgnoredBadge": {
+    "placeholders": {
+      "version": {"type": "String"}
+    }
+  },
+  "updateDisableReminder": "不再自动提醒",
+  "updateAutoReminderTitle": "启动时自动提醒更新",
+  "updateAutoReminderSubtitle": "发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查",
   "updateLater": "稍后处理"
 }

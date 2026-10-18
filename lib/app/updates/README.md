@@ -12,10 +12,13 @@ The production desktop main and Android bootstrap explicitly enable updates.
 ordinary `RillightApp` tests/prototypes stay offline unless given an injected
 controller. `UpdateReminderHost` starts one check after the first frame and
 observes the foreground lifecycle, both requested/committed playback routes and
-desktop opening/open occupancy. Paused playback still defers the reminder. A
-reminder already visible when playback begins is deferred again without marking
-the version acknowledged. A user dismissal acknowledges that version for this
-run, while the settings entry remains available.
+desktop opening/open occupancy. paused playback still defers the reminder. A reminder already visible when
+playback begins is deferred again without marking the version acknowledged.
+Dismissing with "稍后处理" acknowledges that version for this run, "此版本不再提醒"
+persists `ignoredUpdateVersion` in `PlayerSettings` so automatic reminders skip
+that version until a newer release appears, and "不再自动提醒" (or the toggle in
+Settings/About) persists `updateReminderEnabled: false` to disable automatic
+startup checks while keeping manual checks available in settings.
 
 Desktop settings, phone About and TV settings consume the same `UpdateCheck`.
 Downloads keep their original candidate when a later check returns another

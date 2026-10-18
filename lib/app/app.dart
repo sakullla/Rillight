@@ -53,6 +53,7 @@ class RillightApp extends StatelessWidget {
   Widget build(BuildContext context) => UpdateScopeHost(
     enabled: enableUpdates,
     controller: updateController,
+    settingsStore: playerBindings.settingsStore,
     child: AppearanceScope(
       controller: appearance,
       child: _SystemBrightnessObserver(

@@ -1856,6 +1856,15 @@
     ]
   },
   {
+    "id": "settings-update-auto-disabled",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
     "id": "settings-update-checking",
     "feature": "settings",
     "platforms": [
@@ -1866,6 +1875,24 @@
   },
   {
     "id": "settings-update-available",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-ignored",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update-reminder",
     "feature": "settings",
     "platforms": [
       "desktop",

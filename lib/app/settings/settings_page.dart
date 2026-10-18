@@ -823,6 +823,10 @@ PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
     playbackRate: patch.playbackRate ?? current.playbackRate,
     skipIntroEnabled: patch.skipIntroEnabled ?? current.skipIntroEnabled,
     skipOutroEnabled: patch.skipOutroEnabled ?? current.skipOutroEnabled,
+    updateReminderEnabled:
+        patch.updateReminderEnabled ?? current.updateReminderEnabled,
+    ignoredUpdateVersion:
+        patch.ignoredUpdateVersion ?? current.ignoredUpdateVersion,
     phoneSubtitles: patch.phoneSubtitles ?? current.phoneSubtitles,
     seriesPreferences: patch.seriesPreferences.isNotEmpty
         ? patch.seriesPreferences

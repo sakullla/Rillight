@@ -8,7 +8,6 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
-import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -391,44 +390,17 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          _group(
-            context,
-            title: l10n.mobileAboutGroup,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: 14,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        l10n.appName,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                    ),
-                    Text(
-                      l10n.mobileVersion(kAppVersion),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.xs),
+            child: Text(
+              l10n.mobileAboutGroup,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(height: AppSpacing.md),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  0,
-                  AppSpacing.md,
-                  AppSpacing.md,
-                ),
-                child: UpdateCheck(),
-              ),
-            ],
+            ),
           ),
+          const UpdateCheck(),
         ],
       ),
     );

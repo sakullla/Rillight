@@ -2372,5 +2372,39 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateReminderTitle => '应用更新';
 
   @override
+  String get updateReminderSubtitle => '发现可用更新，可直接在应用内下载校验并安装';
+
+  @override
+  String updateVersionTransition(String current, String target) {
+    return '当前 v$current → 最新 v$target';
+  }
+
+  @override
+  String get updateCurrentBadge => '已是最新';
+
+  @override
+  String get updateNewBadge => '可更新';
+
+  @override
+  String get updateIgnoreVersion => '此版本不再提醒';
+
+  @override
+  String get updateUnignoreVersion => '恢复此版本提醒';
+
+  @override
+  String updateIgnoredBadge(String version) {
+    return '已忽略 v$version 提醒';
+  }
+
+  @override
+  String get updateDisableReminder => '不再自动提醒';
+
+  @override
+  String get updateAutoReminderTitle => '启动时自动提醒更新';
+
+  @override
+  String get updateAutoReminderSubtitle => '发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查';
+
+  @override
   String get updateLater => '稍后处理';
 }

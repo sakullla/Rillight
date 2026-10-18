@@ -1,3 +1,4 @@
+import '../../player/player_settings.dart';
 import '../ui/ui.dart';
 import 'update_controller.dart';
 import 'update_platform.dart';
@@ -20,10 +21,12 @@ class UpdateScopeHost extends StatefulWidget {
     super.key,
     required this.enabled,
     this.controller,
+    this.settingsStore,
     required this.child,
   });
   final bool enabled;
   final UpdateController? controller;
+  final PlayerSettingsStore? settingsStore;
   final Widget child;
   @override
   State<UpdateScopeHost> createState() => _UpdateScopeHostState();
@@ -35,7 +38,13 @@ class _UpdateScopeHostState extends State<UpdateScopeHost> {
   void initState() {
     super.initState();
     if (widget.enabled && widget.controller == null) {
-      _owned = UpdateController(platform: SystemUpdatePlatform());
+      _owned = UpdateController(
+        platform: SystemUpdatePlatform(),
+        settingsStore: widget.settingsStore,
+        openSettingsStore: widget.settingsStore == null
+            ? openPlayerSettingsStore
+            : null,
+      );
     }
   }
 
@@ -43,7 +52,13 @@ class _UpdateScopeHostState extends State<UpdateScopeHost> {
   void didUpdateWidget(UpdateScopeHost oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.enabled && widget.controller == null && _owned == null) {
-      _owned = UpdateController(platform: SystemUpdatePlatform());
+      _owned = UpdateController(
+        platform: SystemUpdatePlatform(),
+        settingsStore: widget.settingsStore,
+        openSettingsStore: widget.settingsStore == null
+            ? openPlayerSettingsStore
+            : null,
+      );
     }
   }
 

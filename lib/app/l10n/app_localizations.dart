@@ -4564,6 +4564,66 @@ abstract class AppLocalizations {
   /// **'应用更新'**
   String get updateReminderTitle;
 
+  /// No description provided for @updateReminderSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现可用更新，可直接在应用内下载校验并安装'**
+  String get updateReminderSubtitle;
+
+  /// No description provided for @updateVersionTransition.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前 v{current} → 最新 v{target}'**
+  String updateVersionTransition(String current, String target);
+
+  /// No description provided for @updateCurrentBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'已是最新'**
+  String get updateCurrentBadge;
+
+  /// No description provided for @updateNewBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'可更新'**
+  String get updateNewBadge;
+
+  /// No description provided for @updateIgnoreVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'此版本不再提醒'**
+  String get updateIgnoreVersion;
+
+  /// No description provided for @updateUnignoreVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复此版本提醒'**
+  String get updateUnignoreVersion;
+
+  /// No description provided for @updateIgnoredBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'已忽略 v{version} 提醒'**
+  String updateIgnoredBadge(String version);
+
+  /// No description provided for @updateDisableReminder.
+  ///
+  /// In zh, this message translates to:
+  /// **'不再自动提醒'**
+  String get updateDisableReminder;
+
+  /// No description provided for @updateAutoReminderTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'启动时自动提醒更新'**
+  String get updateAutoReminderTitle;
+
+  /// No description provided for @updateAutoReminderSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现新版本时自动弹窗提醒，关闭后仍可在此处手动检查'**
+  String get updateAutoReminderSubtitle;
+
   /// No description provided for @updateLater.
   ///
   /// In zh, this message translates to:
