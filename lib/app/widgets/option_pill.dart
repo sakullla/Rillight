@@ -2,6 +2,9 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
 /// 可多选的圆角选项。宽度随文字收缩，方便在筛选里换行排列。
+///
+/// 选中只用一种语言表达:实底强调色 + 反色文字,不再叠勾和描边。
+/// 未选在深色下是安静的抬高底,浅色下是白底细边。
 class OptionPill extends StatelessWidget {
   const OptionPill({
     super.key,
@@ -16,9 +19,10 @@ class OptionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = AppUiTheme.of(context).colorScheme;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     final light = scheme.brightness == Brightness.light;
-    final foreground = selected ? scheme.onPrimaryContainer : scheme.onSurface;
+    final foreground = selected ? scheme.onPrimary : scheme.onSurface;
     return Opacity(
       opacity: onPressed == null ? .45 : 1,
       child: Semantics(
@@ -27,58 +31,43 @@ class OptionPill extends StatelessWidget {
         enabled: onPressed != null,
         child: AppSurfaceAction(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
           child: AnimatedContainer(
             duration: AppMotion.durationOf(context, AppMotion.fast),
             curve: AppMotion.standard,
             decoration: ShapeDecoration(
-              // 浅色:未选是白底细边,与浅灰页面/白色面板都分得开;选中换强调色。
               color: selected
-                  ? scheme.primaryContainer
+                  ? scheme.primary
                   : (light
                         ? scheme.surfaceContainerLowest
                         : scheme.surfaceContainerHigh),
               shape: StadiumBorder(
                 side: BorderSide(
                   color: selected
-                      ? scheme.primary
-                      : (light
-                            ? scheme.onSurface.withValues(alpha: .14)
-                            : scheme.outlineVariant),
-                  width: selected ? 1.5 : 1,
+                      ? const Color(0x00000000)
+                      : AppEdge.of(scheme.brightness, strong: !light),
                 ),
               ),
             ),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 40),
+              constraints: const BoxConstraints(
+                minWidth: 48,
+                minHeight: AppControlHeight.md,
+              ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
+                  horizontal: 16,
                   vertical: 8,
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (selected) ...[
-                      Icon(
-                        AppIcons.check,
-                        fill: AppIcons.filled,
-                        size: 16,
-                        color: foreground,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      label,
-                      style: AppUiTheme.of(context).textTheme.labelLarge
-                          ?.copyWith(
-                            color: foreground,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                          ),
+                child: Center(
+                  widthFactor: 1,
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: foreground,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -105,23 +94,23 @@ class RemovablePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final foreground = scheme.onSurface;
+    final foreground = scheme.onPrimaryContainer;
     final tooltip = CupertinoLocalizations.of(context).clearButtonLabel;
     return Semantics(
       button: true,
       label: '$label, $tooltip',
       child: AppSurfaceAction(
         onTap: onDeleted,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
         child: DecoratedBox(
           decoration: ShapeDecoration(
-            color: scheme.surfaceContainerHighest,
-            shape: StadiumBorder(
-              side: BorderSide(color: scheme.outlineVariant),
-            ),
+            color: scheme.primaryContainer,
+            shape: const StadiumBorder(),
           ),
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: compact ? 28 : 36),
+            constraints: BoxConstraints(
+              minHeight: compact ? 28 : AppControlHeight.sm + 4,
+            ),
             child: Padding(
               padding: EdgeInsets.fromLTRB(
                 compact ? 10 : 12,
@@ -148,7 +137,7 @@ class RemovablePill extends StatelessWidget {
                     AppIcons.close,
                     fill: AppIcons.filled,
                     size: compact ? 14 : 16,
-                    color: scheme.onSurfaceVariant,
+                    color: foreground.withValues(alpha: .72),
                   ),
                 ],
               ),

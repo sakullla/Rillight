@@ -132,11 +132,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           child: AppUiTheme(
             data: AppUiTheme.dark(),
             child: Container(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(AppRadii.xl),
-                border: Border.all(color: scheme.outlineVariant),
-              ),
+              decoration: overlaySurfaceDecoration(AppUiTheme.dark()),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -274,20 +270,18 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               key: info.$3,
               onPressed: () => setState(() => _section = key),
               style: AppButtonStyle(
-                minimumSize: Size(rail ? double.infinity : 0, rail ? 44 : 36),
+                minimumSize: Size(rail ? double.infinity : 0, 44),
                 foregroundColor: selected
-                    ? scheme.onSurface
+                    ? scheme.onPrimaryContainer
                     : scheme.onSurfaceVariant,
                 backgroundColor: selected
-                    ? scheme.surfaceContainerHighest
+                    ? scheme.primaryContainer
                     : const Color(0x00000000),
                 shape: const StadiumBorder(),
-                side: selected && !rail
-                    ? BorderSide(color: scheme.onSurface.withValues(alpha: .7))
-                    : BorderSide.none,
+                side: BorderSide.none,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 textStyle: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
               child: Row(
@@ -330,7 +324,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                 child: Text(
                   sections[section]!.$1,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
                   ),
                 ),
               ),
@@ -347,7 +341,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                           ? PlayerKeys.speedLabel
                           : null,
                       style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        color: scheme.primary,
                       ),
                     ),
                   ),
@@ -406,7 +400,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                   child: Text(
                     l10n.playerPlaybackSettings,
                     style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
                     ),
                   ),
                 ),

@@ -43,16 +43,7 @@ class AppDialog extends StatelessWidget {
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),
             child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(AppRadii.xl),
-                border: Border.all(
-                  color: theme.colorScheme.outlineVariant.withValues(
-                    alpha: theme.brightness == Brightness.dark ? 0.65 : 0.9,
-                  ),
-                ),
-                boxShadow: AppShadow.overlay(theme.brightness),
-              ),
+              decoration: overlaySurfaceDecoration(theme),
               child: SingleChildScrollView(
                 child: Padding(
                   padding: padding,
@@ -65,9 +56,7 @@ class AppDialog extends StatelessWidget {
                           namesRoute: true,
                           header: true,
                           child: DefaultTextStyle(
-                            style: theme.textTheme.titleLarge!.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: theme.textTheme.titleLarge!,
                             child: title!,
                           ),
                         ),
@@ -114,7 +103,6 @@ class AppModalFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     return SafeArea(
       child: Padding(
         padding:
@@ -123,24 +111,7 @@ class AppModalFrame extends StatelessWidget {
         child: Center(
           child: Container(
             clipBehavior: clipBehavior,
-            decoration: BoxDecoration(
-              color: backgroundColor ?? theme.colorScheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(AppRadii.xl),
-              border: Border.all(
-                color: theme.colorScheme.outlineVariant.withValues(
-                  alpha: dark ? 0.55 : 0.85,
-                ),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: theme.colorScheme.scrim.withValues(
-                    alpha: dark ? .38 : .14,
-                  ),
-                  blurRadius: 28,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
+            decoration: overlaySurfaceDecoration(theme, color: backgroundColor),
             child: child,
           ),
         ),
@@ -148,6 +119,20 @@ class AppModalFrame extends StatelessWidget {
     );
   }
 }
+
+/// 对话框、浮层面板共用的表面:浮层圆角、发丝亮边与两层投影。
+///
+/// 深色主题的亮边让面板从压暗的页面里浮出来,不靠加亮底色。
+BoxDecoration overlaySurfaceDecoration(
+  AppUiThemeData theme, {
+  Color? color,
+  BorderRadius? borderRadius,
+}) => BoxDecoration(
+  color: color ?? theme.colorScheme.surfaceContainerLow,
+  borderRadius: borderRadius ?? BorderRadius.circular(AppRadii.overlay),
+  border: Border.all(color: AppEdge.of(theme.brightness, strong: true)),
+  boxShadow: AppShadow.overlay(theme.brightness),
+);
 
 /// Captures local artwork/TV theme across the navigator boundary. Escape/back
 /// cancels with null, just like a barrier tap; an explicit result commits.
@@ -219,8 +204,13 @@ Future<T?> showAppModalSheet<T>({
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surfaceContainerLow,
                   borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20),
+                    top: Radius.circular(AppRadii.overlay),
                   ),
+                  // 圆角边框要求四边同色;底边贴在屏幕外,看到的只有顶缘亮边。
+                  border: Border.all(
+                    color: AppEdge.of(theme.brightness, strong: true),
+                  ),
+                  boxShadow: AppShadow.overlay(theme.brightness),
                 ),
                 child: Builder(builder: builder),
               ),

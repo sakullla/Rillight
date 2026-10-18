@@ -2340,7 +2340,13 @@ void main() {
           find.byKey(const Key('phone-library-section-genre')),
           findsOneWidget,
         );
-        expect(find.text('流派'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('phone-library-genre-section')),
+            matching: find.text('流派'),
+          ),
+          findsOneWidget,
+        );
 
         await _libraryTap(tester, const Key('phone-library-watch-IsUnplayed'));
         await _libraryTap(tester, const Key('phone-library-sort-DateCreated'));
@@ -2460,7 +2466,13 @@ void main() {
         find.byKey(const Key('phone-library-section-genre')),
         findsOneWidget,
       );
-      expect(find.text('流派'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('phone-library-genre-section')),
+          matching: find.text('流派'),
+        ),
+        findsOneWidget,
+      );
       await _libraryTap(tester, const Key('phone-library-genre-SciFi'));
       await _libraryTap(tester, const Key('phone-library-apply'));
       expect(find.text('SciFi'), findsOneWidget);

@@ -417,11 +417,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
           child: AppUiTheme(
             data: AppUiTheme.dark(),
             child: Container(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(AppRadii.xl),
-                border: Border.all(color: scheme.outlineVariant),
-              ),
+              decoration: overlaySurfaceDecoration(AppUiTheme.dark()),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -495,7 +491,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                 child: Text(
                   l.subtitleTrack,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
                   ),
                 ),
               ),

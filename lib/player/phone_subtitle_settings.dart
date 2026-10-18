@@ -30,7 +30,7 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
             l.phoneSubtitleSize,
             style: AppUiTheme.of(context).textTheme.titleMedium,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
         ],
         PlayerOptionGrid(
           options: [
@@ -50,6 +50,7 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
               ),
           ],
         ),
+        const SizedBox(height: AppSpacing.sm),
         AppSwitchTile(
           key: const Key('phone-subtitle-original'),
           title: Text(l.phoneSubtitleOriginal),
@@ -64,6 +65,8 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: AppButton.icon(
               key: const Key('phone-subtitle-reset'),
+              variant: AppButtonVariant.tinted,
+              style: const AppButtonStyle(minimumSize: Size(0, 44)),
               icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
               onPressed: () => onChanged(const PhoneSubtitleSettings()),
               label: Text(l.settingsRestoreDefaults),
