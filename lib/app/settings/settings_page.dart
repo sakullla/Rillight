@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/webdav/webdav_backup.dart';
 import 'package:rillight/webdav/webdav_client.dart';
 import 'package:rillight/webdav/webdav_config.dart';
@@ -45,6 +46,8 @@ class SettingsPage extends StatefulWidget {
     this.webdavStore,
     this.webdavDirectory,
     this.webdavClientFactory,
+    this.webdavBundleCollector,
+    this.webdavBundleApplier,
   });
 
   /// 测试注入;运行时留空用当前平台。
@@ -67,6 +70,21 @@ class SettingsPage extends StatefulWidget {
 
   /// 测试注入的客户端工厂;运行时直接按配置构造真实客户端。
   final WebDavClient Function(WebDavConfig config)? webdavClientFactory;
+
+  /// 测试注入的 bundle 采集器;运行时直接采集本地文件。
+  final Future<Map<String, dynamic>> Function(
+    Directory directory,
+    CredentialStore credentials,
+  )?
+  webdavBundleCollector;
+
+  /// 测试注入的 bundle 应用器;运行时直接应用下载字节。
+  final Future<WebDavApplyResult> Function(
+    List<int> bytes,
+    Directory directory,
+    CredentialStore credentials,
+  )?
+  webdavBundleApplier;
 
   static const diskCacheLimitKey = Key('settings-disk-cache-limit');
   static const hardwareDecodingKey = Key('settings-hardware-decoding');
@@ -537,7 +555,8 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       Map<String, dynamic> bundle;
       try {
-        bundle = await collectBackupBundle(directory, auth.credentials);
+        final collect = widget.webdavBundleCollector ?? collectBackupBundle;
+        bundle = await collect(directory, auth.credentials);
       } on FormatException {
         if (mounted) {
           AppNoticeHost.of(context).show(l10n.settingsWebDavLocalConfigCorrupt);
@@ -604,7 +623,8 @@ class _SettingsPageState extends State<SettingsPage> {
         );
         return;
       }
-      final applied = await applyBackupBundleBytes(
+      final apply = widget.webdavBundleApplier ?? applyBackupBundleBytes;
+      final applied = await apply(
         (download as WebDavDownloadSuccess).bytes,
         directory,
         auth.credentials,

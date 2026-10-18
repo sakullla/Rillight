@@ -21,6 +21,7 @@ import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/webdav/webdav_backup.dart';
 import 'package:rillight/webdav/webdav_client.dart';
 import 'package:rillight/webdav/webdav_config.dart';
 
@@ -72,62 +73,42 @@ class _FakeWebDavClient extends WebDavClient {
       downloadResult ?? WebDavDownloadSuccess(Uint8List(0));
 }
 
+/// 内存 WebDAV 配置存储:替代 webdav.json 的真实读写,
+/// 使页面动作链全程无磁盘 IO、无真实事件循环依赖。
+class _MemoryWebDavConfigStore extends WebDavConfigStore {
+  _MemoryWebDavConfigStore([this._config = const WebDavConfig()])
+    : super(File('memory-webdav.json'));
+
+  WebDavConfig _config;
+
+  @override
+  Future<WebDavConfig> load() async => _config;
+
+  @override
+  Future<void> save(WebDavConfig config) async => _config = config;
+}
+
 void main() {
   setUp(isolateImageCache);
-
-  /// 页面动作链里的真实文件 IO 必须在真实事件循环里发起并完成;
-  /// 与 update_verification_ui 相同的 runAsync 窗口模式。
-  Future<void> runInRealLoop(
-    WidgetTester tester,
-    Future<void> Function() action, {
-    bool Function()? done,
-    Duration budget = const Duration(seconds: 5),
-  }) async {
-    await tester.runAsync<void>(() async {
-      await action();
-      final end = DateTime.now().add(budget);
-      while (DateTime.now().isBefore(end)) {
-        if (done != null && done()) break;
-        await Future<void>.delayed(const Duration(milliseconds: 2));
-      }
-    });
-    await settle(tester);
-  }
-
-  /// WebDAV 动作链含真实文件 IO:固定预算或单次 settle 在慢速 CI runner 上
-  /// 都可能先于反馈渲染返回。tap 在 runAsync 窗口发起,随后逐轮
-  /// "真实 IO 窗口 + settle 帧推进"直到完成条件出现,至多 [rounds] 轮。
-  Future<void> runWebDavActionUntil(
-    WidgetTester tester,
-    Future<void> Function() action,
-    bool Function() done, {
-    int rounds = 100,
-  }) async {
-    await tester.runAsync<void>(action);
-    for (var i = 0; i < rounds && !done(); i++) {
-      await tester.runAsync<void>(
-        () => Future<void>.delayed(const Duration(milliseconds: 10)),
-      );
-      await settle(tester);
-    }
-  }
-
-  /// 先让 initState 里的 webdav.json 加载完成,再断言回显。逐轮开窗,
-  /// 让 fake zone 里挂起的读链在窗口边界推进。
-  Future<void> flushWebDavLoad(WidgetTester tester) async {
-    for (var i = 0; i < 20; i++) {
-      await tester.runAsync<void>(() => Future<void>.delayed(Duration.zero));
-    }
-    await settle(tester);
-  }
 
   Future<void> pumpPage(
     WidgetTester tester, {
     required PlayerSettingsStore store,
     TargetPlatform platform = TargetPlatform.windows,
     AuthController? auth,
-    Directory? webdavDirectory,
+    WebDavConfigStore? webdavStore,
     WebDavClient Function(WebDavConfig config)? webdavClientFactory,
+    Future<Map<String, dynamic>> Function(
+      Directory directory,
+      CredentialStore credentials,
+    )?
+    webdavCollector,
+    Future<WebDavApplyResult> Function(
+      List<int> bytes,
+      Directory directory,
+      CredentialStore credentials,
+    )?
+    webdavApplier,
   }) async {
     tester.view.physicalSize = const Size(1280, 2200);
     tester.view.devicePixelRatio = 1;
@@ -136,8 +117,12 @@ void main() {
     Widget page = SettingsPage(
       settingsStore: store,
       platform: platform,
-      webdavDirectory: webdavDirectory,
+      // 注入内存 store 时目录只作占位:采集与应用由注入桩接管,不落盘。
+      webdavDirectory: webdavStore == null ? null : Directory('webdav-memory'),
+      webdavStore: webdavStore,
       webdavClientFactory: webdavClientFactory,
+      webdavBundleCollector: webdavCollector,
+      webdavBundleApplier: webdavApplier,
     );
     if (auth != null) {
       page = AuthScope(controller: auth, child: page);
@@ -154,9 +139,6 @@ void main() {
       ),
     );
     await settle(tester);
-    if (webdavDirectory != null) {
-      await flushWebDavLoad(tester);
-    }
   }
 
   Future<void> expandSection(WidgetTester tester, String title) async {
@@ -474,30 +456,6 @@ void main() {
     );
   }, tags: ['integration']);
 
-  Directory webDavTempDir() {
-    final dir = Directory.systemTemp.createTempSync('rillight-webdav-ui');
-    addTearDown(() {
-      // 页面可能仍持有未决 IO 句柄;清理尽力而为,失败留给系统临时目录。
-      try {
-        if (dir.existsSync()) dir.deleteSync(recursive: true);
-      } on Object {
-        // ignore: avoid_catches_without_on_clauses
-      }
-    });
-    return dir;
-  }
-
-  void seedConfig(Directory dir, WebDavConfig config) {
-    File('${dir.path}/webdav.json')
-        .writeAsStringSync(jsonEncode(config.toJson()));
-  }
-
-  WebDavConfig readStoredConfig(Directory dir) => WebDavConfig.fromJson(
-    Map<String, dynamic>.from(
-      jsonDecode(File('${dir.path}/webdav.json').readAsStringSync()) as Map,
-    ),
-  );
-
   const seededConfig = WebDavConfig(
     address: 'https://192.0.2.5:5006/dav',
     username: 'user',
@@ -509,9 +467,11 @@ void main() {
     tester,
   ) async {
     final store = MemoryPlayerSettingsStore();
-    final dir = webDavTempDir();
-    seedConfig(dir, seededConfig);
-    await pumpPage(tester, store: store, webdavDirectory: dir);
+    await pumpPage(
+      tester,
+      store: store,
+      webdavStore: _MemoryWebDavConfigStore(seededConfig),
+    );
     await expandSection(tester, '备份与同步');
 
     expect(find.byKey(SettingsPage.webDavAddressFieldKey), findsOneWidget);
@@ -546,8 +506,8 @@ void main() {
     tester,
   ) async {
     final store = MemoryPlayerSettingsStore();
-    final dir = webDavTempDir();
-    await pumpPage(tester, store: store, webdavDirectory: dir);
+    final webdavStore = _MemoryWebDavConfigStore();
+    await pumpPage(tester, store: store, webdavStore: webdavStore);
     await expandSection(tester, '备份与同步');
 
     await tester.enterText(
@@ -567,28 +527,22 @@ void main() {
       'backup',
     );
     // 切到别的分类即离开输入框,与弹幕服务一致在失焦时提交;
-    // 保存是真实文件写入,在真实事件循环窗口内等待落盘。
-    final stored = File('${dir.path}/webdav.json');
+    // 提交链全程内存 Future,settle 即确定性落库。
     final appearance = find.byKey(const ValueKey('settings-section-外观'));
     await tester.ensureVisible(appearance);
-    await runInRealLoop(
-      tester,
-      () => tester.tap(
-        find.descendant(of: appearance, matching: find.text('外观')),
-      ),
-      done: () =>
-          stored.existsSync() &&
-          stored.readAsStringSync().contains('https://192.0.2.7/dav'),
+    await tester.tap(
+      find.descendant(of: appearance, matching: find.text('外观')),
     );
+    await settle(tester);
 
-    final saved = readStoredConfig(dir);
+    final saved = await webdavStore.load();
     expect(saved.address, 'https://192.0.2.7/dav');
     expect(saved.username, 'media');
     expect(saved.password, 'pass-1234');
     expect(saved.directory, 'backup');
 
     // 重进设置页仍回显,密码继续脱敏。
-    await pumpPage(tester, store: store, webdavDirectory: dir);
+    await pumpPage(tester, store: store, webdavStore: webdavStore);
     await expandSection(tester, '备份与同步');
     expect(
       tester
@@ -629,21 +583,16 @@ void main() {
     ];
     for (final (result, message) in cases) {
       final store = MemoryPlayerSettingsStore();
-      final dir = webDavTempDir();
-      seedConfig(dir, seededConfig);
       final fake = _FakeWebDavClient(connection: result);
       await pumpPage(
         tester,
         store: store,
-        webdavDirectory: dir,
+        webdavStore: _MemoryWebDavConfigStore(seededConfig),
         webdavClientFactory: (_) => fake,
       );
       await expandSection(tester, '备份与同步');
-      await runWebDavActionUntil(
-        tester,
-        () => tester.tap(find.byKey(SettingsPage.webDavTestConnectionKey)),
-        () => find.text(message).evaluate().isNotEmpty,
-      );
+      await tester.tap(find.byKey(SettingsPage.webDavTestConnectionKey));
+      await settle(tester);
       expect(find.text(message), findsOneWidget, reason: message);
     }
   }, tags: ['integration']);
@@ -652,41 +601,51 @@ void main() {
     tester,
   ) async {
     final store = MemoryPlayerSettingsStore();
-    final dir = webDavTempDir();
-    seedConfig(dir, seededConfig);
-    File('${dir.path}/servers.json').writeAsStringSync(
-      jsonEncode({
+    final bundle = <String, dynamic>{
+      'format': 'rillight-backup',
+      'version': 1,
+      'created_at': 1,
+      'servers': {
         'servers': [
           {'id': 'source-a', 'name': 'Main'},
         ],
-      }),
-    );
+      },
+      'credentials': {},
+      'prefs': {},
+    };
     final auth = _RestoreCountingAuth(MemoryCredentialStore());
+    Directory? seenDirectory;
+    CredentialStore? seenCredentials;
     final fake = _FakeWebDavClient();
     await pumpPage(
       tester,
       store: store,
       auth: auth,
-      webdavDirectory: dir,
+      webdavStore: _MemoryWebDavConfigStore(seededConfig),
       webdavClientFactory: (_) => fake,
+      webdavCollector: (directory, credentials) async {
+        seenDirectory = directory;
+        seenCredentials = credentials;
+        return bundle;
+      },
     );
     await expandSection(tester, '备份与同步');
 
-    await runInRealLoop(
-      tester,
-      () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
-      done: () => fake.uploadedBytes != null,
-    );
+    await tester.tap(find.byKey(SettingsPage.webDavBackupKey));
+    await settle(tester);
 
     expect(
       find.textContaining(RegExp('备份完成 · \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}')),
       findsOneWidget,
     );
+    // 注入采集器收到页面传入的凭据,上传字节即其返回的 bundle。
+    expect(seenCredentials, same(auth.credentials));
+    expect(seenDirectory, isNotNull);
     final uploaded = fake.uploadedBytes;
     expect(uploaded, isNotNull);
-    final bundle = jsonDecode(utf8.decode(uploaded!));
-    expect(bundle['format'], 'rillight-backup');
-    expect((bundle['servers'] as Map)['servers'], hasLength(1));
+    final uploadedBundle = jsonDecode(utf8.decode(uploaded!));
+    expect(uploadedBundle['format'], 'rillight-backup');
+    expect((uploadedBundle['servers'] as Map)['servers'], hasLength(1));
     // 备份动作不改登录态。
     expect(auth.restoreCalls, 0);
   }, tags: ['integration']);
@@ -695,26 +654,22 @@ void main() {
     tester,
   ) async {
     final store = MemoryPlayerSettingsStore();
-    final dir = webDavTempDir();
-    seedConfig(dir, seededConfig);
-    File('${dir.path}/servers.json').writeAsStringSync('{ not json');
     final fake = _FakeWebDavClient();
     await pumpPage(
       tester,
       store: store,
       auth: _RestoreCountingAuth(MemoryCredentialStore()),
-      webdavDirectory: dir,
+      webdavStore: _MemoryWebDavConfigStore(seededConfig),
       webdavClientFactory: (_) => fake,
+      // 采集链抛 FormatException 走本地损坏分支,不再写坏 servers.json。
+      webdavCollector: (directory, credentials) async =>
+          throw const FormatException('Invalid local configuration'),
     );
     await expandSection(tester, '备份与同步');
 
-    // 采集链在真实事件循环里跑到本地损坏分支。
     const corruptionNotice = '本地配置文件损坏，本次操作已取消';
-    await runWebDavActionUntil(
-      tester,
-      () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
-      () => find.text(corruptionNotice).evaluate().isNotEmpty,
-    );
+    await tester.tap(find.byKey(SettingsPage.webDavBackupKey));
+    await settle(tester);
 
     expect(find.text(corruptionNotice), findsOneWidget);
     expect(fake.uploadedBytes, isNull);
@@ -725,31 +680,17 @@ void main() {
     tester,
   ) async {
     final store = MemoryPlayerSettingsStore();
-    final dir = webDavTempDir();
-    seedConfig(dir, seededConfig);
+    final webdavStore = _MemoryWebDavConfigStore(seededConfig);
     final auth = _RestoreCountingAuth(MemoryCredentialStore());
-    final bundleBytes = Uint8List.fromList(
-      utf8.encode(
-        jsonEncode({
-          'format': 'rillight-backup',
-          'version': 1,
-          'created_at': 1,
-          'servers': {
-            'servers': [
-              {'id': 'source-restored', 'name': 'Restored'},
-            ],
-          },
-          'credentials': {},
-          'prefs': {},
-          'webdav': {
-            'address': 'https://192.0.2.9/dav',
-            'username': 'next',
-            'password': 'next-pass',
-            'directory': 'sync',
-          },
-        }),
-      ),
+    const restoredConfig = WebDavConfig(
+      address: 'https://192.0.2.9/dav',
+      username: 'next',
+      password: 'next-pass',
+      directory: 'sync',
     );
+    final bundleBytes = Uint8List.fromList(utf8.encode('synthetic-bundle'));
+    List<int>? appliedBytes;
+    CredentialStore? appliedCredentials;
     final fake = _FakeWebDavClient(
       downloadResult: WebDavDownloadSuccess(bundleBytes),
     );
@@ -757,22 +698,29 @@ void main() {
       tester,
       store: store,
       auth: auth,
-      webdavDirectory: dir,
+      webdavStore: webdavStore,
       webdavClientFactory: (_) => fake,
+      webdavApplier: (bytes, directory, credentials) async {
+        appliedBytes = bytes;
+        appliedCredentials = credentials;
+        // 模拟 bundle 覆盖 webdav.json,供原位重载回填表单。
+        await webdavStore.save(restoredConfig);
+        return const WebDavApplySuccess(needsReload: true);
+      },
     );
     await expandSection(tester, '备份与同步');
 
-    // 应用与重载链都是真实文件 IO,在窗口内等到原位重载完成。
-    await runInRealLoop(
-      tester,
-      () => tester.tap(find.byKey(SettingsPage.webDavRestoreKey)),
-      done: () => auth.restoreCalls == 1,
-    );
+    // 应用与重载链全程内存 Future,settle 即确定性完成。
+    await tester.tap(find.byKey(SettingsPage.webDavRestoreKey));
+    await settle(tester);
 
     expect(find.text('已恢复'), findsOneWidget);
     // 无二次确认弹窗,动作一次点击直接完成并触发了原位重载。
     expect(find.byType(CupertinoAlertDialog), findsNothing);
     expect(auth.restoreCalls, 1);
+    // 应用器收到下载字节与页面凭据。
+    expect(appliedBytes, bundleBytes);
+    expect(appliedCredentials, same(auth.credentials));
     // bundle 里的 WebDAV 配置覆盖本地后,表单回填新值。
     expect(
       tester
@@ -781,9 +729,6 @@ void main() {
           .text,
       'https://192.0.2.9/dav',
     );
-    final servers =
-        jsonDecode(File('${dir.path}/servers.json').readAsStringSync()) as Map;
-    expect((servers['servers'] as List), hasLength(1));
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -793,39 +738,43 @@ void main() {
     final noBackup = _FakeWebDavClient(
       downloadResult: const WebDavDownloadNoBackup(),
     );
+    final rejectedBytes = Uint8List.fromList(utf8.encode('not a backup'));
     final rejected = _FakeWebDavClient(
-      downloadResult: WebDavDownloadSuccess(
-        Uint8List.fromList(utf8.encode('not a backup')),
-      ),
+      downloadResult: WebDavDownloadSuccess(rejectedBytes),
     );
     for (final (fake, message) in [
       (noBackup, '服务器上还没有备份文件'),
       (rejected, '备份文件校验未通过，本地数据未改动'),
     ]) {
       final store = MemoryPlayerSettingsStore();
-      final dir = webDavTempDir();
-      seedConfig(dir, seededConfig);
-      File('${dir.path}/servers.json')
-          .writeAsStringSync(jsonEncode({'servers': []}));
+      final webdavStore = _MemoryWebDavConfigStore(seededConfig);
+      final auth = _RestoreCountingAuth(MemoryCredentialStore());
+      var applierCalls = 0;
       await pumpPage(
         tester,
         store: store,
-        auth: _RestoreCountingAuth(MemoryCredentialStore()),
-        webdavDirectory: dir,
+        auth: auth,
+        webdavStore: webdavStore,
         webdavClientFactory: (_) => fake,
+        // 校验拒绝的应用器:零写入,直接返回拒绝。
+        webdavApplier: (bytes, directory, credentials) async {
+          applierCalls++;
+          return const WebDavApplyRejected(WebDavBackupError.malformed);
+        },
       );
       await expandSection(tester, '备份与同步');
-      await runWebDavActionUntil(
-        tester,
-        () => tester.tap(find.byKey(SettingsPage.webDavRestoreKey)),
-        () => find.text(message).evaluate().isNotEmpty,
-      );
+      await tester.tap(find.byKey(SettingsPage.webDavRestoreKey));
+      await settle(tester);
       expect(find.text(message), findsOneWidget, reason: message);
-      // 拒绝路径零写入,servers.json 保持原样。
-      final servers = jsonDecode(
-        File('${dir.path}/servers.json').readAsStringSync(),
-      ) as Map;
-      expect(servers['servers'], isEmpty);
+      // 拒绝路径零写入:配置保持原样,不触发原位重载。
+      final config = await webdavStore.load();
+      expect(config.address, seededConfig.address);
+      expect(auth.restoreCalls, 0);
+      if (identical(fake, rejected)) {
+        expect(applierCalls, 1);
+      } else {
+        expect(applierCalls, 0);
+      }
     }
   }, tags: ['integration']);
 
@@ -833,29 +782,22 @@ void main() {
     'webdav actions without an address point to configuration first',
     (tester) async {
       final store = MemoryPlayerSettingsStore();
-      final dir = webDavTempDir();
       await pumpPage(
         tester,
         store: store,
         auth: _RestoreCountingAuth(MemoryCredentialStore()),
-        webdavDirectory: dir,
+        webdavStore: _MemoryWebDavConfigStore(),
         webdavClientFactory: (_) => _FakeWebDavClient(),
       );
       await expandSection(tester, '备份与同步');
 
       const missingAddressNotice = '请先填写 WebDAV 服务器地址';
-      await runWebDavActionUntil(
-        tester,
-        () => tester.tap(find.byKey(SettingsPage.webDavBackupKey)),
-        () => find.text(missingAddressNotice).evaluate().isNotEmpty,
-      );
+      await tester.tap(find.byKey(SettingsPage.webDavBackupKey));
+      await settle(tester);
       expect(find.text(missingAddressNotice), findsOneWidget);
 
-      await runWebDavActionUntil(
-        tester,
-        () => tester.tap(find.byKey(SettingsPage.webDavRestoreKey)),
-        () => find.text(missingAddressNotice).evaluate().length >= 2,
-      );
+      await tester.tap(find.byKey(SettingsPage.webDavRestoreKey));
+      await settle(tester);
       expect(find.text(missingAddressNotice), findsNWidgets(2));
       expect(tester.takeException(), isNull);
     },
