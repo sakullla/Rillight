@@ -58,6 +58,7 @@ class CredentialCommit {
   final SourceSessionRegistry owner;
   final String id;
   final int scope;
+  void Function()? _settledSelectionGuard;
 }
 
 /// An authorization transaction is captured before password/Quick Connect/PIN
@@ -1116,6 +1117,18 @@ class SourceSessionRegistry {
     }
   }
 
+  /// Only a completed write or completed rollback can replace the selected
+  /// lease retired by that write. Later authorization or entry changes still
+  /// revoke this proof; callers cannot renew it by taking a fresh snapshot.
+  void Function() settledCredentialsGuard(CredentialCommit commit) {
+    final guard = commit._settledSelectionGuard;
+    if (!identical(commit.owner, this) || guard == null) {
+      throw StateError('Credential write did not settle');
+    }
+    guard();
+    return guard;
+  }
+
   /// Shares the configuration writer. Migration revokes synchronously; if it
   /// starts during secure-store IO, restore the old value before it can commit.
   Future<void> commitCredentials(
@@ -1142,6 +1155,15 @@ class SourceSessionRegistry {
       commit.id,
       _authorizations[commit.id]!,
     );
+    final generation = access.generation(commit.id);
+    void settledGuard() {
+      _guardCredentials(writing);
+      requireContentAccess(commit.id);
+      if (access.generation(commit.id) != generation) {
+        throw StateError('Credential entry revoked');
+      }
+    }
+
     try {
       if (value == null) {
         await credentials.delete(commit.id);
@@ -1176,6 +1198,7 @@ class SourceSessionRegistry {
           await access.register(server);
         }
       }
+      if (value != null) commit._settledSelectionGuard = settledGuard;
     } catch (error) {
       if (savedConfig) {
         await store.save(
@@ -1193,6 +1216,9 @@ class SourceSessionRegistry {
         } else {
           await credentials.write(commit.id, previous);
         }
+      }
+      if (value != null && previous != null) {
+        commit._settledSelectionGuard = settledGuard;
       }
       rethrow;
     } finally {

@@ -973,7 +973,7 @@ class AuthController extends ChangeNotifier {
   /// 修改当前登录用户的密码;旧密码留空照常提交,客户端不做拦截。
   ///
   /// 成功:本机凭据换成新密码,会话保持可用。
-  /// 失败:本机保留旧密码,用户仍处于登录态,原因经
+  /// 失败:本机尝试恢复旧密码,仍有效的会话保持可用,原因经
   /// [passwordChangeFailure] 暴露。服务器改密后吊销当前会话时,
   /// 复用会话过期路径回到登录页,本机已存的新密码可直接重新进入。
   Future<bool> changePassword({
@@ -984,20 +984,37 @@ class AuthController extends ChangeNotifier {
     if (_busy || session == null || newPassword.isEmpty) {
       return false;
     }
+    final sessionOwner = _sessionOwner;
+    final accessGeneration = serverAccess.generation(session.server.id);
+    final activationGeneration = _activationGeneration;
+    bool ownsSession() =>
+        !_disposed &&
+        identical(_sessionOwner, sessionOwner) &&
+        _isSameSession(session);
+    bool entryCurrent() =>
+        ownsSession() &&
+        _activationGeneration == activationGeneration &&
+        serverAccess.allows(session.server.id) &&
+        serverAccess.generation(session.server.id) == accessGeneration;
+    CredentialCommit? credentialCommit;
+    var remoteChanged = false;
     _busy = true;
     _passwordChangeFailure = null;
     notifyListeners();
     try {
-      final credentialCommit = await sources.beginCredentials(
-        session.server.id,
-      );
+      credentialCommit = await sources.beginCredentials(session.server.id);
+      if (!entryCurrent()) throw StateError('Password change superseded');
+      _selectionGuard?.call();
       await client.changePassword(
         currentPassword: (currentPassword == null || currentPassword.isEmpty)
             ? null
             : currentPassword,
         newPassword: newPassword,
       );
+      remoteChanged = true;
       final stored = await credentials.read(session.server.id);
+      if (!entryCurrent()) throw StateError('Password change superseded');
+      _selectionGuard?.call();
       await sources.commitCredentials(
         credentialCommit,
         StoredCredentials(
@@ -1014,13 +1031,6 @@ class AuthController extends ChangeNotifier {
           authMaterial: stored?.authMaterial ?? const {},
         ),
       );
-      // Saving the new password retires credential leases, even though this
-      // account and its remote token remain the same. Renew the selected lease
-      // before probing that token; a retired guard would mask a real 401.
-      if (identical(_session, session)) {
-        _selectionGuard = sources.selectedSessionGuard(session.server.id);
-      }
-      await _verifySessionAfterPasswordChange();
       return true;
     } on MediaServerException catch (error) {
       _passwordChangeFailure = error;
@@ -1033,8 +1043,28 @@ class AuthController extends ChangeNotifier {
       );
       return false;
     } finally {
+      if (remoteChanged && entryCurrent()) {
+        try {
+          try {
+            _selectionGuard?.call();
+          } on StateError {
+            // The registry retires the lease before secure-store IO. Both a
+            // successful write and a confirmed rollback can preserve this
+            // account's live token, but a failed rollback cannot do so.
+            _selectionGuard = sources.settledCredentialsGuard(
+              credentialCommit!,
+            );
+          }
+          await _verifySessionAfterPasswordChange();
+        } catch (_) {
+          if (ownsSession()) _onSessionExpired();
+        }
+      }
       _busy = false;
-      notifyListeners();
+      if (!_disposed) {
+        _sourceChanged(session.server.id);
+        notifyListeners();
+      }
     }
   }
 
@@ -1042,14 +1072,15 @@ class AuthController extends ChangeNotifier {
   /// 会话已失效时走 [_onSessionExpired] 回到登录页;其它探测失败
   /// (如瞬时网络错误)不影响已完成的改密结果。
   Future<void> _verifySessionAfterPasswordChange() async {
-    final refresh = client.onRefreshSession;
-    client.onRefreshSession = null;
+    final selectedClient = client;
+    final refresh = selectedClient.onRefreshSession;
+    selectedClient.onRefreshSession = null;
     try {
-      await client.getUser();
+      await selectedClient.getUser();
     } on MediaServerException {
       // 会话过期时回调已把用户带回登录页,这里只需吞掉探测异常。
     } finally {
-      client.onRefreshSession = refresh;
+      selectedClient.onRefreshSession = refresh;
     }
   }
 

@@ -1,5 +1,7 @@
 import '../helpers/cupertino_test_app.dart';
 
+import 'dart:async';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -15,6 +17,8 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/credential_store.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 
 import 'server_ui_harness.dart';
@@ -33,6 +37,26 @@ const _device = ClientDeviceInfo(
   deviceId: 'device-change-password',
   version: '0.1.0',
 );
+
+class _FailingCredentialStore extends MemoryCredentialStore {
+  int failingWrites = 0;
+  Future<void> Function()? beforeFailure;
+
+  @override
+  Future<void> write(String id, StoredCredentials credentials) async {
+    if (failingWrites > 0) {
+      failingWrites--;
+      final wait = beforeFailure;
+      beforeFailure = null;
+      await wait?.call();
+      // Secure storage can report failure after changing its value. Recovery
+      // must wait for a successful rollback, not just read an old snapshot.
+      await super.write(id, credentials);
+      throw StateError('synthetic credential write failure');
+    }
+    await super.write(id, credentials);
+  }
+}
 
 void main() {
   late FakeEmbyServer server;
@@ -69,6 +93,122 @@ void main() {
     }
     expect(auth.isLoggedIn, isTrue);
     return auth;
+  }
+
+  Future<AuthController> connectedWithStore(
+    _FailingCredentialStore store,
+  ) async {
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: store,
+      servers: MemoryServerListStore(),
+    );
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(auth.isLoggedIn, isTrue);
+    return auth;
+  }
+
+  for (final outcome in ['rollback', 'rollback failure', 'revoked token']) {
+    test('password write failure reconciles $outcome honestly', () async {
+      final store = _FailingCredentialStore();
+      final auth = await connectedWithStore(store);
+      final id = auth.session!.server.id;
+      final token = auth.session!.accessToken;
+      final retained = auth.client;
+      store.failingWrites = outcome == 'rollback failure' ? 2 : 1;
+      server.revokeSessionOnChangePassword = outcome == 'revoked token';
+
+      expect(await auth.changePassword(newPassword: 'new-horse'), isFalse);
+      expect(auth.isBusy, isFalse);
+      expect(auth.passwordChangeFailure, isNotNull);
+      expect(auth.passwordChangeFailure!.detail, contains('write failure'));
+      expect(server.effectivePassword('user-alice'), 'new-horse');
+      expect((await store.read(id))!.password, 'correct-horse');
+      if (outcome == 'rollback') {
+        expect(server.issuedTokens, contains(token));
+        expect(auth.isLoggedIn, isTrue);
+        expect(auth.session!.accessToken, token);
+        expect(await auth.client.getViews(), isNotEmpty);
+        expect(await retained.getViews(), isNotEmpty);
+      } else {
+        expect(auth.isLoggedIn, isFalse);
+        expect(auth.prefill!.id, id);
+        await expectLater(() => retained.getViews(), throwsA(anything));
+      }
+    });
+  }
+
+  for (final boundary in ['lock', 'lock and unlock', 'another account']) {
+    test('password rollback cannot revive entry after $boundary', () async {
+      final store = _FailingCredentialStore();
+      final auth = await connectedWithStore(store);
+      final id = auth.session!.server.id;
+      String? otherId;
+      if (boundary == 'another account') {
+        final other = FakeEmbyServer(
+          baseUrl: Uri.parse('http://other-password.test:8096'),
+          serverId: 'other-password-server',
+        );
+        adapter.add(other);
+        await auth.connect(
+          address: other.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        otherId = auth.session!.server.id;
+        await auth.switchTo(id);
+      } else {
+        await auth.serverAccess.setPassword(
+          id,
+          'local',
+          'local',
+          persistReference: (ref) =>
+              auth.sources.persistProtectionReference(id, ref),
+        );
+        expect(await auth.serverAccess.unlock(id, 'local'), isTrue);
+        await auth.switchTo(id);
+      }
+      final retained = auth.client;
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      store.failingWrites = 1;
+      store.beforeFailure = () async {
+        entered.complete();
+        await release.future;
+      };
+      final changing = auth.changePassword(newPassword: 'new-horse');
+      await entered.future;
+      Future<void>? switching;
+      if (otherId != null) {
+        switching = auth.switchTo(otherId);
+      } else {
+        await auth.serverAccess.lock(id);
+        if (boundary == 'lock and unlock') {
+          expect(await auth.serverAccess.unlock(id, 'local'), isTrue);
+        }
+      }
+      release.complete();
+      expect(await changing, isFalse);
+      await switching;
+      if (otherId != null) {
+        expect(auth.session!.server.id, otherId);
+        expect(await auth.client.getViews(), isNotEmpty);
+      } else {
+        expect(auth.isLoggedIn, isFalse);
+      }
+      await Future<void>.delayed(Duration.zero);
+      final requests = server.requests.length;
+      await expectLater(() => retained.getViews(), throwsA(anything));
+      expect(await retained.onRefreshSession!(), isFalse);
+      expect(server.requests.length, requests);
+      expect((await store.read(id))!.password, 'correct-horse');
+      expect(auth.passwordChangeFailure, isNotNull);
+    });
   }
 
   test(
@@ -237,6 +377,36 @@ void main() {
             ?.password,
         'new-horse',
       );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'dialog keeps password inputs after a recoverable local save error',
+    (tester) async {
+      final store = _FailingCredentialStore();
+      final auth = (await tester.runAsync(() => connectedWithStore(store)))!;
+      await _pumpDialog(tester, auth);
+      await tester.enterText(
+        find.byKey(ChangePasswordDialog.newPasswordField),
+        'new-horse',
+      );
+      await tester.enterText(
+        find.byKey(ChangePasswordDialog.confirmField),
+        'new-horse',
+      );
+      await tester.pump();
+      store.failingWrites = 1;
+      await tester.tap(find.byKey(ChangePasswordDialog.submitKey));
+      await _pumpUntilFound(
+        tester,
+        find.byKey(ChangePasswordDialog.failureKey),
+      );
+      expect(find.byType(ui.AppDialog), findsOneWidget);
+      expect(find.text('new-horse'), findsNWidgets(2));
+      expect(auth.passwordChangeFailure, isNotNull);
+      expect(auth.isLoggedIn, isTrue);
+      expect(await tester.runAsync(() => auth.client.getViews()), isNotEmpty);
       expect(tester.takeException(), isNull);
     },
   );

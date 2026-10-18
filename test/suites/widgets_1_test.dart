@@ -15,8 +15,12 @@ void main() {
     caseEntrypoints['auth/line_management_cases.dart']!,
   );
   group(
-    'auth/provider_connect_management_test.dart',
-    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
+    'auth/provider_connect_entry_user_agent_test.dart',
+    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
+  );
+  group(
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
   );
   group(
     'library/person_works_test.dart',
@@ -33,9 +37,5 @@ void main() {
   group(
     'mobile/phone_nav_style_test.dart',
     caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
-  );
-  group(
-    'mobile/tv_shelf_focus_test.dart',
-    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
   );
 }
