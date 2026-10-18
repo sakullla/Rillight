@@ -38,6 +38,9 @@ import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 import 'package:rillight/player/player_host_command.dart';
+import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/aggregation/history/history_writer.dart';
 
 class _ImageDisk implements MediaImageDiskStore {
   final reads = <String>[];
@@ -978,6 +981,11 @@ void main() {
         sources: registry,
       );
       await tester.runAsync(auth.restore);
+      final history = (await tester.runAsync(
+        () =>
+            HistoryWriter.open(registry: registry, store: MemoryHistoryStore()),
+      ))!;
+      final runtime = PlaybackRuntime(auth: auth, history: history);
       final router = createAppRouter(
         auth: auth,
         environment: PresentationEnvironment.desktop,
@@ -986,6 +994,7 @@ void main() {
         RillightApp(
           auth: auth,
           router: router,
+          playerBindings: PlayerBindings(runtime: runtime),
           environment: PresentationEnvironment.desktop,
         ),
       );
@@ -1006,7 +1015,7 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
       await settle(tester);
-      expect(find.text('查找同源'), findsNothing);
+      expect(find.byKey(const Key('source-selection-open')), findsNothing);
       expect(
         tester
             .widget<SourceDetailGate>(find.byType(SourceDetailGate))
@@ -1024,7 +1033,7 @@ void main() {
       expect(router.state.uri.path, '/item/similar');
       expect(router.state.uri.queryParameters['showComparison'], '0');
       expect(find.text('b-similar-detail'), findsWidgets);
-      expect(find.text('查找同源'), findsNothing);
+      expect(find.byKey(const Key('source-selection-open')), findsNothing);
       // A similar title does not belong to the current item's own id.
       // It still opens on server B.
       transport.requests.clear();
@@ -1088,7 +1097,26 @@ void main() {
         router.state.uri.queryParameters.containsKey('showComparison'),
         isFalse,
       );
-      expect(find.text('查找同源'), findsOneWidget);
+      expect(find.byKey(const Key('source-selection-open')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('source-selection-open')));
+      // Source discovery also reads credential storage outside fake frames.
+      for (var frame = 0; frame < 30; frame++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        if (find
+            .byKey(const Key('source-selection-title'))
+            .evaluate()
+            .isNotEmpty) {
+          break;
+        }
+      }
+
+      expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('source-selection-close')));
+      await settle(tester);
+      expect(find.byKey(const Key('source-selection-title')), findsNothing);
       expect(
         tester
             .widget<SourceDetailGate>(find.byType(SourceDetailGate))
@@ -1098,6 +1126,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       router.dispose();
+      await tester.runAsync(history.close);
       auth.dispose();
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 20));

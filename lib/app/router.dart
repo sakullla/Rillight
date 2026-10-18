@@ -51,6 +51,44 @@ import 'package:rillight/player/tv_player_page.dart';
 
 export 'package:rillight/app/routes.dart';
 
+/// Only navigation authorization changes need GoRouter reparsing. Catalog
+/// counts, token renewal and same-account playback line projections rebuild
+/// their own consumers. Reparsing those notifications in go_router 16 loses
+/// the completer of an imperative push, leaving callers waiting after pop.
+class _AuthRouteRefresh implements Listenable {
+  _AuthRouteRefresh(this.auth);
+  final AuthController auth;
+  final Map<VoidCallback, VoidCallback> _listeners = {};
+
+  Object get _state => (
+    auth.isLoggedIn,
+    auth.session?.server.id,
+    auth.session?.userId,
+    auth.presentingAuthorization,
+    auth.savedServers.isEmpty,
+  );
+
+  @override
+  void addListener(VoidCallback listener) {
+    var previous = _state;
+    void changed() {
+      final current = _state;
+      if (current == previous) return;
+      previous = current;
+      listener();
+    }
+
+    _listeners[listener] = changed;
+    auth.addListener(changed);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    final changed = _listeners.remove(listener);
+    if (changed != null) auth.removeListener(changed);
+  }
+}
+
 GoRouter createAppRouter({
   required AuthController auth,
   PresentationEnvironment environment = PresentationEnvironment.desktop,
@@ -74,7 +112,10 @@ GoRouter createAppRouter({
     ),
     extraCodec: const SourceRouteExtraCodec(),
     observers: [_ConnectFlowObserver(auth)],
-    refreshListenable: Listenable.merge([auth, auth.serverAccess]),
+    refreshListenable: Listenable.merge([
+      _AuthRouteRefresh(auth),
+      auth.serverAccess,
+    ]),
     redirect: (context, state) {
       if (state.uri.path == '/private') return '/servers';
       if (!environment.isDesktop &&

@@ -10,12 +10,14 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/catalog_keys.dart';
 
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/tv_player_page.dart';
@@ -49,13 +51,17 @@ Future<void> _back(WidgetTester tester) async {
 
 void main() {
   setUp(isolateImageCache);
-  Future<RillightApp> start(WidgetTester tester, FakeEmbyServer server) async {
+  Future<RillightApp> start(
+    WidgetTester tester,
+    FakeEmbyServer server, {
+    FakeEmbyServer? alternate,
+  }) async {
     tester.view.physicalSize = const Size(960, 540);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final auth = SyntheticSourceAuth(
-      adapter: FakeEmbyAdapter([server]),
+      adapter: FakeEmbyAdapter([server, ?alternate]),
       device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'tv',
@@ -357,8 +363,22 @@ void main() {
             runtime: Duration(microseconds: (minute * 22) ~/ 10),
           ),
       ]);
-      final app = await start(tester, server);
+      final alternate = FakeEmbyServer(
+        serverId: server.serverId,
+        baseUrl: Uri.parse('http://tv-alternate.test:8096'),
+        items: server.items,
+      );
+      final app = await start(tester, server, alternate: alternate);
       await login(tester, server);
+      alternate.issuedTokens.addAll(server.issuedTokens);
+      final serverId = app.auth.session!.server.id;
+      await tester.runAsync(
+        () => app.auth.sources.setLineAddress(
+          serverId,
+          alternate.baseUrl.toString(),
+        ),
+      );
+      final alternateLine = app.auth.sources.server(serverId).lines.last.id;
       await openItem(tester, app, 'series-friends');
 
       expect(find.byType(TvDetailPage), findsOneWidget);
@@ -450,25 +470,58 @@ void main() {
 
       // 遥控器确认开播;返回后详情重新加载,分集进度/已看状态随刷新更新。
       // 播放器会拦截返回键(先收控制层/结束页),逐级弹出直到回到详情。
-      final before = detailRequests(server, 'series-friends');
-      await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(TvPlayerPage), findsOneWidget);
-      for (
-        var i = 0;
-        i < 4 && find.byType(TvDetailPage).evaluate().isEmpty;
-        i++
-      ) {
-        await _back(tester);
+      for (var playback = 0; playback < 2; playback++) {
+        final before =
+            detailRequests(server, 'series-friends') +
+            detailRequests(alternate, 'series-friends');
+        await key(tester, LogicalKeyboardKey.select);
+        expect(find.byType(TvPlayerPage), findsOneWidget);
+        if (playback == 1) {
+          final player = tester
+              .state<TvPlayerPageState>(find.byType(TvPlayerPage))
+              .controller!;
+          var switched = false;
+          final change = player.selectPlaybackLine(
+            LineSelection.fixed(alternateLine),
+          );
+          unawaited(change.then((_) => switched = true));
+          for (var frame = 0; frame < 60 && !switched; frame++) {
+            await _settle(tester);
+          }
+          expect(switched, isTrue);
+          await change;
+          expect(player.origin!.client.baseUrl, alternate.baseUrl);
+          expect(app.auth.session!.server.activeLineId, alternateLine);
+        }
+        app.auth.publishPlaybackConnection(
+          app.auth.session!.server.id,
+          app.auth.client,
+        );
         await _settle(tester);
-        await tester.pump(const Duration(seconds: 4));
-        await _settle(tester);
+        for (
+          var i = 0;
+          i < 4 && find.byType(TvDetailPage).evaluate().isEmpty;
+          i++
+        ) {
+          await _back(tester);
+          await _settle(tester);
+          await tester.pump(const Duration(seconds: 4));
+          await _settle(tester);
+        }
+        expect(find.byType(TvDetailPage), findsOneWidget);
+        expect(
+          detailRequests(server, 'series-friends') +
+              detailRequests(alternate, 'series-friends'),
+          greaterThan(before),
+          reason: '播放返回后详情必须重新拉取,分集进度与已看状态才刷新',
+        );
+        expect(
+          tester
+              .widget<TvAction>(find.byKey(const Key('tv-detail-play')))
+              .onPressed,
+          isNotNull,
+        );
       }
-      expect(find.byType(TvDetailPage), findsOneWidget);
-      expect(
-        detailRequests(server, 'series-friends'),
-        greaterThan(before),
-        reason: '播放返回后详情必须重新拉取,分集进度与已看状态才刷新',
-      );
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

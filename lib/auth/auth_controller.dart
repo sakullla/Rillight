@@ -1165,6 +1165,7 @@ class AuthController extends ChangeNotifier {
     bool usePrepared = false,
     bool deferPublication = false,
     bool remember = false,
+    bool preserveContentOwner = false,
   }) async {
     guard?.call();
     final operation = generation ?? ++_activationGeneration;
@@ -1249,7 +1250,8 @@ class AuthController extends ChangeNotifier {
       }
       retiredGuarded?.clearSession();
       _client = attached;
-      if (_session?.server.id != server.id ||
+      if (!preserveContentOwner ||
+          _session?.server.id != server.id ||
           _session?.userId != stored.userId) {
         _contentOwner = Object();
       }
@@ -1423,6 +1425,7 @@ class AuthController extends ChangeNotifier {
           session.server,
           next,
           generation: generation,
+          preserveContentOwner: true,
           guard: () {
             if (!current()) throw StateError('Refresh superseded');
           },
