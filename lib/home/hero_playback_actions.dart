@@ -119,13 +119,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
               child: CupertinoActivityIndicator(),
             )
           : Icon(AppIcons.play, size: expand ? 22 : 24, fill: AppIcons.filled),
-      label: Text(
-        l10n.play,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-
-        style: const TextStyle(fontWeight: FontWeight.w700),
-      ),
+      label: Text(l10n.play, maxLines: 1, overflow: TextOverflow.ellipsis),
       style: AppButtonStyle(
         minimumSize: Size(0, expand ? 48 : 52),
         shape: const StadiumBorder(),
@@ -158,26 +152,26 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
             variant: AppButtonVariant.outlined,
             child: Text(l10n.details),
           )
+        // 桌面详情钮与播放同高的胶囊:半透明染色底 + 细边,不做成圆钮。
         : AppButton(
             onPressed: widget.onDetails,
             style: AppButtonStyle(
               minimumSize: const Size(0, 52),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
               shape: const StadiumBorder(),
               foregroundColor: onScrim
                   ? const Color(0xffffffff)
                   : scheme.onSurface,
-              // 深色遮罩上的详情钮做玻璃 pill:白底低透明 + 细白边,
-              // 比裸描边在复杂底图上更清晰,也和播放钮的实底形成层次。
               backgroundColor: onScrim
-                  ? const Color(0xffffffff).withValues(alpha: .14)
-                  : scheme.surfaceContainerLowest,
+                  ? const Color(0xffffffff).withValues(alpha: .16)
+                  : scheme.surfaceContainerHigh,
               side: BorderSide(
                 color: onScrim
                     ? const Color(0xffffffff).withValues(alpha: .32)
-                    : scheme.outline,
+                    : scheme.outlineVariant,
               ),
             ),
-            variant: AppButtonVariant.outlined,
+            variant: AppButtonVariant.tinted,
             child: Text(l10n.details),
           );
     if (expand) {

@@ -351,7 +351,7 @@ class _MediaShelfState extends State<MediaShelf> {
     final delta = position.viewportDimension * 0.9 * direction;
     _controller.animateTo(
       (position.pixels + delta).clamp(0.0, position.maxScrollExtent),
-      duration: const Duration(milliseconds: 220),
+      duration: AppMotion.durationOf(context, AppMotion.normal),
       curve: Curves.easeOut,
     );
   }
@@ -362,7 +362,8 @@ class _MediaShelfState extends State<MediaShelf> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     return Padding(
       key: widget.rowKey,
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      // 分区之间留 32(AppSpacing.xxl)。
+      padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -375,19 +376,8 @@ class _MediaShelfState extends State<MediaShelf> {
                     widget.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    // 分区标题两级字阶:手机 20 号粗体,桌面用 titleLarge(20)加粗,
-                    // 不再比手机小一档。
-                    style: AppUiTheme.of(context).phone
-                        ? AppUiTheme.of(context).textTheme.titleLarge?.copyWith(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            height: 1.25,
-                            letterSpacing: -0.2,
-                          )
-                        : AppUiTheme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                          ),
+                    // 分区标题用 titleMedium(手机/桌面同一档),标题与内容间距见下方 12。
+                    style: AppUiTheme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 if (widget.headerAction != null) widget.headerAction!,
