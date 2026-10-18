@@ -887,7 +887,8 @@ class _TvDetailHeader extends StatelessWidget {
                         ].join('  ·  '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          height: 1.3,
                           color: const Color(0xffffffff).withValues(alpha: .82),
                         ),
                       ),
@@ -907,7 +908,8 @@ class _TvDetailHeader extends StatelessWidget {
                     overview,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      height: 1.3,
                       color: const Color(0xffffffff).withValues(alpha: .78),
                     ),
                   ),
@@ -938,19 +940,17 @@ class _TvBadge extends StatelessWidget {
     final s = TvDesign.scaleOf(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(3 * s),
-        border: Border.all(
-          color: const Color(0xffffffff).withValues(alpha: .6),
-        ),
+        borderRadius: BorderRadius.circular(AppRadii.xs * s),
+        // 发丝描边:只做轻量分组,不抢封面和标题。
+        border: Border.all(color: AppEdge.of(Brightness.dark)),
       ),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 5 * s, vertical: 1 * s),
+        padding: EdgeInsets.symmetric(horizontal: 6 * s, vertical: 2 * s),
         child: Text(
           label,
-          style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
-            color: const Color(0xffffffff).withValues(alpha: .9),
-            fontWeight: FontWeight.w700,
-            letterSpacing: .3,
+          style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
+            color: const Color(0xffffffff).withValues(alpha: .78),
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),

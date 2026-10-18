@@ -76,30 +76,65 @@ class TvTopNavBar extends StatelessWidget {
               IgnorePointer(child: _Brand(name: l.appName)),
               SizedBox(width: 28 * s),
               for (var i = 0; i < labels.length; i++) ...[
-                Focus(
-                  skipTraversal: true,
-                  canRequestFocus: false,
-                  onKeyEvent: (_, event) {
-                    if (event is KeyDownEvent &&
-                        event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                      onEnter(i);
-                      return KeyEventResult.handled;
-                    }
-                    return KeyEventResult.ignored;
-                  },
-                  child: TvAction(
-                    key: ValueKey('tv-nav-$i'),
-                    autofocus: i == 0,
-                    focusNode: i == 0 ? homeNode : null,
-                    selected: i == index,
-                    variant: TvActionVariant.ghost,
-                    leading: Icon(
-                      _icons[i],
-                      fill: i == index ? AppIcons.filled : AppIcons.outline,
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Focus(
+                      skipTraversal: true,
+                      canRequestFocus: false,
+                      onKeyEvent: (_, event) {
+                        if (event is KeyDownEvent &&
+                            event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                          onEnter(i);
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: TvAction(
+                        key: ValueKey('tv-nav-$i'),
+                        autofocus: i == 0,
+                        focusNode: i == 0 ? homeNode : null,
+                        selected: i == index,
+                        variant: TvActionVariant.ghost,
+                        leading: Icon(
+                          _icons[i],
+                          fill: i == index ? AppIcons.filled : AppIcons.outline,
+                        ),
+                        onPressed: () => onSelect(i),
+                        // 未选中的标签收成常规字重,当前项加粗;焦点白胶囊另行表达。
+                        child: Text(
+                          labels[i],
+                          style: TextStyle(
+                            fontWeight: i == index
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ),
-                    onPressed: () => onSelect(i),
-                    child: Text(labels[i]),
-                  ),
+                    // 当前面板的指示条:叠在胶囊下方、不占布局高度,
+                    // 与焦点的白胶囊形态不同,二者一眼可辨。
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: -7 * s,
+                      child: Center(
+                        child: AnimatedContainer(
+                          duration: AppMotion.durationOf(
+                            context,
+                            AppMotion.normal,
+                          ),
+                          curve: AppMotion.standard,
+                          width: i == index ? 18 * s : 0,
+                          height: 3 * s,
+                          decoration: BoxDecoration(
+                            color: scheme.primary,
+                            borderRadius: BorderRadius.circular(AppRadii.pill),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 SizedBox(width: 6 * s),
               ],
@@ -168,12 +203,7 @@ class _Brand extends StatelessWidget {
           ),
         ),
         SizedBox(width: 8 * s),
-        Text(
-          name,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        Text(name, style: theme.textTheme.titleMedium),
       ],
     );
   }

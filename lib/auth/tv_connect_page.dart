@@ -341,8 +341,9 @@ class _TvConnectPageState extends State<TvConnectPage> {
       padding: EdgeInsets.all(20 * s),
       decoration: BoxDecoration(
         color: scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(20 * s),
-        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(AppRadii.overlay * s),
+        border: Border.all(color: AppEdge.of(theme.brightness)),
+        boxShadow: AppShadow.overlay(theme.brightness),
       ),
       child: ProviderLoginForm(
         userAgent: () => _userAgent.text,
@@ -527,7 +528,7 @@ class _Brand extends StatelessWidget {
           width: 30 * s,
           height: 30 * s,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8 * s),
+            borderRadius: BorderRadius.circular(AppRadii.sm * s),
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -542,12 +543,7 @@ class _Brand extends StatelessWidget {
           ),
         ),
         SizedBox(width: 10 * s),
-        Text(
-          name,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        Text(name, style: theme.textTheme.titleLarge),
       ],
     );
   }
@@ -650,7 +646,7 @@ class _TvLanWaitingState extends State<_TvLanWaiting> {
               height: 156 * s,
               decoration: BoxDecoration(
                 color: const Color(0xffffffff),
-                borderRadius: BorderRadius.circular(14 * s),
+                borderRadius: BorderRadius.circular(AppRadii.card * s),
               ),
               padding: EdgeInsets.all(10 * s),
               child: TvLanQrImage(
@@ -800,7 +796,7 @@ class _TvLanPendingState extends State<_TvLanPending> {
           width: double.infinity,
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainer,
-            borderRadius: BorderRadius.circular(14 * s),
+            borderRadius: BorderRadius.circular(AppRadii.card * s),
           ),
           padding: EdgeInsets.fromLTRB(16 * s, 14 * s, 16 * s, 6 * s),
           child: Column(
