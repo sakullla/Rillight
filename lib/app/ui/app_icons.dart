@@ -65,6 +65,8 @@ abstract final class AppIcons {
   static const IconData chevronRight = Symbols.chevron_right_rounded;
   static const IconData chevronDown = Symbols.expand_more_rounded;
   static const IconData chevronUp = Symbols.expand_less_rounded;
+  static const IconData more = Symbols.more_horiz_rounded;
+  static const IconData moreVertical = Symbols.more_vert_rounded;
   static const IconData forward = Symbols.arrow_forward_rounded;
   static const IconData arrowUp = Symbols.arrow_upward_rounded;
 

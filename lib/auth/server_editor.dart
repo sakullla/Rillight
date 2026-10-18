@@ -10,7 +10,9 @@ import 'server_flow_frame.dart';
 import 'server_line_fields.dart';
 import 'server_list_store.dart';
 import 'server_management_widgets.dart';
+import 'login_widgets.dart';
 import 'server_password_form.dart';
+import 'server_ui.dart';
 
 class ServerEditor extends StatefulWidget {
   const ServerEditor({
@@ -255,13 +257,29 @@ class ServerEditorState extends State<ServerEditor> {
         variant: AppButtonVariant.filled,
         child: Text(l.serversSave),
       );
+      final current = widget.auth.session?.server.id == widget.server.id;
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (busy) const AppLoadingBar(),
           if (error != null) ServerFeedback(error!),
-          ServerFormSection(
+          ServerIdentityCard(
+            server: widget.server.copyWith(nickname: name.text, iconId: icon),
+            subtitle:
+                '${widget.server.serviceType.label} · ${(needsLogin ? l.serversNoAccount : widget.server.username)}',
+            trailing: current
+                ? ServerStatusPill(
+                    label: l.serversCurrent,
+                    tone: ServerTone.current,
+                    icon: AppIcons.checkCircle,
+                  )
+                : null,
+          ),
+          const SizedBox(height: 14),
+          ServerSectionCard(
             title: l.serversBasic,
+            icon: AppIcons.edit,
+            description: l.serversBasicSummary,
             children: [
               AppTextField(
                 key: const Key('server-editor-name'),
@@ -270,56 +288,111 @@ class ServerEditorState extends State<ServerEditor> {
                 maxLength: 80,
                 textInputAction: TextInputAction.next,
               ),
-              const SizedBox(height: 12),
-              Row(
+              const SizedBox(height: 10),
+              Text(
+                l.serversIcon,
+                style: AppUiTheme.of(context).textTheme.labelLarge
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 9),
+              Wrap(
+                key: const Key('server-editor-icon'),
+                spacing: 10,
+                runSpacing: 10,
                 children: [
-                  ServerIdentityIcon(widget.server.copyWith(iconId: icon)),
-                  const SizedBox(width: 12),
-                  Text(l.serversIcon),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: AppDropdown<String>(
-                      key: const Key('server-editor-icon'),
-                      value: icon,
-                      label: l.serversIcon,
-                      items: [
-                        AppMenuEntry(
-                          value: 'default',
-                          child: Text(l.serversIconDefault),
-                        ),
-                        AppMenuEntry(
-                          value: 'home',
-                          child: Text(l.serversIconHome),
-                        ),
-                        AppMenuEntry(
-                          value: 'cinema',
-                          child: Text(l.serversIconCinema),
-                        ),
-                        AppMenuEntry(
-                          value: 'cloud',
-                          child: Text(l.serversIconCloud),
-                        ),
-                      ],
-                      onChanged: busy ? null : (v) => setState(() => icon = v),
+                  for (final option in const [
+                    ('default', 'serversIconDefault'),
+                    ('home', 'serversIconHome'),
+                    ('cinema', 'serversIconCinema'),
+                    ('cloud', 'serversIconCloud'),
+                  ])
+                    _ServerIconChoice(
+                      type: widget.server.serviceType,
+                      iconId: option.$1 == 'default' ? null : option.$1,
+                      label: _iconLabel(l, option.$2),
+                      selected: icon == option.$1,
+                      onTap: busy
+                          ? null
+                          : () => setState(() => icon = option.$1),
                     ),
-                  ),
                 ],
               ),
             ],
           ),
-          ServerFormSection(
-            title: l.serversAccount,
+          ServerSectionCard(
+            title: l.serversAccountStatus,
+            icon: AppIcons.person,
+            trailing: needsLogin
+                ? null
+                : ServerStatusPill(
+                    label: l.serversLoggedIn,
+                    tone: ServerTone.success,
+                  ),
             children: [
-              Text(
-                needsLogin
-                    ? l.serversNoAccount
-                    : widget.auth.savedServers
-                              .where((s) => s.id == widget.server.id)
-                              .firstOrNull
-                              ?.username ??
-                          widget.server.username,
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppUiTheme.of(context).colorScheme.primary
+                          .withValues(alpha: .12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      needsLogin
+                          ? '?'
+                          : widget.server.username.isEmpty
+                          ? '?'
+                          : widget.server.username
+                                .substring(0, 1)
+                                .toUpperCase(),
+                      style: AppUiTheme.of(context).textTheme.titleMedium
+                          ?.copyWith(
+                            color: AppUiTheme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          needsLogin
+                              ? l.serversNoAccount
+                              : widget.auth.savedServers
+                                        .where((s) => s.id == widget.server.id)
+                                        .firstOrNull
+                                        ?.username ??
+                                    widget.server.username,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppUiTheme.of(context).textTheme.bodyLarge
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          needsLogin
+                              ? l.serversReauthorize
+                              : l.serversChangeAccountHint,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppUiTheme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: AppUiTheme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -329,7 +402,10 @@ class ServerEditorState extends State<ServerEditor> {
                     onPressed: busy
                         ? null
                         : () => setState(() => step = 'account'),
-                    child: Text(l.serversReauthorize),
+                    variant: AppButtonVariant.tinted,
+                    child: Text(
+                      needsLogin ? l.serversLoginAction : l.serversReauthorize,
+                    ),
                   ),
                   if (widget.server.serviceType == MediaServerType.plex &&
                       !needsLogin)
@@ -365,70 +441,167 @@ class ServerEditorState extends State<ServerEditor> {
               ),
             ],
           ),
-          ServerFormSection(
+          ServerSectionCard(
             title: l.serversLines,
+            icon: AppIcons.link,
+            description: l.serversLinesSummary,
+            trailing: ServerStatusPill(
+              label: l.serversLineCount(lines.length),
+              tone: ServerTone.neutral,
+            ),
             children: [
-              Text(
-                l.serversLinesHint,
-                style: AppUiTheme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
               for (var i = 0; i < lines.length; i++)
-                Row(
-                  children: [
-                    Expanded(
-                      child: AppListTile(
-                        key: Key('server-editor-line-${lines[i].id}'),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                        title: Text(
-                          serverLineLabel(lines[i]),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: AppSurfaceAction(
+                          key: Key('server-editor-line-${lines[i].id}'),
+                          onTap: busy
+                              ? null
+                              : () => setState(() {
+                                  editing = lines[i];
+                                  step = 'line';
+                                }),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+                            decoration: BoxDecoration(
+                              color: AppUiTheme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: .38),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 28,
+                                  height: 28,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: AppUiTheme.of(context)
+                                        .colorScheme
+                                        .primary
+                                        .withValues(alpha: .12),
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: Text(
+                                    '${i + 1}',
+                                    style: AppUiTheme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                          color: AppUiTheme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(width: 11),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              serverLineLabel(lines[i]),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: AppUiTheme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                            ),
+                                          ),
+                                          if (lines[i].id ==
+                                              widget.server.activeLine?.id) ...[
+                                            const SizedBox(width: 7),
+                                            ServerStatusPill(
+                                              label: l.serversLineActual,
+                                              tone: ServerTone.current,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        serverSafeAddress(lines[i].address),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: AppUiTheme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: AppUiTheme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Icon(
+                                  AppIcons.edit,
+                                  size: 17,
+                                  color: AppUiTheme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        subtitle: Text(
-                          serverSafeAddress(lines[i].address),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onTap: busy
-                            ? null
-                            : () => setState(() {
-                                editing = lines[i];
-                                step = 'line';
-                              }),
-                        trailing: const Icon(AppIcons.edit, size: 20),
                       ),
-                    ),
-                    AppMenuButton<String>(
-                      key: Key('server-editor-line-more-${lines[i].id}'),
-                      tooltip: l.serversMore,
-                      items: [
-                        if (i > 0)
-                          AppMenuEntry(value: 'up', child: Text(l.serversUp)),
-                        if (i < lines.length - 1)
-                          AppMenuEntry(
-                            value: 'down',
-                            child: Text(l.serversDown),
+                      AppMenuButton<String>(
+                        key: Key('server-editor-line-more-${lines[i].id}'),
+                        tooltip: l.serversMore,
+                        items: [
+                          if (i > 0)
+                            AppMenuEntry(value: 'up', child: Text(l.serversUp)),
+                          if (i < lines.length - 1)
+                            AppMenuEntry(
+                              value: 'down',
+                              child: Text(l.serversDown),
+                            ),
+                          if (lines.length > 1)
+                            AppMenuEntry(
+                              value: 'remove',
+                              child: Text(l.serversLineRemove),
+                            ),
+                        ],
+                        onSelected: busy || lines.length == 1
+                            ? null
+                            : (value) {
+                                if (value == 'remove') {
+                                  setState(() => lines.removeAt(i));
+                                } else {
+                                  move(i, value == 'up' ? -1 : 1);
+                                }
+                              },
+                        child: Padding(
+                          padding: const EdgeInsets.all(9),
+                          child: Icon(
+                            AppIcons.more,
+                            size: 19,
+                            color: AppUiTheme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
                           ),
-                        if (lines.length > 1)
-                          AppMenuEntry(
-                            value: 'remove',
-                            child: Text(l.serversLineRemove),
-                          ),
-                      ],
-                      onSelected: busy || lines.length == 1
-                          ? null
-                          : (value) {
-                              if (value == 'remove') {
-                                setState(() => lines.removeAt(i));
-                              } else {
-                                move(i, value == 'up' ? -1 : 1);
-                              }
-                            },
-                      child: const Text('•••'),
-                    ),
-                  ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              const SizedBox(height: 4),
               AppButton.icon(
                 key: const Key('server-editor-add-line'),
                 onPressed: busy
@@ -437,20 +610,42 @@ class ServerEditorState extends State<ServerEditor> {
                         editing = null;
                         step = 'line';
                       }),
-                icon: const Icon(AppIcons.add),
+                variant: AppButtonVariant.outlined,
+                icon: const Icon(AppIcons.add, size: 18),
                 label: Text(l.serversLineAdd),
               ),
             ],
           ),
-          ServerFormSection(
-            title: l.serversPassword,
+          ServerSectionCard(
+            title: l.serversProtection,
+            icon: AppIcons.shield,
+            description: l.serversProtectionSummary,
             children: [
-              Text(l.serversPasswordHint),
-              const SizedBox(height: 8),
               AppListTile(
                 key: const Key('server-editor-password'),
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(AppIcons.lock),
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color:
+                        (protected
+                                ? AppUiTheme.of(context).colorScheme.primary
+                                : AppUiTheme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant)
+                            .withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    protected ? AppIcons.lock : AppIcons.lockOpen,
+                    size: 19,
+                    color: protected
+                        ? AppUiTheme.of(context).colorScheme.primary
+                        : AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 title: Text(
                   password != null
                       ? l.serversPasswordPending
@@ -458,38 +653,125 @@ class ServerEditorState extends State<ServerEditor> {
                       ? l.serversPasswordOn
                       : l.serversPasswordOff,
                 ),
+                subtitle: Text(l.serversPasswordHint),
                 trailing: const Icon(AppIcons.chevronRight),
                 onTap: busy ? null : () => setState(() => step = 'password'),
               ),
             ],
           ),
-          AppListTile(
-            key: const Key('server-editor-advanced'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(l.serversAdvanced),
-            trailing: Icon(
-              advanced ? AppIcons.chevronUp : AppIcons.chevronDown,
-            ),
-            onTap: () => setState(() => advanced = !advanced),
-          ),
-          if (advanced)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: AppTextField(
-                key: const Key('server-editor-user-agent'),
-                controller: userAgent,
-                label: l.userAgent,
-                placeholder: l.userAgentHint,
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(
+              color:
+                  AppUiTheme.of(context).colorScheme.brightness ==
+                      Brightness.dark
+                  ? AppUiTheme.of(context).colorScheme.surfaceContainer
+                  : AppUiTheme.of(context).colorScheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(ServerUi.cardRadius),
+              border: Border.all(
+                color: AppUiTheme.of(context).colorScheme.outlineVariant,
               ),
             ),
+            child: Column(
+              children: [
+                AppListTile(
+                  key: const Key('server-editor-advanced'),
+                  leading: const Icon(AppIcons.tune, size: 20),
+                  title: Text(l.serversAdvanced),
+                  subtitle: Text(l.serversAdvancedSummary),
+                  trailing: Icon(
+                    advanced ? AppIcons.chevronUp : AppIcons.chevronDown,
+                  ),
+                  onTap: () => setState(() => advanced = !advanced),
+                ),
+                if (advanced)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                    child: AppTextField(
+                      key: const Key('server-editor-user-agent'),
+                      controller: userAgent,
+                      label: l.userAgent,
+                      placeholder: l.userAgentHint,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       );
     }
     return ServerFlowFrame(
       title: title,
+      subtitle: step == 'main' ? l.serversEditorSubtitle : null,
       onBack: back,
       action: action,
       child: body,
+    );
+  }
+}
+
+String _iconLabel(AppLocalizations l, String key) => switch (key) {
+  'serversIconHome' => l.serversIconHome,
+  'serversIconCinema' => l.serversIconCinema,
+  'serversIconCloud' => l.serversIconCloud,
+  _ => l.serversIconDefault,
+};
+
+class _ServerIconChoice extends StatelessWidget {
+  const _ServerIconChoice({
+    required this.type,
+    required this.iconId,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final MediaServerType type;
+  final String? iconId;
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final colors = theme.colorScheme;
+    return AppSurfaceAction(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: AppMotion.fast,
+        width: 68,
+        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: selected
+              ? colors.primary.withValues(alpha: .10)
+              : colors.surfaceContainerHighest.withValues(alpha: .28),
+          border: Border.all(
+            color: selected
+                ? colors.primary.withValues(alpha: .58)
+                : colors.outlineVariant,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ServerIdentityBadge(type: type, iconId: iconId, size: 38),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: selected ? colors.primary : colors.onSurfaceVariant,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

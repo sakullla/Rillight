@@ -2293,6 +2293,9 @@
   "serversEmptyTitle": "添加你的第一台服务器",
   "serversEmptyHint": "连接 Emby、Jellyfin 或 Plex，开始观看。",
   "serversNoResults": "没有找到服务器",
+  "serversNoResultsHint": "换个关键词，或清除搜索。",
+  "serversSearchResults": "搜索结果",
+  "serversConnectionError": "连接失败",
   "serversClearSearch": "清除搜索",
   "serversMore": "更多操作",
   "serversEdit": "编辑服务器",
@@ -2588,5 +2591,42 @@
   "settingsWebDavSaveFailed": "配置保存失败，请重试",
   "@settingsWebDavSaveFailed": {
     "description": "Notice when the WebDAV configuration cannot be saved."
-  }
+  },
+  "serversSubtitle": "选择要观看的服务器",
+  "serversCount": "共 {count} 台",
+  "@serversCount": {
+    "description": "Number of saved servers in the hub header.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serversSectionAll": "全部服务器",
+  "serversSwitchLine": "换条线路",
+  "serversLineSubtitle": "同一台服务器的不同地址",
+  "serversLineCount": "{count} 条线路",
+  "@serversLineCount": {
+    "description": "Line count on the line picker section title.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serversLineActual": "当前",
+  "serversLineDetails": "线路详情",
+  "serversRecommend": "推荐",
+  "serversEditorSubtitle": "名称、账号、线路与进入保护",
+  "serversAddSubtitle": "登录后即可直接观看",
+  "serversLoginAction": "重新登录",
+  "serversCurrentLine": "当前线路",
+  "serversBackupLine": "备用线路",
+  "serversAccountStatus": "账号状态",
+  "serversLoggedIn": "已登录",
+  "serversProtection": "进入保护",
+  "serversProtectionSummary": "只在这台设备上生效，不影响服务器账号",
+  "serversBasicSummary": "名称和图标用于在列表中辨认这台服务器",
+  "serversLinesSummary": "按顺序尝试；固定线路失败时由你决定是否切换",
+  "serversAdvancedSummary": "User-Agent 等少用配置"
 }

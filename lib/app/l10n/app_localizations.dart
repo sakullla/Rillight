@@ -4444,6 +4444,24 @@ abstract class AppLocalizations {
   /// **'没有找到服务器'**
   String get serversNoResults;
 
+  /// No description provided for @serversNoResultsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'换个关键词，或清除搜索。'**
+  String get serversNoResultsHint;
+
+  /// No description provided for @serversSearchResults.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索结果'**
+  String get serversSearchResults;
+
+  /// No description provided for @serversConnectionError.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接失败'**
+  String get serversConnectionError;
+
   /// No description provided for @serversClearSearch.
   ///
   /// In zh, this message translates to:
@@ -5445,6 +5463,132 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'配置保存失败，请重试'**
   String get settingsWebDavSaveFailed;
+
+  /// No description provided for @serversSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择要观看的服务器'**
+  String get serversSubtitle;
+
+  /// Number of saved servers in the hub header.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 台'**
+  String serversCount(int count);
+
+  /// No description provided for @serversSectionAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部服务器'**
+  String get serversSectionAll;
+
+  /// No description provided for @serversSwitchLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'换条线路'**
+  String get serversSwitchLine;
+
+  /// No description provided for @serversLineSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'同一台服务器的不同地址'**
+  String get serversLineSubtitle;
+
+  /// Line count on the line picker section title.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 条线路'**
+  String serversLineCount(int count);
+
+  /// No description provided for @serversLineActual.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前'**
+  String get serversLineActual;
+
+  /// No description provided for @serversLineDetails.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路详情'**
+  String get serversLineDetails;
+
+  /// No description provided for @serversRecommend.
+  ///
+  /// In zh, this message translates to:
+  /// **'推荐'**
+  String get serversRecommend;
+
+  /// No description provided for @serversEditorSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称、账号、线路与进入保护'**
+  String get serversEditorSubtitle;
+
+  /// No description provided for @serversAddSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录后即可直接观看'**
+  String get serversAddSubtitle;
+
+  /// No description provided for @serversLoginAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新登录'**
+  String get serversLoginAction;
+
+  /// No description provided for @serversCurrentLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前线路'**
+  String get serversCurrentLine;
+
+  /// No description provided for @serversBackupLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'备用线路'**
+  String get serversBackupLine;
+
+  /// No description provided for @serversAccountStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'账号状态'**
+  String get serversAccountStatus;
+
+  /// No description provided for @serversLoggedIn.
+  ///
+  /// In zh, this message translates to:
+  /// **'已登录'**
+  String get serversLoggedIn;
+
+  /// No description provided for @serversProtection.
+  ///
+  /// In zh, this message translates to:
+  /// **'进入保护'**
+  String get serversProtection;
+
+  /// No description provided for @serversProtectionSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'只在这台设备上生效，不影响服务器账号'**
+  String get serversProtectionSummary;
+
+  /// No description provided for @serversBasicSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称和图标用于在列表中辨认这台服务器'**
+  String get serversBasicSummary;
+
+  /// No description provided for @serversLinesSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'按顺序尝试；固定线路失败时由你决定是否切换'**
+  String get serversLinesSummary;
+
+  /// No description provided for @serversAdvancedSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'User-Agent 等少用配置'**
+  String get serversAdvancedSummary;
 }
 
 class _AppLocalizationsDelegate

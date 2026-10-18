@@ -390,6 +390,13 @@ class PlaybackLineMenu extends StatelessWidget {
             ],
             AppListTile(
               key: const Key('playback-line-auto'),
+              leading: Icon(
+                AppIcons.bolt,
+                size: 20,
+                color: selection.isAutomatic
+                    ? AppUiTheme.of(context).colorScheme.primary
+                    : AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+              ),
               title: Text(l10n.serversAutomatic),
               subtitle: Text(l10n.serversAutomaticHint),
               selected: selection.isAutomatic,
@@ -442,8 +449,39 @@ class _LineTile extends StatelessWidget {
       key: ValueKey('playback-line-$lineId'),
       autofocus: autofocus,
       selected: selected,
-      title: Text(label),
-      trailing: current ? Text(currentLabel) : null,
+      leading: Icon(
+        selected ? AppIcons.checkCircle : AppIcons.circle,
+        size: 22,
+        color: selected
+            ? AppUiTheme.of(context).colorScheme.primary
+            : AppUiTheme.of(context).colorScheme.outline,
+      ),
+      title: Text(
+        label,
+        style: selected
+            ? TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppUiTheme.of(context).colorScheme.primary,
+              )
+            : null,
+      ),
+      trailing: current
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.primary
+                    .withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                currentLabel,
+                style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppUiTheme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          : null,
       onTap: () {
         unawaited(
           _pickLine(controller, LineSelection.fixed(lineId)).then((_) {

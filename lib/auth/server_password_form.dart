@@ -199,47 +199,92 @@ class ServerUnlockFormState extends State<ServerUnlockForm> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final colors = theme.colorScheme;
+    final enabled = !widget.unavailable && remaining <= 0 && !widget.busy;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 24),
-        const Center(child: Icon(AppIcons.lock, size: 44)),
-        const SizedBox(height: 24),
+        const SizedBox(height: 12),
+        Center(
+          child: Container(
+            width: 68,
+            height: 68,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  colors.primary.withValues(alpha: .22),
+                  colors.primary.withValues(alpha: .06),
+                ],
+              ),
+              border: Border.all(color: colors.primary.withValues(alpha: .24)),
+            ),
+            child: Icon(AppIcons.lock, size: 30, color: colors.primary),
+          ),
+        ),
+        const SizedBox(height: 18),
         Text(
           widget.unavailable
               ? l.serversPasswordUnavailable
               : widget.prompt ?? l.serversPasswordPrompt,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: colors.onSurfaceVariant,
+            height: 1.5,
+          ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 22),
         if (!widget.unavailable) ...[
-          AppTextField(
-            key: const Key('server-unlock-password'),
-            controller: password,
-            label: l.serversPasswordInput,
-            autofocus: true,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            textInputAction: TextInputAction.done,
-            onSubmitted: widget.busy || remaining > 0 ? null : widget.onSubmit,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppTextField(
+                key: const Key('server-unlock-password'),
+                controller: password,
+                label: l.serversPasswordInput,
+                autofocus: true,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                textInputAction: TextInputAction.done,
+                onSubmitted: widget.busy || remaining > 0
+                    ? null
+                    : widget.onSubmit,
+              ),
+              const SizedBox(height: 16),
+              AppButton(
+                key: const Key('server-unlock-submit'),
+                onPressed: widget.busy || remaining > 0
+                    ? null
+                    : () => widget.onSubmit(password.text),
+                variant: AppButtonVariant.filled,
+                minimumSize: const Size(64, 48),
+                child: Text(
+                  remaining > 0
+                      ? l.serversPasswordRetryAfter(remaining)
+                      : widget.busy
+                      ? l.serversBusy
+                      : widget.submitLabel ?? l.serversEnter,
+                ),
+              ),
+              if (widget.error != null) ServerFeedback(widget.error!),
+              if (enabled) ...[
+                const SizedBox(height: 10),
+                Text(
+                  l.serversPasswordHint,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 20),
-          AppButton(
-            key: const Key('server-unlock-submit'),
-            onPressed: widget.busy || remaining > 0
-                ? null
-                : () => widget.onSubmit(password.text),
-            variant: AppButtonVariant.filled,
-            child: Text(
-              remaining > 0
-                  ? l.serversPasswordRetryAfter(remaining)
-                  : widget.busy
-                  ? l.serversBusy
-                  : widget.submitLabel ?? l.serversEnter,
-            ),
-          ),
-        ],
-        if (widget.error != null) ServerFeedback(widget.error!),
+        ] else if (widget.error != null)
+          ServerFeedback(widget.error!),
       ],
     );
   }

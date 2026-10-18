@@ -22,6 +22,7 @@ import 'server_line_selector.dart';
 import 'server_list_store.dart';
 import 'server_management_widgets.dart';
 import 'server_password_form.dart';
+import 'server_ui.dart';
 
 Future<void> showServerSelection(
   BuildContext context, {
@@ -468,22 +469,30 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(l.serversEntryPlaybackImpact),
-              const SizedBox(height: 24),
+              ServerIdentityCard(server: target!, subtitle: target!.username),
+              const SizedBox(height: 16),
+              ServerFeedback(l.serversEntryPlaybackImpact, error: false),
+              const SizedBox(height: 20),
               AppButton(
                 key: const Key('server-entry-continue'),
                 onPressed: () => enter(target!, playbackConfirmed: true),
                 variant: AppButtonVariant.filled,
+                minimumSize: const Size(64, 48),
                 child: Text(l.serversContinue),
               ),
-              const SizedBox(height: 12),
-              AppButton(onPressed: back, child: Text(l.serversCancel)),
+              const SizedBox(height: 8),
+              AppButton(
+                onPressed: back,
+                minimumSize: const Size(64, 48),
+                child: Text(l.serversCancel),
+              ),
             ],
           ),
         );
       } else if (step == 'unlock') {
         content = ServerFlowFrame(
           title: target!.displayName,
+          subtitle: l.serversPassword,
           onBack: back,
           child: ServerUnlockForm(
             onSubmit: submitPassword,
@@ -500,25 +509,27 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(target!.displayName, style: theme.textTheme.titleMedium),
+              ServerIdentityCard(server: target!, subtitle: target!.username),
               const SizedBox(height: 16),
-              Text(l.serversRemoveHint),
+              ServerFeedback(l.serversRemoveHint, error: false),
               if (widget.auth.session?.server.id == target!.id)
                 ServerFeedback(l.serversCurrentImpact, error: false),
               if (errors[target!.id] != null)
                 ServerFeedback(errors[target!.id]!),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               AppButton(
                 key: const Key('server-remove-confirm'),
                 onPressed: pending.contains(target!.id) ? null : remove,
                 foregroundColor: theme.colorScheme.error,
                 variant: AppButtonVariant.tinted,
+                minimumSize: const Size(64, 48),
                 child: Text(l.serversRemove),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               AppButton(
                 key: const Key('server-remove-cancel'),
                 onPressed: back,
+                minimumSize: const Size(64, 48),
                 child: Text(l.serversCancel),
               ),
             ],
@@ -543,6 +554,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
             .toList();
         content = ServerFlowFrame(
           title: l.serversTitle,
+          subtitle: l.serversSubtitle,
           onBack: back,
           backLabel: l.serversDismiss,
           scroll: false,
@@ -555,100 +567,109 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           ),
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: AppTextField(
-                  key: const Key('server-search'),
-                  controller: search,
-                  onChanged: (_) => setState(() {}),
-                  placeholder: l.serversSearch,
-                  textInputAction: TextInputAction.search,
-                  prefix: const Icon(AppIcons.search),
-                  suffix: query.isEmpty
-                      ? null
-                      : AppIconButton(
-                          tooltip: l.serversClearSearch,
-                          onPressed: () => setState(() => search.clear()),
-                          icon: const Icon(AppIcons.close),
-                        ),
+              if (all.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                  child: AppTextField(
+                    key: const Key('server-search'),
+                    controller: search,
+                    onChanged: (_) => setState(() {}),
+                    placeholder: l.serversSearch,
+                    textInputAction: TextInputAction.search,
+                    prefix: const Icon(AppIcons.search),
+                    suffix: query.isEmpty
+                        ? null
+                        : AppIconButton(
+                            tooltip: l.serversClearSearch,
+                            onPressed: () => setState(() => search.clear()),
+                            icon: const Icon(AppIcons.close),
+                          ),
+                  ),
                 ),
-              ),
+              if (ready && filtered.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 4, 22, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        query.isEmpty ? l.serversSectionAll : l.serversSearch,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest
+                              .withValues(alpha: .45),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          l.serversCount(filtered.length),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Expanded(
                 child: !ready
                     ? const Center(child: AppLoadingBar())
                     : filtered.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                query.isEmpty
-                                    ? AppIcons.library
-                                    : AppIcons.search,
-                                size: 44,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                query.isEmpty
-                                    ? l.serversEmptyTitle
-                                    : l.serversNoResults,
-                              ),
-                              const SizedBox(height: 8),
-                              if (query.isEmpty)
-                                Text(
-                                  l.serversEmptyHint,
-                                  textAlign: TextAlign.center,
-                                ),
-                              if (query.isNotEmpty)
-                                AppButton(
-                                  onPressed: () =>
-                                      setState(() => search.clear()),
-                                  child: Text(l.serversClearSearch),
-                                ),
-                            ],
-                          ),
-                        ),
+                    ? _ServerEmptyState(
+                        query: query,
+                        onAdd: () => showFlow('add'),
+                        onClear: () => setState(() => search.clear()),
                       )
-                    : ListView.builder(
+                    : CupertinoScrollbar(
                         controller: scroll,
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                        itemCount: filtered.length,
-                        itemBuilder: (_, index) {
-                          final server = filtered[index];
-                          final position = all.indexOf(server);
-                          return KeyedSubtree(
-                            key: itemKeys.putIfAbsent(
-                              server.id,
-                              () => GlobalKey(),
-                            ),
-                            child: ServerSelectionTile(
-                              server: server,
-                              needsLogin:
-                                  widget.auth.hasSavedAuthorization(
-                                    server.id,
-                                  ) ==
-                                  false,
-                              focusNode: itemFocus.putIfAbsent(
+                        thumbVisibility: !widget.phone,
+                        child: ListView.builder(
+                          controller: scroll,
+                          padding: const EdgeInsets.fromLTRB(20, 2, 20, 20),
+                          itemCount: filtered.length,
+                          itemBuilder: (_, index) {
+                            final server = filtered[index];
+                            final position = all.indexOf(server);
+                            return KeyedSubtree(
+                              key: itemKeys.putIfAbsent(
                                 server.id,
-                                () => FocusNode(),
+                                () => GlobalKey(),
                               ),
-                              current:
-                                  widget.auth.session?.server.id == server.id,
-                              locked: !widget.auth.serverAccess.allows(
-                                server.id,
+                              child: ServerSelectionTile(
+                                server: server,
+                                needsLogin:
+                                    widget.auth.hasSavedAuthorization(
+                                      server.id,
+                                    ) ==
+                                    false,
+                                focusNode: itemFocus.putIfAbsent(
+                                  server.id,
+                                  () => FocusNode(),
+                                ),
+                                current:
+                                    widget.auth.session?.server.id == server.id,
+                                locked: !widget.auth.serverAccess.allows(
+                                  server.id,
+                                ),
+                                busy: pending.contains(server.id),
+                                error: errors[server.id],
+                                canMoveUp: position > 0,
+                                canMoveDown: position < all.length - 1,
+                                onEnter: () => enter(server),
+                                onLines: () => open(server, 'lines'),
+                                onAction: (value) => action(server, value),
                               ),
-                              busy: pending.contains(server.id),
-                              error: errors[server.id],
-                              canMoveUp: position > 0,
-                              canMoveDown: position < all.length - 1,
-                              onEnter: () => enter(server),
-                              onLines: () => open(server, 'lines'),
-                              onAction: (value) => action(server, value),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
               ),
             ],
@@ -671,18 +692,38 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
             ),
             child: Center(
               child: SizedBox(
-                width: widget.phone ? viewport.width : 600,
-                height: widget.phone ? double.infinity : 760,
+                width: widget.phone ? viewport.width : ServerUi.panelWidth,
+                height: widget.phone
+                    ? double.infinity
+                    : (viewport.height - 48).clamp(360.0, ServerUi.panelHeight),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(widget.phone ? 0 : 20),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color.alphaBlend(
+                          theme.colorScheme.primary.withValues(alpha: .07),
+                          theme.colorScheme.surfaceContainerLow,
+                        ),
+                        theme.colorScheme.surfaceContainerLow,
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(
+                      widget.phone ? 0 : ServerUi.panelRadius,
+                    ),
                     border: widget.phone
                         ? null
                         : Border.all(color: theme.colorScheme.outlineVariant),
+                    boxShadow: widget.phone
+                        ? null
+                        : AppShadow.overlay(theme.colorScheme.brightness),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(widget.phone ? 0 : 20),
+                    borderRadius: BorderRadius.circular(
+                      widget.phone ? 0 : ServerUi.panelRadius,
+                    ),
                     child: content,
                   ),
                 ),
@@ -693,4 +734,88 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
       );
     },
   );
+}
+
+class _ServerEmptyState extends StatelessWidget {
+  const _ServerEmptyState({
+    required this.query,
+    required this.onAdd,
+    required this.onClear,
+  });
+
+  final String query;
+  final VoidCallback onAdd, onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final colors = theme.colorScheme;
+    final empty = query.isEmpty;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(28, 24, 28, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    colors.primary.withValues(alpha: .19),
+                    colors.primary.withValues(alpha: .05),
+                  ],
+                ),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: .22),
+                ),
+              ),
+              child: Icon(
+                empty ? AppIcons.server : AppIcons.search,
+                size: 34,
+                color: colors.primary,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              empty ? l.serversEmptyTitle : l.serversNoResults,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              empty ? l.serversEmptyHint : l.serversNoResultsHint,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (empty)
+              AppButton.icon(
+                key: const Key('server-empty-add'),
+                onPressed: onAdd,
+                variant: AppButtonVariant.filled,
+                icon: const Icon(AppIcons.add, size: 18),
+                label: Text(l.addServer),
+              )
+            else
+              AppButton(
+                key: const Key('server-empty-clear'),
+                onPressed: onClear,
+                child: Text(l.serversClearSearch),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

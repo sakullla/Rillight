@@ -26,6 +26,7 @@ import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_line_selector.dart';
 import 'package:rillight/auth/server_management_widgets.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -2586,7 +2587,7 @@ void main() {
           find.byKey(Key('server-lines-${auth.savedServers.single.id}')),
         );
         final option = find.byKey(Key('server-line-choice-${target.id}'));
-        expect(tester.widget<AppListTile>(option).selected, isFalse);
+        expect(tester.widget<ServerLineChoice>(option).selected, isFalse);
         await _mineTap(tester, option);
         await _mineUntil(
           tester,
@@ -2608,7 +2609,7 @@ void main() {
         );
         expect(
           tester
-              .widget<AppListTile>(
+              .widget<ServerLineChoice>(
                 find.byKey(Key('server-line-choice-${target.id}')),
               )
               .selected,

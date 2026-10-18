@@ -145,14 +145,70 @@ class ServerAddPanelState extends State<ServerAddPanel> {
             ServerFeedback(l.serversPasteIncomplete, error: false),
             const SizedBox(height: 8),
           ] else ...[
-            AppButton.icon(
-              key: const Key('server-add-paste'),
-              onPressed: paste,
-              icon: const Icon(AppIcons.download),
-              label: Text(l.serversPaste),
-              variant: AppButtonVariant.tinted,
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: .42),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppUiTheme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppUiTheme.of(context).colorScheme.primary
+                          .withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      AppIcons.download,
+                      size: 21,
+                      color: AppUiTheme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          l.serversPaste,
+                          style: AppUiTheme.of(context).textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          l.serversPasteHint,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppUiTheme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: AppUiTheme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  AppButton(
+                    key: const Key('server-add-paste'),
+                    onPressed: paste,
+                    variant: AppButtonVariant.outlined,
+                    child: Text(l.serversPaste),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
           ],
           ProviderConnectDialog(
             key: ValueKey(selected),
@@ -174,6 +230,9 @@ class ServerAddPanelState extends State<ServerAddPanel> {
     }
     return ServerFlowFrame(
       title: selected != null ? l.serversPastePreview : l.serversAddTitle,
+      subtitle: selected != null
+          ? l.serversPasteIncomplete
+          : l.serversAddSubtitle,
       onBack: back,
       child: body,
     );

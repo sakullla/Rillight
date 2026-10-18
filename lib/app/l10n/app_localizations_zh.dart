@@ -2313,6 +2313,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversNoResults => '没有找到服务器';
 
   @override
+  String get serversNoResultsHint => '换个关键词，或清除搜索。';
+
+  @override
+  String get serversSearchResults => '搜索结果';
+
+  @override
+  String get serversConnectionError => '连接失败';
+
+  @override
   String get serversClearSearch => '清除搜索';
 
   @override
@@ -2826,4 +2835,71 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsWebDavSaveFailed => '配置保存失败，请重试';
+
+  @override
+  String get serversSubtitle => '选择要观看的服务器';
+
+  @override
+  String serversCount(int count) {
+    return '共 $count 台';
+  }
+
+  @override
+  String get serversSectionAll => '全部服务器';
+
+  @override
+  String get serversSwitchLine => '换条线路';
+
+  @override
+  String get serversLineSubtitle => '同一台服务器的不同地址';
+
+  @override
+  String serversLineCount(int count) {
+    return '$count 条线路';
+  }
+
+  @override
+  String get serversLineActual => '当前';
+
+  @override
+  String get serversLineDetails => '线路详情';
+
+  @override
+  String get serversRecommend => '推荐';
+
+  @override
+  String get serversEditorSubtitle => '名称、账号、线路与进入保护';
+
+  @override
+  String get serversAddSubtitle => '登录后即可直接观看';
+
+  @override
+  String get serversLoginAction => '重新登录';
+
+  @override
+  String get serversCurrentLine => '当前线路';
+
+  @override
+  String get serversBackupLine => '备用线路';
+
+  @override
+  String get serversAccountStatus => '账号状态';
+
+  @override
+  String get serversLoggedIn => '已登录';
+
+  @override
+  String get serversProtection => '进入保护';
+
+  @override
+  String get serversProtectionSummary => '只在这台设备上生效，不影响服务器账号';
+
+  @override
+  String get serversBasicSummary => '名称和图标用于在列表中辨认这台服务器';
+
+  @override
+  String get serversLinesSummary => '按顺序尝试；固定线路失败时由你决定是否切换';
+
+  @override
+  String get serversAdvancedSummary => 'User-Agent 等少用配置';
 }

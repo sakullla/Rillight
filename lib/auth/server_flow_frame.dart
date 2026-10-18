@@ -14,10 +14,12 @@ class ServerFlowFrame extends StatefulWidget {
     required this.child,
     this.action,
     this.backLabel,
+    this.subtitle,
     this.scroll = true,
   });
   final String title;
   final String? backLabel;
+  final String? subtitle;
   final VoidCallback onBack;
   final Widget child;
   final Widget? action;
@@ -49,24 +51,51 @@ class _ServerFlowFrameState extends State<ServerFlowFrame> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 12, 12, 12),
+                padding: const EdgeInsets.fromLTRB(8, 10, 14, 10),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     AppIconButton(
                       key: const Key('server-flow-back'),
                       tooltip: widget.backLabel ?? l.serversBack,
                       onPressed: widget.onBack,
-                      minimumSize: const Size(48, 48),
+                      minimumSize: const Size(46, 46),
                       icon: const Icon(AppIcons.back),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                     Expanded(
-                      child: Text(
-                        widget.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppUiTheme.of(context).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppUiTheme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -.2,
+                                ),
+                          ),
+                          if (widget.subtitle != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                widget.subtitle!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppUiTheme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: AppUiTheme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     if (widget.action != null) ...[
