@@ -10,6 +10,8 @@ import 'auth_controller.dart';
 import 'server_selection_page.dart';
 import 'server_list_store.dart';
 import 'server_management_widgets.dart';
+import 'login_widgets.dart';
+import 'server_ui.dart';
 import 'provider_connect_dialog.dart';
 import 'backup_import/backup_import_flow.dart';
 import 'tv_server_editor_page.dart';
@@ -344,7 +346,13 @@ class _TvServerSelectionState extends ServerSelectionPageState {
                                 () => FocusNode(),
                               ),
                               variant: TvActionVariant.tile,
-                              leading: ServerIdentityIcon(server),
+                              leading: ServerAvatar(
+                                server: server,
+                                size: 44,
+                                locked: !widget.auth.serverAccess.allows(
+                                  server.id,
+                                ),
+                              ),
                               onPressed: pending.contains(server.id)
                                   ? null
                                   : () {
@@ -355,36 +363,79 @@ class _TvServerSelectionState extends ServerSelectionPageState {
                                 builder: (context) {
                                   final locked = !widget.auth.serverAccess
                                       .allows(server.id);
+                                  final needsLogin =
+                                      widget.auth.hasSavedAuthorization(
+                                        server.id,
+                                      ) ==
+                                      false;
+                                  final current =
+                                      widget.auth.session?.server.id ==
+                                      server.id;
+                                  final scale = TvDesign.scaleOf(context);
+                                  final secondary = TvAction.secondaryColor(
+                                    context,
+                                  );
                                   return Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        server.displayName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        locked
-                                            ? l.serversLocked
-                                            : widget.auth.hasSavedAuthorization(
-                                                    server.id,
-                                                  ) ==
-                                                  false
-                                            ? l.serversNoAccount
-                                            : '${server.username} · ${serverSafeAddress(server.baseUrl)}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: TvAction.secondaryColor(
-                                            context,
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              server.displayName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
                                           ),
-                                        ),
+                                          if (current) ...[
+                                            SizedBox(width: 14 * scale),
+                                            Icon(
+                                              AppIcons.checkCircle,
+                                              size: 22 * scale,
+                                              fill: AppIcons.filled,
+                                            ),
+                                            SizedBox(width: 6 * scale),
+                                            Text(l.tvSettingsCurrent),
+                                          ],
+                                        ],
                                       ),
-                                      if (widget.auth.session?.server.id ==
-                                          server.id)
-                                        Text(l.tvSettingsCurrent),
+                                      SizedBox(height: 4 * scale),
+                                      Row(
+                                        children: [
+                                          if (locked) ...[
+                                            Icon(
+                                              AppIcons.lock,
+                                              size: 18 * scale,
+                                              color: secondary,
+                                            ),
+                                            SizedBox(width: 8 * scale),
+                                          ] else if (needsLogin) ...[
+                                            ServerStatusDot(
+                                              tone: ServerTone.warning,
+                                              size: 10 * scale,
+                                            ),
+                                            SizedBox(width: 8 * scale),
+                                          ],
+                                          Flexible(
+                                            child: Text(
+                                              locked
+                                                  ? l.serversLockedHint
+                                                  : needsLogin
+                                                  ? l.serversNoAccount
+                                                  : '${server.serviceType.label} · ${server.username} · ${serverSafeAddress(server.baseUrl)}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: secondary,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ],
                                   );
                                 },
@@ -402,10 +453,17 @@ class _TvServerSelectionState extends ServerSelectionPageState {
                                 'lines',
                                 'server-lines-${server.id}',
                               ),
+                              leading: Icon(
+                                !widget.auth.serverAccess.allows(server.id)
+                                    ? AppIcons.lock
+                                    : server.lineSelection.isAutomatic
+                                    ? AppIcons.bolt
+                                    : AppIcons.route,
+                              ),
                               child: Text(
                                 !widget.auth.serverAccess.allows(server.id)
                                     ? l.serversLines
-                                    : '${server.lineSelection.isAutomatic ? l.serversAutomatic : l.serversLines} · ${server.activeLine == null ? '—' : serverLineLabel(server.activeLine!)}',
+                                    : serverLineSummary(l, server),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),

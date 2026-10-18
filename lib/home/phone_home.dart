@@ -267,6 +267,9 @@ class _PhoneHomeState extends State<PhoneHome> {
                   AppSpacing.md
             : 0.0;
         final page = AppRefresh(
+          // 首页铺满到状态栏下，顶栏又浮在上面：指示器要落在两者之下才看得见。
+          edgeOffset:
+              MediaQuery.viewPaddingOf(context).top + PhoneTopBar.bodyHeight,
           onRefresh: () => catalog.reload(showCachedFirst: false),
           child: ListView.builder(
             key: const PageStorageKey('mobile-home-scroll'),

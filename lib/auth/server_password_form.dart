@@ -4,6 +4,7 @@ import '../app/l10n/app_localizations.dart';
 import '../app/ui/ui.dart';
 import '../app/ui/app_icons.dart';
 import 'server_management_widgets.dart';
+import 'server_ui.dart';
 
 class ServerPasswordDraft {
   ServerPasswordDraft({
@@ -80,52 +81,95 @@ class ServerPasswordFieldsState extends State<ServerPasswordFields> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    Widget field(String key, TextEditingController controller, String label) =>
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: AppTextField(
-            key: Key(key),
-            controller: controller,
-            label: label,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            textInputAction: TextInputAction.next,
-          ),
-        );
+    final theme = AppUiTheme.of(context);
+    Widget field(
+      String key,
+      TextEditingController controller,
+      String label, {
+      bool last = false,
+    }) => Padding(
+      padding: EdgeInsets.only(bottom: last ? 0 : 14),
+      child: AppTextField(
+        key: Key(key),
+        controller: controller,
+        label: label,
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        textInputAction: last ? TextInputAction.done : TextInputAction.next,
+        onSubmitted: last ? (_) => done() : null,
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(l.serversPasswordHint),
-        const SizedBox(height: 20),
-        if (widget.protected) ...[
-          AppSwitchTile(
-            title: Text(l.serversPassword),
-            value: enabled,
-            onChanged: (value) => setState(() => enabled = value == true),
-          ),
-          const SizedBox(height: 16),
-          field('server-password-old', old, l.serversPasswordOld),
-        ],
-        if (enabled) ...[
-          field('server-password-new', password, l.serversPasswordNew),
-          field(
-            'server-password-confirm',
-            confirmation,
-            l.serversPasswordConfirm,
-          ),
-        ],
-        if (error != null) ServerFeedback(error!),
-        Text(
-          l.serversPasswordPending,
-          style: AppUiTheme.of(context).textTheme.bodySmall,
+        Row(
+          children: [
+            const ServerRowIcon(AppIcons.shield, size: 40),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                l.serversPasswordHint,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
+        if (widget.protected)
+          ServerGroup(
+            children: [
+              AppSwitchTile(
+                title: Text(l.serversPassword),
+                value: enabled,
+                onChanged: (value) => setState(() => enabled = value == true),
+              ),
+            ],
+          ),
+        ServerSectionCard(
+          title: widget.protected
+              ? l.serversPasswordChange
+              : l.serversPasswordSet,
+          children: [
+            if (widget.protected)
+              field(
+                'server-password-old',
+                old,
+                l.serversPasswordOld,
+                last: !enabled,
+              ),
+            if (enabled) ...[
+              field('server-password-new', password, l.serversPasswordNew),
+              field(
+                'server-password-confirm',
+                confirmation,
+                l.serversPasswordConfirm,
+                last: true,
+              ),
+            ],
+          ],
+        ),
+        if (error != null) ...[
+          ServerFeedback(error!),
+          const SizedBox(height: 12),
+        ],
         AppButton(
           key: const Key('server-password-done'),
           onPressed: done,
           variant: AppButtonVariant.filled,
+          minimumSize: const Size(64, 48),
           child: Text(l.serversDone),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          l.serversPasswordPending,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -143,8 +187,12 @@ class ServerUnlockForm extends StatefulWidget {
     this.clock,
     this.prompt,
     this.submitLabel,
+    this.mark,
   });
   final ValueChanged<String> onSubmit;
+
+  /// Identity of the server being unlocked; defaults to a lock glyph.
+  final Widget? mark;
   final String? error;
   final String? prompt, submitLabel;
   final bool busy, unavailable;
@@ -202,87 +250,85 @@ class ServerUnlockFormState extends State<ServerUnlockForm> {
     final theme = AppUiTheme.of(context);
     final colors = theme.colorScheme;
     final enabled = !widget.unavailable && remaining <= 0 && !widget.busy;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SizedBox(height: 12),
-        Center(
-          child: Container(
-            width: 68,
-            height: 68,
+    void submit() => widget.onSubmit(password.text);
+    return ServerFocusView(
+      mark:
+          widget.mark ??
+          Container(
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  colors.primary.withValues(alpha: .22),
-                  colors.primary.withValues(alpha: .06),
-                ],
-              ),
-              border: Border.all(color: colors.primary.withValues(alpha: .24)),
+              color: colors.primary.withValues(alpha: .12),
             ),
-            child: Icon(AppIcons.lock, size: 30, color: colors.primary),
+            child: Icon(
+              AppIcons.lock,
+              size: 32,
+              color: colors.primary,
+              fill: AppIcons.filled,
+            ),
           ),
-        ),
-        const SizedBox(height: 18),
-        Text(
-          widget.unavailable
-              ? l.serversPasswordUnavailable
-              : widget.prompt ?? l.serversPasswordPrompt,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: colors.onSurfaceVariant,
-            height: 1.5,
-          ),
-        ),
-        const SizedBox(height: 22),
+      title: widget.unavailable ? l.serversPasswordInput : l.serversUnlockTitle,
+      message: widget.unavailable
+          ? l.serversPasswordUnavailable
+          : widget.prompt ?? l.serversPasswordPrompt,
+      children: [
         if (!widget.unavailable) ...[
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              AppTextField(
-                key: const Key('server-unlock-password'),
-                controller: password,
-                label: l.serversPasswordInput,
-                autofocus: true,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                textInputAction: TextInputAction.done,
-                onSubmitted: widget.busy || remaining > 0
-                    ? null
-                    : widget.onSubmit,
-              ),
-              const SizedBox(height: 16),
-              AppButton(
-                key: const Key('server-unlock-submit'),
-                onPressed: widget.busy || remaining > 0
-                    ? null
-                    : () => widget.onSubmit(password.text),
-                variant: AppButtonVariant.filled,
-                minimumSize: const Size(64, 48),
-                child: Text(
-                  remaining > 0
-                      ? l.serversPasswordRetryAfter(remaining)
-                      : widget.busy
-                      ? l.serversBusy
-                      : widget.submitLabel ?? l.serversEnter,
-                ),
-              ),
-              if (widget.error != null) ServerFeedback(widget.error!),
-              if (enabled) ...[
-                const SizedBox(height: 10),
-                Text(
-                  l.serversPasswordHint,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: colors.onSurfaceVariant,
+          AppTextField(
+            key: const Key('server-unlock-password'),
+            controller: password,
+            label: l.serversPasswordInput,
+            autofocus: true,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.done,
+            onSubmitted: widget.busy || remaining > 0 ? null : widget.onSubmit,
+          ),
+          if (widget.error != null) ServerFeedback(widget.error!),
+          const SizedBox(height: 16),
+          AppButton(
+            key: const Key('server-unlock-submit'),
+            onPressed: widget.busy || remaining > 0 ? null : submit,
+            variant: AppButtonVariant.filled,
+            minimumSize: const Size(64, 50),
+            child: widget.busy
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CupertinoActivityIndicator(
+                        radius: 8,
+                        color: colors.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(l.serversBusy),
+                    ],
+                  )
+                : Text(
+                    remaining > 0
+                        ? l.serversPasswordRetryAfter(remaining)
+                        : widget.submitLabel ?? l.serversEnter,
+                  ),
+          ),
+          if (enabled) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(AppIcons.shield, size: 13, color: colors.onSurfaceVariant),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    l.serversPasswordHint,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
-            ],
-          ),
+            ),
+          ],
         ] else if (widget.error != null)
           ServerFeedback(widget.error!),
       ],

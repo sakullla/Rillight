@@ -883,7 +883,6 @@ extension PageCaptures on CaptureSession {
       final remote = adapter.servers.firstWhere(
         (s) => s.baseUrl.toString() == auth.session!.server.baseUrl,
       );
-      if (platform != 'tv') await tap(Key('server-line-details-$lineId'));
       for (final state in checkStates) {
         if (!shouldCapture(state)) continue;
         adapter.certificateError = state == 'server-check-certificate';

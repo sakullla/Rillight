@@ -2919,6 +2919,43 @@ void main() {
       tags: ['integration'],
     );
 
+    cases.testWidgets(
+      'pulling the home page down shows feedback below the bar and reloads',
+      (tester) async {
+        final (_, server) = await _openPhone(tester);
+        final list = find.byKey(const PageStorageKey('mobile-home-scroll'));
+        expect(list, findsOneWidget);
+        final before = server.requests.length;
+        final gesture = await tester.startGesture(
+          tester.getCenter(list) + const Offset(0, -120),
+        );
+        for (var i = 0; i < 8; i++) {
+          await gesture.moveBy(const Offset(0, 30));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        // 下拉过程中指示器可见，并落在透明顶栏之下，不被状态栏/顶栏遮住。
+        final indicator = find.byKey(AppRefresh.indicatorKey);
+        expect(indicator, findsOneWidget);
+        expect(
+          tester.getTopLeft(indicator).dy,
+          greaterThanOrEqualTo(PhoneTopBar.bodyHeight),
+        );
+        await gesture.up();
+        await tester.pump();
+        expect(indicator, findsOneWidget);
+        await _homeSettle(tester);
+        expect(
+          server.requests
+              .sublist(before)
+              .where((request) => request.contains('/Items/Resume')),
+          isNotEmpty,
+        );
+        expect(indicator, findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
     cases.testWidgets('editing reorders and hides home sections live', (
       tester,
     ) async {

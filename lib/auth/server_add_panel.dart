@@ -8,6 +8,7 @@ import 'provider_connect_dialog.dart';
 import 'server_flow_frame.dart';
 import 'server_management_widgets.dart';
 import 'server_paste_draft.dart';
+import 'server_ui.dart';
 
 class ServerAddPanel extends StatefulWidget {
   const ServerAddPanel({
@@ -116,25 +117,38 @@ class ServerAddPanelState extends State<ServerAddPanel> {
         children: [
           Text(l.serversPasteGroups),
           const SizedBox(height: 16),
-          for (var i = 0; i < preview!.groups.length; i++)
-            AppListTile(
-              key: Key('server-paste-group-$i'),
-              title: Text(
-                preview!.groups[i].name.isEmpty
-                    ? '${l.serversPasteGroup} ${i + 1}'
-                    : preview!.groups[i].name,
-              ),
-              subtitle: Text(
-                '${preview!.groups[i].username}\n${preview!.groups[i].lines.map(serverSafeAddress).join('\n')}',
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: const Icon(AppIcons.chevronRight),
-              onTap: () => setState(() {
-                selected = preview!.groups[i];
-                step = 'connect';
-              }),
-            ),
+          ServerGroup(
+            dividerIndent: 60,
+            children: [
+              for (var i = 0; i < preview!.groups.length; i++)
+                ServerRow(
+                  key: Key('server-paste-group-$i'),
+                  leading: ServerRowIcon(
+                    AppIcons.person,
+                    tone: ServerTone.neutral,
+                    size: 34,
+                  ),
+                  title: Text(
+                    preview!.groups[i].name.isEmpty
+                        ? '${l.serversPasteGroup} ${i + 1}'
+                        : preview!.groups[i].name,
+                  ),
+                  subtitle: Text(
+                    [
+                      preview!.groups[i].username,
+                      ...preview!.groups[i].lines.map(serverSafeAddress),
+                    ].join('\n'),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  chevron: true,
+                  onTap: () => setState(() {
+                    selected = preview!.groups[i];
+                    step = 'connect';
+                  }),
+                ),
+            ],
+          ),
         ],
       );
     } else {
@@ -145,70 +159,73 @@ class ServerAddPanelState extends State<ServerAddPanel> {
             ServerFeedback(l.serversPasteIncomplete, error: false),
             const SizedBox(height: 8),
           ] else ...[
-            Container(
-              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-              decoration: BoxDecoration(
-                color: AppUiTheme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest
-                    .withValues(alpha: .42),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: AppUiTheme.of(context).colorScheme.outlineVariant,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: AppUiTheme.of(context).colorScheme.primary
-                          .withValues(alpha: .12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      AppIcons.download,
-                      size: 21,
-                      color: AppUiTheme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l.serversPaste,
-                          style: AppUiTheme.of(context).textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          l.serversPasteHint,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppUiTheme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: AppUiTheme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
-                        ),
+            Builder(
+              builder: (context) {
+                final theme = AppUiTheme.of(context);
+                final colors = theme.colorScheme;
+                final dark = colors.brightness == Brightness.dark;
+                return Container(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        colors.primary.withValues(alpha: dark ? .18 : .10),
+                        colors.primary.withValues(alpha: dark ? .06 : .03),
                       ],
                     ),
+                    border: Border.all(
+                      color: colors.primary.withValues(alpha: dark ? .25 : .18),
+                      width: .8,
+                    ),
                   ),
-                  const SizedBox(width: 8),
-                  AppButton(
-                    key: const Key('server-add-paste'),
-                    onPressed: paste,
-                    variant: AppButtonVariant.outlined,
-                    child: Text(l.serversPaste),
+                  child: Row(
+                    children: [
+                      const ServerRowIcon(AppIcons.copy, size: 40),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l.serversPaste,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              l.serversPasteCardHint,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      AppButton(
+                        key: const Key('server-add-paste'),
+                        onPressed: paste,
+                        variant: AppButtonVariant.filled,
+                        minimumSize: const Size(44, 38),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 7,
+                        ),
+                        child: Text(l.serversPaste),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 22),
+            ServerGroupHeader(title: l.serversSelectType),
           ],
           ProviderConnectDialog(
             key: ValueKey(selected),
@@ -218,12 +235,22 @@ class ServerAddPanelState extends State<ServerAddPanel> {
             initialDraft: selected,
             onConnected: widget.onConnected,
           ),
-          const SizedBox(height: 24),
-          const AppDivider(),
-          AppButton(
-            key: const Key('server-add-import'),
-            onPressed: widget.onImport,
-            child: Text(l.serversImportFile),
+          const SizedBox(height: 26),
+          ServerGroup(
+            title: l.serversMoreOptions,
+            margin: EdgeInsets.zero,
+            children: [
+              ServerRow(
+                key: const Key('server-add-import'),
+                onTap: widget.onImport,
+                leading: const ServerRowIcon(
+                  AppIcons.download,
+                  tone: ServerTone.neutral,
+                ),
+                title: Text(l.serversImportFile),
+                chevron: true,
+              ),
+            ],
           ),
         ],
       );

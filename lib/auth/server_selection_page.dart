@@ -10,6 +10,7 @@ import '../player/player_bindings.dart';
 import '../app/l10n/app_localizations.dart';
 import '../app/ui/ui.dart';
 import '../app/ui/app_icons.dart';
+import '../media_server/capabilities.dart';
 import '../media_server/errors.dart';
 import 'auth_controller.dart';
 import '../player/player_window_host.dart';
@@ -416,6 +417,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
     listenable: Listenable.merge([widget.auth, widget.auth.serverAccess]),
     builder: (context, _) {
       final l = AppLocalizations.of(context), theme = AppUiTheme.of(context);
+      final colors = theme.colorScheme;
       Widget content;
       if (step == 'edit') {
         content = ServerEditor(
@@ -454,6 +456,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
       } else if (step == 'login') {
         content = ServerFlowFrame(
           title: l.serversAccount,
+          subtitle: target!.displayName,
           onBack: back,
           child: ProviderConnectDialog(
             auth: widget.auth,
@@ -466,25 +469,21 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
         content = ServerFlowFrame(
           title: target!.displayName,
           onBack: back,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: ServerFocusView(
+            mark: ServerMarkWithGlyph(
+              server: target!,
+              glyph: AppIcons.swap,
+              tone: ServerTone.warning,
+            ),
+            title: l.serversEnterOtherTitle,
+            message: l.serversEntryPlaybackImpact,
             children: [
-              ServerIdentityCard(server: target!, subtitle: target!.username),
-              const SizedBox(height: 16),
-              ServerFeedback(l.serversEntryPlaybackImpact, error: false),
-              const SizedBox(height: 20),
-              AppButton(
-                key: const Key('server-entry-continue'),
-                onPressed: () => enter(target!, playbackConfirmed: true),
-                variant: AppButtonVariant.filled,
-                minimumSize: const Size(64, 48),
-                child: Text(l.serversContinue),
-              ),
-              const SizedBox(height: 8),
-              AppButton(
-                onPressed: back,
-                minimumSize: const Size(64, 48),
-                child: Text(l.serversCancel),
+              ServerDecisionButtons(
+                confirmKey: const Key('server-entry-continue'),
+                confirmLabel: l.serversContinue,
+                onConfirm: () => enter(target!, playbackConfirmed: true),
+                cancelLabel: l.serversCancel,
+                onCancel: back,
               ),
             ],
           ),
@@ -495,6 +494,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           subtitle: l.serversPassword,
           onBack: back,
           child: ServerUnlockForm(
+            mark: ServerMarkWithGlyph(server: target!, glyph: AppIcons.lock),
             onSubmit: submitPassword,
             retryAt: widget.auth.serverAccess.retryAt(target!.id),
             unavailable: widget.auth.serverAccess.isUnavailable(target!.id),
@@ -503,34 +503,33 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           ),
         );
       } else if (step == 'remove') {
+        final current = widget.auth.session?.server.id == target!.id;
         content = ServerFlowFrame(
           title: l.serversRemove,
           onBack: back,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: ServerFocusView(
+            mark: ServerMarkWithGlyph(
+              server: target!,
+              glyph: AppIcons.delete,
+              tone: ServerTone.error,
+            ),
+            title: l.serversRemoveTitle,
+            message: '${target!.displayName}\n${l.serversRemoveHint}',
             children: [
-              ServerIdentityCard(server: target!, subtitle: target!.username),
-              const SizedBox(height: 16),
-              ServerFeedback(l.serversRemoveHint, error: false),
-              if (widget.auth.session?.server.id == target!.id)
-                ServerFeedback(l.serversCurrentImpact, error: false),
+              if (current)
+                ServerFeedbackCard(l.serversCurrentImpact, error: false),
               if (errors[target!.id] != null)
-                ServerFeedback(errors[target!.id]!),
-              const SizedBox(height: 20),
-              AppButton(
-                key: const Key('server-remove-confirm'),
-                onPressed: pending.contains(target!.id) ? null : remove,
-                foregroundColor: theme.colorScheme.error,
-                variant: AppButtonVariant.tinted,
-                minimumSize: const Size(64, 48),
-                child: Text(l.serversRemove),
-              ),
-              const SizedBox(height: 8),
-              AppButton(
-                key: const Key('server-remove-cancel'),
-                onPressed: back,
-                minimumSize: const Size(64, 48),
-                child: Text(l.serversCancel),
+                ServerFeedbackCard(errors[target!.id]!),
+              const SizedBox(height: 18),
+              ServerDecisionButtons(
+                confirmKey: const Key('server-remove-confirm'),
+                cancelKey: const Key('server-remove-cancel'),
+                confirmLabel: l.serversRemove,
+                onConfirm: pending.contains(target!.id) ? null : remove,
+                cancelLabel: l.serversCancel,
+                onCancel: back,
+                destructive: true,
+                busy: pending.contains(target!.id),
               ),
             ],
           ),
@@ -552,24 +551,80 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
                       ),
             )
             .toList();
+        final shrink = !widget.phone;
+        final pad = widget.phone ? 16.0 : 22.0;
+        final Widget results = !ready
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CupertinoActivityIndicator()),
+              )
+            : filtered.isEmpty
+            ? _ServerEmptyState(
+                query: query,
+                onAdd: () => showFlow('add'),
+                onClear: () => setState(() => search.clear()),
+              )
+            : CupertinoScrollbar(
+                controller: scroll,
+                child: ListView.builder(
+                  controller: scroll,
+                  shrinkWrap: shrink,
+                  padding: EdgeInsets.fromLTRB(pad, 2, pad, pad),
+                  itemCount: filtered.length,
+                  itemBuilder: (_, index) {
+                    final server = filtered[index];
+                    final position = all.indexOf(server);
+                    return KeyedSubtree(
+                      key: itemKeys.putIfAbsent(server.id, () => GlobalKey()),
+                      child: ServerSelectionTile(
+                        server: server,
+                        needsLogin:
+                            widget.auth.hasSavedAuthorization(server.id) ==
+                            false,
+                        focusNode: itemFocus.putIfAbsent(
+                          server.id,
+                          () => FocusNode(),
+                        ),
+                        current: widget.auth.session?.server.id == server.id,
+                        locked: !widget.auth.serverAccess.allows(server.id),
+                        busy: pending.contains(server.id),
+                        error: errors[server.id],
+                        canMoveUp: position > 0,
+                        canMoveDown: position < all.length - 1,
+                        onEnter: () => enter(server),
+                        onLines: () => open(server, 'lines'),
+                        onAction: (value) => action(server, value),
+                      ),
+                    );
+                  },
+                ),
+              );
         content = ServerFlowFrame(
           title: l.serversTitle,
-          subtitle: l.serversSubtitle,
+          subtitle: all.isEmpty
+              ? l.serversSubtitle
+              : l.serversHubSubtitle(all.length),
           onBack: back,
           backLabel: l.serversDismiss,
+          dismissible: true,
           scroll: false,
           action: AppButton.icon(
             key: const Key('server-add'),
             onPressed: () => showFlow('add'),
             icon: const Icon(AppIcons.add, size: 18),
-            label: Text(l.addServer),
+            label: Text(widget.phone ? l.serversAddShort : l.addServer),
+            semanticLabel: l.addServer,
             variant: AppButtonVariant.filled,
+            minimumSize: const Size(44, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           ),
           child: Column(
+            mainAxisSize: shrink ? MainAxisSize.min : MainAxisSize.max,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (all.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                  padding: EdgeInsets.fromLTRB(pad, 4, pad, 12),
                   child: AppTextField(
                     key: const Key('server-search'),
                     controller: search,
@@ -586,151 +641,110 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
                           ),
                   ),
                 ),
-              if (ready && filtered.isNotEmpty)
+              if (ready && query.isNotEmpty && filtered.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 4, 22, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        query.isEmpty ? l.serversSectionAll : l.serversSearch,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest
-                              .withValues(alpha: .45),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          l.serversCount(filtered.length),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                    ],
+                  padding: EdgeInsets.fromLTRB(pad + 4, 0, pad + 4, 8),
+                  child: Text(
+                    '${l.serversSearchResults} · ${l.serversCount(filtered.length)}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              Expanded(
-                child: !ready
-                    ? const Center(child: AppLoadingBar())
-                    : filtered.isEmpty
-                    ? _ServerEmptyState(
-                        query: query,
-                        onAdd: () => showFlow('add'),
-                        onClear: () => setState(() => search.clear()),
-                      )
-                    : CupertinoScrollbar(
-                        controller: scroll,
-                        thumbVisibility: !widget.phone,
-                        child: ListView.builder(
-                          controller: scroll,
-                          padding: const EdgeInsets.fromLTRB(20, 2, 20, 20),
-                          itemCount: filtered.length,
-                          itemBuilder: (_, index) {
-                            final server = filtered[index];
-                            final position = all.indexOf(server);
-                            return KeyedSubtree(
-                              key: itemKeys.putIfAbsent(
-                                server.id,
-                                () => GlobalKey(),
-                              ),
-                              child: ServerSelectionTile(
-                                server: server,
-                                needsLogin:
-                                    widget.auth.hasSavedAuthorization(
-                                      server.id,
-                                    ) ==
-                                    false,
-                                focusNode: itemFocus.putIfAbsent(
-                                  server.id,
-                                  () => FocusNode(),
-                                ),
-                                current:
-                                    widget.auth.session?.server.id == server.id,
-                                locked: !widget.auth.serverAccess.allows(
-                                  server.id,
-                                ),
-                                busy: pending.contains(server.id),
-                                error: errors[server.id],
-                                canMoveUp: position > 0,
-                                canMoveDown: position < all.length - 1,
-                                onEnter: () => enter(server),
-                                onLines: () => open(server, 'lines'),
-                                onAction: (value) => action(server, value),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-              ),
+              if (shrink)
+                Flexible(child: results)
+              else
+                Expanded(child: results),
             ],
           ),
         );
       }
       final viewport = MediaQuery.sizeOf(context);
+      final panel = ServerPanelScope(
+        shrinkWrap: !widget.phone,
+        compact: widget.phone,
+        child: content,
+      );
       return PopScope(
         canPop: step == 'list',
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) back();
         },
-        child: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              widget.phone ? 0 : 24,
-              widget.phone ? 0 : 24,
-              widget.phone ? 0 : 24,
-              (widget.phone ? 0 : 24) + MediaQuery.viewInsetsOf(context).bottom,
-            ),
-            child: Center(
-              child: SizedBox(
-                width: widget.phone ? viewport.width : ServerUi.panelWidth,
-                height: widget.phone
-                    ? double.infinity
-                    : (viewport.height - 48).clamp(360.0, ServerUi.panelHeight),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Color.alphaBlend(
-                          theme.colorScheme.primary.withValues(alpha: .07),
-                          theme.colorScheme.surfaceContainerLow,
-                        ),
-                        theme.colorScheme.surfaceContainerLow,
-                      ],
+        child: widget.phone
+            ? SafeArea(
+                child: ColoredBox(
+                  color: theme.scaffoldBackgroundColor,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.viewInsetsOf(context).bottom,
                     ),
-                    borderRadius: BorderRadius.circular(
-                      widget.phone ? 0 : ServerUi.panelRadius,
-                    ),
-                    border: widget.phone
-                        ? null
-                        : Border.all(color: theme.colorScheme.outlineVariant),
-                    boxShadow: widget.phone
-                        ? null
-                        : AppShadow.overlay(theme.colorScheme.brightness),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(
-                      widget.phone ? 0 : ServerUi.panelRadius,
-                    ),
-                    child: content,
+                    child: SizedBox(width: viewport.width, child: panel),
                   ),
                 ),
+              )
+            : Stack(
+                children: [
+                  Positioned.fill(
+                    child: ServerScrim(
+                      onTap: step == 'list' ? closeSelection : null,
+                    ),
+                  ),
+                  SafeArea(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        24,
+                        24,
+                        24,
+                        24 + MediaQuery.viewInsetsOf(context).bottom,
+                      ),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: ServerUi.panelWidth,
+                            maxHeight: (viewport.height - 48).clamp(
+                              320.0,
+                              ServerUi.panelHeight,
+                            ),
+                          ),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Color.alphaBlend(
+                                colors.primary.withValues(alpha: .025),
+                                colors.surfaceContainerLow,
+                              ),
+                              borderRadius: BorderRadius.circular(
+                                ServerUi.panelRadius,
+                              ),
+                              border: Border.all(
+                                color: colors.outlineVariant.withValues(
+                                  alpha: .7,
+                                ),
+                                width: .7,
+                              ),
+                              boxShadow: AppShadow.overlay(colors.brightness),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                ServerUi.panelRadius,
+                              ),
+                              child: AnimatedSize(
+                                duration: AppMotion.durationOf(
+                                  context,
+                                  AppMotion.normal,
+                                ),
+                                curve: AppMotion.standard,
+                                alignment: Alignment.topCenter,
+                                child: panel,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ),
-        ),
       );
     },
   );
@@ -754,34 +768,57 @@ class _ServerEmptyState extends StatelessWidget {
     final empty = query.isEmpty;
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(28, 24, 28, 32),
+        padding: const EdgeInsets.fromLTRB(28, 28, 28, 36),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    colors.primary.withValues(alpha: .19),
-                    colors.primary.withValues(alpha: .05),
+            if (empty)
+              // Three provider marks fanned out: what can be added, at a glance.
+              SizedBox(
+                width: 132,
+                height: 76,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    for (final (index, type) in const [
+                      (0, MediaServerType.jellyfin),
+                      (2, MediaServerType.plex),
+                      (1, MediaServerType.emby),
+                    ])
+                      Positioned(
+                        left: index * 38.0,
+                        top: index == 1 ? 0 : 10,
+                        child: Transform.rotate(
+                          angle: (index - 1) * .14,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: ServerUi.groupColor(colors),
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: AppShadow.cardHover(colors.brightness),
+                            ),
+                            child: ServerIdentityBadge(type: type, size: 54),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-                border: Border.all(
-                  color: colors.primary.withValues(alpha: .22),
+              )
+            else
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.onSurface.withValues(alpha: .06),
+                ),
+                child: Icon(
+                  AppIcons.search,
+                  size: 28,
+                  color: colors.onSurfaceVariant,
                 ),
               ),
-              child: Icon(
-                empty ? AppIcons.server : AppIcons.search,
-                size: 34,
-                color: colors.primary,
-              ),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
             Text(
               empty ? l.serversEmptyTitle : l.serversNoResults,
               textAlign: TextAlign.center,
@@ -789,13 +826,13 @@ class _ServerEmptyState extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 7),
+            const SizedBox(height: 6),
             Text(
               empty ? l.serversEmptyHint : l.serversNoResultsHint,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.onSurfaceVariant,
-                height: 1.4,
+                height: 1.45,
               ),
             ),
             const SizedBox(height: 20),
@@ -804,6 +841,7 @@ class _ServerEmptyState extends StatelessWidget {
                 key: const Key('server-empty-add'),
                 onPressed: onAdd,
                 variant: AppButtonVariant.filled,
+                minimumSize: const Size(64, 46),
                 icon: const Icon(AppIcons.add, size: 18),
                 label: Text(l.addServer),
               )
@@ -811,6 +849,7 @@ class _ServerEmptyState extends StatelessWidget {
               AppButton(
                 key: const Key('server-empty-clear'),
                 onPressed: onClear,
+                variant: AppButtonVariant.tinted,
                 child: Text(l.serversClearSearch),
               ),
           ],

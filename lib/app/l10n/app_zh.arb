@@ -2628,5 +2628,27 @@
   "serversProtectionSummary": "只在这台设备上生效，不影响服务器账号",
   "serversBasicSummary": "名称和图标用于在列表中辨认这台服务器",
   "serversLinesSummary": "按顺序尝试；固定线路失败时由你决定是否切换",
-  "serversAdvancedSummary": "User-Agent 等少用配置"
+  "serversAdvancedSummary": "User-Agent 等少用配置",
+  "serversLockedHint": "已锁定 · 输入进入密码后可用",
+  "serversLineFixedSection": "指定线路",
+  "serversLineAutoSection": "选线方式",
+  "serversRemoveTitle": "移除这台服务器？",
+  "serversPasteCardHint": "复制了服务器信息？一键识别地址、账号和多条线路",
+  "serversUnlockTitle": "输入进入密码",
+  "serversEnterOtherTitle": "切换到这台服务器？",
+  "serversSignOutTitle": "退出这个账号？",
+  "serversImpactTitle": "修改当前连接？",
+  "serversAccountSection": "账号",
+  "serversCheckingNow": "正在检查…",
+  "serversFixedShort": "固定",
+  "serversMoreOptions": "更多方式",
+  "serversHubSubtitle": "{count} 台服务器 · 点按进入",
+  "@serversHubSubtitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "serversAddShort": "添加"
 }

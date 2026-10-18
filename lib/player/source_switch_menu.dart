@@ -7,6 +7,7 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:flutter/services.dart';
 
 import '../app/l10n/app_localizations.dart';
+import '../auth/server_ui.dart';
 import 'player_controller.dart';
 import 'playback_line_recovery_ui.dart';
 
@@ -373,8 +374,11 @@ class PlaybackLineMenu extends StatelessWidget {
               ),
             if (failure != null)
               Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(failure, key: const Key('playback-line-failure')),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: ServerFeedbackCard(
+                  failure,
+                  key: const Key('playback-line-failure'),
+                ),
               ),
             if (controller.isRecovering ||
                 controller.pendingLineId != null) ...[
@@ -399,6 +403,14 @@ class PlaybackLineMenu extends StatelessWidget {
               ),
               title: Text(l10n.serversAutomatic),
               subtitle: Text(l10n.serversAutomaticHint),
+              trailing: selection.isAutomatic
+                  ? Icon(
+                      AppIcons.checkCircle,
+                      fill: AppIcons.filled,
+                      size: 22,
+                      color: AppUiTheme.of(context).colorScheme.primary,
+                    )
+                  : null,
               selected: selection.isAutomatic,
               autofocus: autofocus && selection.isAutomatic,
               onTap: () =>
@@ -451,6 +463,7 @@ class _LineTile extends StatelessWidget {
       selected: selected,
       leading: Icon(
         selected ? AppIcons.checkCircle : AppIcons.circle,
+        fill: selected ? AppIcons.filled : null,
         size: 22,
         color: selected
             ? AppUiTheme.of(context).colorScheme.primary
@@ -465,22 +478,9 @@ class _LineTile extends StatelessWidget {
               )
             : null,
       ),
+      // Same tag as the server list's line picker: one meaning, one look.
       trailing: current
-          ? Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppUiTheme.of(context).colorScheme.primary
-                    .withValues(alpha: .12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                currentLabel,
-                style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppUiTheme.of(context).colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )
+          ? ServerStatusPill(label: currentLabel, tone: ServerTone.success)
           : null,
       onTap: () {
         unawaited(

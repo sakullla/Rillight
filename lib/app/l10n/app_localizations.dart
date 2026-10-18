@@ -5589,6 +5589,96 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'User-Agent 等少用配置'**
   String get serversAdvancedSummary;
+
+  /// No description provided for @serversLockedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已锁定 · 输入进入密码后可用'**
+  String get serversLockedHint;
+
+  /// No description provided for @serversLineFixedSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'指定线路'**
+  String get serversLineFixedSection;
+
+  /// No description provided for @serversLineAutoSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'选线方式'**
+  String get serversLineAutoSection;
+
+  /// No description provided for @serversRemoveTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除这台服务器？'**
+  String get serversRemoveTitle;
+
+  /// No description provided for @serversPasteCardHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'复制了服务器信息？一键识别地址、账号和多条线路'**
+  String get serversPasteCardHint;
+
+  /// No description provided for @serversUnlockTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入进入密码'**
+  String get serversUnlockTitle;
+
+  /// No description provided for @serversEnterOtherTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换到这台服务器？'**
+  String get serversEnterOtherTitle;
+
+  /// No description provided for @serversSignOutTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'退出这个账号？'**
+  String get serversSignOutTitle;
+
+  /// No description provided for @serversImpactTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改当前连接？'**
+  String get serversImpactTitle;
+
+  /// No description provided for @serversAccountSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'账号'**
+  String get serversAccountSection;
+
+  /// No description provided for @serversCheckingNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查…'**
+  String get serversCheckingNow;
+
+  /// No description provided for @serversFixedShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'固定'**
+  String get serversFixedShort;
+
+  /// No description provided for @serversMoreOptions.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多方式'**
+  String get serversMoreOptions;
+
+  /// No description provided for @serversHubSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 台服务器 · 点按进入'**
+  String serversHubSubtitle(int count);
+
+  /// No description provided for @serversAddShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加'**
+  String get serversAddShort;
 }
 
 class _AppLocalizationsDelegate

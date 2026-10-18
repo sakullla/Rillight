@@ -963,7 +963,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                       return built;
                     },
                   ),
-                if (!ended && !_interaction.locked)
+                // 锁屏只挡住误触画面和控制条；跳过片头/片尾是用户明确想要的
+                // 提示，锁定时照常弹出，位置贴到底边（锁定态没有控制条）。
+                if (!ended)
                   ListenableBuilder(
                     listenable: Listenable.merge([c, _interaction]),
                     builder: (context, _) {
@@ -980,7 +982,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                       if (!show) return const SizedBox.shrink();
                       final media = MediaQuery.of(context);
                       final insets = phonePlayerControlInsets(media);
-                      final controls = _interaction.controlsVisibleFor(c);
+                      final controls =
+                          !_interaction.locked &&
+                          _interaction.controlsVisibleFor(c);
                       return Positioned(
                         right: insets.right + 12,
                         bottom: insets.bottom + (controls ? 168 : 16),

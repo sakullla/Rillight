@@ -101,7 +101,6 @@ void main() {
             lineId = auth.session!.server.activeLineId!;
         await pumpServerSelection(tester, auth);
         await serverUiTap(tester, Key('server-lines-$id'));
-        await serverUiTap(tester, Key('server-line-details-$lineId'));
         adapter.certificateError = failure == 'certificate';
         adapter.offline = failure == 'unreachable';
         remote.publicInfoStatus = switch (failure) {
@@ -126,7 +125,6 @@ void main() {
         await serverUiTap(tester, const Key('server-flow-back'));
         await serverUiTap(tester, Key('server-lines-$id'));
         expect(find.textContaining(label), findsWidgets);
-        await serverUiTap(tester, Key('server-line-details-$lineId'));
         adapter.certificateError = false;
         adapter.offline = false;
         remote.publicInfoStatus = null;

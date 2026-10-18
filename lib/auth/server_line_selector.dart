@@ -28,7 +28,7 @@ class ServerLineSelector extends StatefulWidget {
 class ServerLineSelectorState extends State<ServerLineSelector> {
   String? busy, error;
   final Map<String, ManualCheckResult> checks = {};
-  final Set<String> expanded = {};
+  final Set<String> checking = {};
   int revision = 0;
   @override
   void dispose() {
@@ -74,7 +74,10 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
 
   Future<void> check(ServerLine line) async {
     final l = AppLocalizations.of(context);
-    setState(() => busy = line.id);
+    setState(() {
+      busy = line.id;
+      checking.add(line.id);
+    });
     try {
       checks[line.id] = await widget.auth.sources.check(
         widget.serverId,
@@ -84,6 +87,7 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     } catch (failure) {
       error = serverOperationFailure(l, failure);
     } finally {
+      checking.remove(line.id);
       if (mounted) setState(() => busy = null);
     }
   }
@@ -119,14 +123,16 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     builder: (context, _) {
       final l = AppLocalizations.of(context);
       final theme = AppUiTheme.of(context);
+      final colors = theme.colorScheme;
       final server = widget.auth.sources.server(widget.serverId);
       final actual = widget.auth.sources.connectedLineId(server.id);
       final actualLine = server.lines
           .where((line) => line.id == actual)
           .firstOrNull;
+      final automatic = server.lineSelection.isAutomatic;
       return ServerFlowFrame(
         title: l.serversLines,
-        subtitle: l.serversLineSubtitle,
+        subtitle: server.displayName,
         onBack: back,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -136,168 +142,24 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
               subtitle:
                   '${server.username} · ${l.serversLineCount(server.lines.length)}',
             ),
-            const SizedBox(height: 20),
-            _LineAutoCard(
-              selected: server.lineSelection.isAutomatic,
-              actualLine: server.lineSelection.isAutomatic ? actualLine : null,
-              onTap: busy == null
-                  ? () => select(const LineSelection.auto())
-                  : null,
-            ),
             const SizedBox(height: 22),
-            Row(
+            ServerGroup(
+              title: l.serversLineAutoSection,
               children: [
-                Text(
-                  l.serversLines,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                ServerRow(
+                  key: const Key('server-line-auto'),
+                  selected: automatic,
+                  onTap: busy == null
+                      ? () => select(const LineSelection.auto())
+                      : null,
+                  leading: ServerRowIcon(
+                    AppIcons.bolt,
+                    tone: automatic ? ServerTone.current : ServerTone.neutral,
+                    size: 36,
                   ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  l.serversLineCount(server.lines.length),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            for (final line in server.lines)
-              ServerLineChoice(
-                key: Key('server-line-choice-${line.id}'),
-                line: line,
-                selected: server.lineSelection.fixedLineId == line.id,
-                actual: actual == line.id,
-                busy: busy == line.id,
-                expanded: expanded.contains(line.id),
-                status: status(l, line),
-                onSelect: busy == null
-                    ? () => select(LineSelection.fixed(line.id))
-                    : null,
-                onDetails: () => setState(() {
-                  expanded.contains(line.id)
-                      ? expanded.remove(line.id)
-                      : expanded.add(line.id);
-                }),
-                onCheck: busy == null ? () => check(line) : null,
-                checking: busy == line.id,
-              ),
-            if (busy != null) const AppLoadingBar(),
-            if (error != null) ServerFeedback(error!),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withValues(
-                  alpha: .45,
-                ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    AppIcons.info,
-                    size: 17,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      l.serversFixedHint,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-class _LineAutoCard extends StatelessWidget {
-  const _LineAutoCard({
-    required this.selected,
-    required this.actualLine,
-    required this.onTap,
-  });
-
-  final bool selected;
-  final ServerLine? actualLine;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final colors = theme.colorScheme;
-    final dark = colors.brightness == Brightness.dark;
-    return AppSurfaceAction(
-      key: const Key('server-line-auto'),
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: AnimatedContainer(
-        duration: AppMotion.fast,
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: selected
-              ? Color.alphaBlend(
-                  colors.primary.withValues(alpha: dark ? .13 : .07),
-                  dark
-                      ? colors.surfaceContainer
-                      : colors.surfaceContainerLowest,
-                )
-              : dark
-              ? colors.surfaceContainer
-              : colors.surfaceContainerLowest,
-          border: Border.all(
-            color: selected
-                ? colors.primary.withValues(alpha: .55)
-                : colors.outlineVariant,
-            width: selected ? 1.4 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(13),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    colors.primary.withValues(alpha: .24),
-                    colors.primary.withValues(alpha: .08),
-                  ],
-                ),
-              ),
-              child: Icon(AppIcons.bolt, size: 23, color: colors.primary),
-            ),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                  title: Row(
                     children: [
-                      Flexible(
-                        child: Text(
-                          l.serversAutomatic,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
+                      Flexible(child: Text(l.serversAutomatic)),
                       const SizedBox(width: 8),
                       ServerStatusPill(
                         label: l.serversRecommend,
@@ -305,50 +167,89 @@ class _LineAutoCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    l.serversAutomaticHint,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                      height: 1.35,
-                    ),
+                  subtitle: Text(
+                    automatic && actualLine != null
+                        ? '${l.serversActualLine} · ${serverLineLabel(actualLine)}'
+                        : l.serversAutomaticHint,
+                    style: automatic && actualLine != null
+                        ? TextStyle(
+                            color: colors.primary,
+                            fontWeight: FontWeight.w600,
+                          )
+                        : null,
                   ),
-                  if (actualLine != null) ...[
-                    const SizedBox(height: 7),
-                    Row(
-                      children: [
-                        Icon(AppIcons.bolt, size: 14, color: colors.primary),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            '${l.serversActualLine} · ${serverLineLabel(actualLine!)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: colors.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
+                  trailing: busy == 'auto'
+                      ? const CupertinoActivityIndicator(radius: 9)
+                      : _SelectionMark(selected: automatic),
+                ),
+              ],
+            ),
+            ServerGroup(
+              title: l.serversLineFixedSection,
+              trailing: Text(
+                l.serversLineCount(server.lines.length),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
               ),
+              description: l.serversFixedHint,
+              dividerIndent: 60,
+              children: [
+                for (final line in server.lines)
+                  ServerLineChoice(
+                    key: Key('server-line-choice-${line.id}'),
+                    line: line,
+                    selected: server.lineSelection.fixedLineId == line.id,
+                    actual: actual == line.id,
+                    busy: busy == line.id,
+                    expanded: false,
+                    status: status(l, line),
+                    onSelect: busy == null
+                        ? () => select(LineSelection.fixed(line.id))
+                        : null,
+                    onDetails: () {},
+                    onCheck: busy == null ? () => check(line) : null,
+                    checking: busy == line.id && checking.contains(line.id),
+                  ),
+              ],
             ),
-            const SizedBox(width: 10),
-            Icon(
-              selected ? AppIcons.checkCircle : AppIcons.circle,
-              size: 23,
-              color: selected ? colors.primary : colors.outline,
-            ),
+            if (error != null) ServerFeedback(error!),
           ],
         ),
-      ),
+      );
+    },
+  );
+}
+
+/// Radio mark that reads without colour: filled check vs empty ring.
+class _SelectionMark extends StatelessWidget {
+  const _SelectionMark({required this.selected});
+  final bool selected;
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppUiTheme.of(context).colorScheme;
+    return AnimatedSwitcher(
+      duration: AppMotion.fast,
+      child: selected
+          ? Icon(
+              AppIcons.checkCircle,
+              key: const ValueKey(true),
+              size: 24,
+              color: colors.primary,
+              fill: AppIcons.filled,
+            )
+          : Icon(
+              AppIcons.circle,
+              key: const ValueKey(false),
+              size: 24,
+              color: colors.outline,
+            ),
     );
   }
 }
 
+/// One connection line: selection mark, name, address and last check result,
+/// with a direct "check" action. Selecting and checking are separate targets.
 class ServerLineChoice extends StatelessWidget {
   const ServerLineChoice({
     super.key,
@@ -376,174 +277,84 @@ class ServerLineChoice extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final colors = theme.colorScheme;
-    final dark = colors.brightness == Brightness.dark;
-    final failed = line.checkFailureKind != null;
-    final passed =
-        line.checkStatus == 'success' ||
-        line.checkStatus == 'available' ||
-        line.checkStatus == 'online';
-    final statusColor = failed
-        ? colors.error
-        : passed
-        ? colors.tertiary
-        : colors.onSurfaceVariant;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: selected
-            ? Color.alphaBlend(
-                colors.primary.withValues(alpha: dark ? .11 : .06),
-                dark ? colors.surfaceContainer : colors.surfaceContainerLowest,
-              )
-            : dark
-            ? colors.surfaceContainer
-            : colors.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: selected
-              ? colors.primary.withValues(alpha: .52)
-              : colors.outlineVariant,
-          width: selected ? 1.3 : 1,
-        ),
+    final health = serverLineHealth(line);
+    final statusTone = checking ? ServerTone.current : health;
+    final statusColor = statusTone == null
+        ? colors.onSurfaceVariant
+        : serverToneColor(colors, statusTone);
+    return ServerRow(
+      selected: selected,
+      onTap: onSelect,
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      leading: SizedBox(
+        width: 30,
+        child: busy && !checking
+            ? const CupertinoActivityIndicator(radius: 9)
+            : _SelectionMark(selected: selected),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      title: Row(
         children: [
-          AppSurfaceAction(
-            onTap: onSelect,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 13, 6, 13),
-              child: Row(
-                children: [
-                  Icon(
-                    selected ? AppIcons.checkCircle : AppIcons.circle,
-                    size: 22,
-                    color: selected ? colors.primary : colors.outline,
-                  ),
-                  const SizedBox(width: 11),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                serverLineLabel(line),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyLarge?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            if (actual) ...[
-                              const SizedBox(width: 8),
-                              ServerStatusPill(
-                                label: l.serversActualLine,
-                                tone: ServerTone.success,
-                                busy: busy,
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          serverSafeAddress(line.address),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        Row(
-                          children: [
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                color: statusColor,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                checking ? l.serversBusy : status,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: statusColor,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  AppIconButton(
-                    key: Key('server-line-details-${line.id}'),
-                    tooltip: l.serversLineDetails,
-                    onPressed: onDetails,
-                    minimumSize: const Size(44, 44),
-                    icon: Icon(
-                      expanded ? AppIcons.chevronUp : AppIcons.chevronDown,
-                      size: 20,
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+          Flexible(
+            child: Text(
+              serverLineLabel(line),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          if (expanded)
-            Container(
-              margin: const EdgeInsets.fromLTRB(14, 0, 14, 13),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: colors.surfaceContainerHighest.withValues(alpha: .42),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l.serversLineAddress,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        AppSelectableText(
-                          serverSafeAddress(line.address),
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  AppButton(
-                    key: Key('server-line-check-${line.id}'),
-                    onPressed: onCheck,
-                    variant: AppButtonVariant.tinted,
-                    minimumSize: const Size(40, 36),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 7,
-                    ),
-                    child: Text(checking ? l.serversBusy : l.serversCheck),
-                  ),
-                ],
-              ),
+          if (actual) ...[
+            const SizedBox(width: 8),
+            ServerStatusPill(
+              label: l.serversActualLine,
+              tone: ServerTone.success,
             ),
+          ],
         ],
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            serverSafeAddress(line.address),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              if (statusTone == null)
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: colors.outline, width: 1.2),
+                  ),
+                )
+              else
+                ServerStatusDot(tone: statusTone, size: 7),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  checking ? l.serversCheckingNow : status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: statusColor,
+                    fontWeight: statusTone == null ? null : FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      trailing: AppIconButton(
+        key: Key('server-line-check-${line.id}'),
+        tooltip: l.serversCheck,
+        onPressed: onCheck,
+        minimumSize: const Size(44, 44),
+        icon: checking
+            ? const CupertinoActivityIndicator(radius: 9)
+            : Icon(AppIcons.refresh, size: 20, color: colors.onSurfaceVariant),
       ),
     );
   }

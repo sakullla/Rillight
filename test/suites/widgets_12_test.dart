@@ -11,24 +11,24 @@ void main() {
     caseEntrypoints['app/appearance_cases.dart']!,
   );
   group(
+    'app/content_theme_test.dart',
+    caseEntrypoints['app/content_theme_cases.dart']!,
+  );
+  group(
     'catalog/catalog_controller_test.dart',
     caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );
   group(
-    'home/shelf_hover_clip_test.dart',
-    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+    'home/library_latest_row_test.dart',
+    caseEntrypoints['home/library_latest_row_cases.dart']!,
   );
   group(
-    'mobile/detail_route_identity_test.dart',
-    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
+    'media_image/blurred_artwork_test.dart',
+    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 4]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
-  );
-  group(
-    'mobile/phone_detail_redesign_test.dart',
-    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
+    'mobile/mobile_flow_test.dart [part 2]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#1']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 2]',
@@ -37,6 +37,10 @@ void main() {
   group(
     'player/danmaku/danmaku_renderer_test.dart',
     caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
+  );
+  group(
+    'player/playback_image_release_test.dart',
+    caseEntrypoints['player/playback_image_release_cases.dart']!,
   );
   group(
     'player/seek_preview_test.dart',

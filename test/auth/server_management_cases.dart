@@ -18,6 +18,7 @@ import 'server_ui_harness.dart';
 import '../helpers/cupertino_test_app.dart';
 
 import 'package:rillight/auth/server_password_form.dart';
+import 'package:rillight/auth/server_ui.dart';
 import 'package:rillight/auth/server_access.dart';
 
 import 'package:rillight/emby/emby_client.dart';
@@ -530,6 +531,22 @@ void main() {
     expect(revived.session?.accessToken, isNot(token));
     auth.dispose();
     revived.dispose();
+  });
+
+  test('saved servers get distinct, rename-stable avatar colours', () {
+    final ids = [for (var i = 0; i < 12; i++) 'server-$i-${i * 7919}'];
+    final colours = {
+      for (final id in ids) ServerUi.gradientOf(id, among: ids).$1,
+    };
+    // Up to twelve servers never share a colour.
+    expect(colours, hasLength(ids.length));
+    // The colour depends on the id and the saved set, not on list order.
+    expect(
+      ServerUi.gradientOf(ids[3], among: ids.reversed),
+      ServerUi.gradientOf(ids[3], among: ids),
+    );
+    // Without the saved set the colour is still deterministic.
+    expect(ServerUi.gradientOf('abc'), ServerUi.gradientOf('abc'));
   });
 
   test('deleting an unknown server id is a no-op', () async {

@@ -2902,4 +2902,51 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get serversAdvancedSummary => 'User-Agent 等少用配置';
+
+  @override
+  String get serversLockedHint => '已锁定 · 输入进入密码后可用';
+
+  @override
+  String get serversLineFixedSection => '指定线路';
+
+  @override
+  String get serversLineAutoSection => '选线方式';
+
+  @override
+  String get serversRemoveTitle => '移除这台服务器？';
+
+  @override
+  String get serversPasteCardHint => '复制了服务器信息？一键识别地址、账号和多条线路';
+
+  @override
+  String get serversUnlockTitle => '输入进入密码';
+
+  @override
+  String get serversEnterOtherTitle => '切换到这台服务器？';
+
+  @override
+  String get serversSignOutTitle => '退出这个账号？';
+
+  @override
+  String get serversImpactTitle => '修改当前连接？';
+
+  @override
+  String get serversAccountSection => '账号';
+
+  @override
+  String get serversCheckingNow => '正在检查…';
+
+  @override
+  String get serversFixedShort => '固定';
+
+  @override
+  String get serversMoreOptions => '更多方式';
+
+  @override
+  String serversHubSubtitle(int count) {
+    return '$count 台服务器 · 点按进入';
+  }
+
+  @override
+  String get serversAddShort => '添加';
 }

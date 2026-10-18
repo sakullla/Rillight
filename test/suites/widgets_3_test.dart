@@ -19,8 +19,8 @@ void main() {
     caseEntrypoints['home/hero_playback_actions_cases.dart']!,
   );
   group(
-    'library/episode_list_scroll_test.dart',
-    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
+    'mobile/mobile_performance_timing_test.dart',
+    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
   );
   group(
     'mobile/phone_home_rails_test.dart',
@@ -31,12 +31,16 @@ void main() {
     caseEntrypoints['mobile/phone_player_cases.dart#3']!,
   );
   group(
-    'player/player_window_test.dart',
-    caseEntrypoints['player/player_window_cases.dart']!,
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
   );
   group(
     'tv/tv_detail_test.dart [part 1]',
     caseEntrypoints['tv/tv_detail_cases.dart#0']!,
+  );
+  group(
+    'tv/tv_lan_pair_test.dart [part 2]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
   );
   group(
     'widgets/scrim_icon_button_test.dart',

@@ -810,12 +810,6 @@ void main() {
         );
         await tester.tap(find.byKey(Key('server-lines-${f.aId}')));
         await _settle(tester);
-        if (!environment.isTv) {
-          await tester.tap(
-            find.byKey(Key('server-line-details-${saved.lines.last.id}')),
-          );
-          await _settle(tester);
-        }
         final check = find.byKey(
           Key('server-line-check-${saved.lines.last.id}'),
         );

@@ -1,6 +1,7 @@
 import '../app/l10n/app_localizations.dart';
 import '../app/tv_widgets.dart';
 import '../app/ui/ui.dart';
+import '../app/ui/app_icons.dart';
 import 'server_line_selector.dart';
 import 'server_line_fields.dart';
 import 'server_list_store.dart';
@@ -27,23 +28,39 @@ class _TvLineSelectionState extends ServerLineSelectorState {
       final l = AppLocalizations.of(context);
       final server = widget.auth.sources.server(widget.serverId);
       final actual = widget.auth.sources.connectedLineId(server.id);
+      final actualLine = server.lines
+          .where((line) => line.id == actual)
+          .firstOrNull;
       return TvServerFlowFrame(
         title: l.serversLines,
         onBack: back,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              server.displayName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            Row(
+              children: [
+                ServerIdentityIcon(
+                  server,
+                  size: 48 * TvDesign.scaleOf(context),
+                ),
+                SizedBox(width: 16 * TvDesign.scaleOf(context)),
+                Expanded(
+                  child: Text(
+                    '${server.displayName} · ${l.serversLineCount(server.lines.length)}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             TvChoiceTile(
               actionKey: const Key('server-line-auto'),
               autofocus: true,
               label: l.serversAutomatic,
-              subtitle: l.serversAutomaticHint,
+              subtitle: server.lineSelection.isAutomatic && actualLine != null
+                  ? '${l.serversActualLine} · ${serverLineLabel(actualLine)}'
+                  : l.serversAutomaticHint,
               selected: server.lineSelection.isAutomatic,
               onPressed: busy == null
                   ? () => select(const LineSelection.auto())
@@ -60,7 +77,7 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                         actionKey: Key('server-line-choice-${line.id}'),
                         label: serverLineLabel(line),
                         subtitle:
-                            '${actual == line.id ? '${l.serversActualLine} · ' : ''}${status(l, line)}',
+                            '${actual == line.id ? '${l.serversActualLine} · ' : ''}${serverSafeAddress(line.address)} · ${status(l, line)}',
                         selected: server.lineSelection.fixedLineId == line.id,
                         onPressed: busy == null
                             ? () => select(LineSelection.fixed(line.id))
@@ -71,8 +88,9 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                     TvAction(
                       key: Key('server-line-check-${line.id}'),
                       onPressed: busy == null ? () => check(line) : null,
+                      leading: const Icon(AppIcons.refresh),
                       child: Text(
-                        busy == line.id ? l.serversBusy : l.serversCheck,
+                        busy == line.id ? l.serversCheckingNow : l.serversCheck,
                       ),
                     ),
                   ],

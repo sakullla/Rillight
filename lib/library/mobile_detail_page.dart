@@ -662,6 +662,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             child: Stack(
               children: [
                 AppRefresh(
+                  // 头图铺到状态栏下，浮层顶栏盖在上面。
+                  edgeOffset:
+                      MediaQuery.paddingOf(context).top +
+                      PhoneTopBar.bodyHeight,
                   onRefresh: _refresh,
                   child: CustomScrollView(
                     key: PageStorageKey('detail-${widget.itemId}'),

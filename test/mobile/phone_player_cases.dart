@@ -2892,6 +2892,67 @@ void main() {
     expect(tester.takeException(), isNull);
     await closePlayer(tester);
   }, tags: ['integration']);
+
+  cases.testWidgets('locked phone playback still offers skip intro', (
+    tester,
+  ) async {
+    const second = 10000000;
+    final backend = FakeVideoBackend();
+    await showPlayer(
+      tester,
+      itemId: 'episode-friends-s1e1',
+      backend: backend,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      prepare: (server) {
+        final episode = server.items.firstWhere(
+          (item) => item.id == 'episode-friends-s1e1',
+        );
+        episode.played = false;
+        episode.playedPercentage = 0;
+        episode.playbackPosition = Duration(microseconds: (20 * second) ~/ 10);
+        episode.chapters = const [
+          FakeChapter(
+            name: 'Intro',
+            startPosition: Duration(microseconds: 0),
+            markerType: 'IntroStart',
+          ),
+          FakeChapter(
+            name: 'Intro End',
+            startPosition: Duration(microseconds: (90 * second) ~/ 10),
+            markerType: 'IntroEnd',
+          ),
+        ];
+      },
+    );
+    const skip = Key('mobile-player-skip-segment');
+    await tester.tap(find.byKey(const Key('mobile-player-lock')));
+    await tester.pump();
+    expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    // 锁屏只挡误触；片头提示照常弹出，可直接点按。
+    expect(find.byKey(skip), findsOneWidget);
+    expect(find.text('\u8df3\u8fc7\u7247\u5934'), findsOneWidget);
+    // 解锁钮自动收起后，跳过钮仍在且可点。
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.byKey(const Key('mobile-player-unlock')), findsNothing);
+    expect(find.byKey(skip).hitTestable(), findsOneWidget);
+    await tester.tap(find.byKey(skip));
+    for (
+      var i = 0;
+      i < 20 && backend.position != const Duration(seconds: 90);
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(backend.position, const Duration(seconds: 90));
+    // 跳过后仍保持锁定，控制条不出现。
+    expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    await tester.tapAt(const Offset(400, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const Key('mobile-player-unlock')));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await closePlayer(tester);
+  }, tags: ['integration']);
 }
 
 class _PhoneTrackBackend extends FakeVideoBackend
