@@ -183,6 +183,13 @@ def serve(media, output, metadata_delay_ms=0):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        def do_DELETE(self):
+            if emby_api_path(self.path) == '/Videos/ActiveEncodings':
+                # HLS uses a prebuilt fixture, so there is no encoder to stop.
+                # Accept both normal release and repeated host reconciliation.
+                self.send_json({})
+            else:
+                self.send_json({'error': 'unknown endpoint'}, 404)
         def do_POST(self):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length) or b'{}')

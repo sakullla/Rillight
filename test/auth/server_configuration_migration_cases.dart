@@ -146,69 +146,77 @@ void main() {
     },
   );
 
-  test('all legacy versions retain three provider identities, lines, credentials and order', () async {
-    for (final version in [null, 1, 2, 3]) {
-      final source = File('${directory.path}/servers-$version.json');
-      final original = jsonEncode(_legacy(version: version));
-      await source.writeAsString(original);
-      final accessStore = MemoryServerAccessStore();
-      final migration = ServerConfigurationMigration(
-        configuration: source,
-        credentials: credentials,
-        accessStore: accessStore,
-        readLegacyVerifier: () async => verifier,
-      );
-      final result = await migration.migrate();
-      expect(result.snapshot.servers.map((s) => s.id), [
-        'emby',
-        'plex',
-        'jellyfin',
-      ]);
-      expect(result.snapshot.lastServerId, 'plex');
-      expect(await migration.backup.readAsString(), original);
-      expect(result.unavailableProtectionIds, isEmpty);
-      final controller = ServerAccessController(store: accessStore);
-      for (final server in result.snapshot.servers) {
-        expect(server.lineSelection, const LineSelection.fixed('wan'));
-        expect(server.activeLineId, 'wan');
-        expect(server.lines.map((line) => line.id), ['lan', 'wan']);
-        expect(
-          server.lines.first.address,
-          'http://${server.id}.test:8096/prefix',
+  // Each format is an independent migration. Keep its real password checks
+  // within its own test timeout instead of accumulating eight KDFs in one case.
+  for (final version in [null, 1, 2, 3]) {
+    test(
+      'legacy version $version retains three provider identities, lines, credentials and order',
+      () async {
+        final source = File('${directory.path}/servers-$version.json');
+        final original = jsonEncode(_legacy(version: version));
+        await source.writeAsString(original);
+        final accessStore = MemoryServerAccessStore();
+        final migration = ServerConfigurationMigration(
+          configuration: source,
+          credentials: credentials,
+          accessStore: accessStore,
+          readLegacyVerifier: () async => verifier,
         );
-        expect(server.normalizedUserAgent, 'custom/${server.id}');
-        expect(server.expectedServerId, 'remote-${server.id}');
-        expect(server.displayName, 'Alias ${server.id}');
-        final credential = await credentials.read(
-          server.effectiveCredentialRef,
-        );
-        expect(credential!.accessToken, 'secret-${server.id}');
-        await controller.register(server);
-        if (server.id != 'emby') {
-          expect(controller.allows(server.id), isFalse);
-          expect(await controller.unlock(server.id, '1234'), isTrue);
+        final result = await migration.migrate();
+        expect(result.snapshot.servers.map((s) => s.id), [
+          'emby',
+          'plex',
+          'jellyfin',
+        ]);
+        expect(result.snapshot.lastServerId, 'plex');
+        expect(await migration.backup.readAsString(), original);
+        expect(result.unavailableProtectionIds, isEmpty);
+        final controller = ServerAccessController(store: accessStore);
+        for (final server in result.snapshot.servers) {
+          expect(server.lineSelection, const LineSelection.fixed('wan'));
+          expect(server.activeLineId, 'wan');
+          expect(server.lines.map((line) => line.id), ['lan', 'wan']);
+          expect(
+            server.lines.first.address,
+            'http://${server.id}.test:8096/prefix',
+          );
+          expect(server.normalizedUserAgent, 'custom/${server.id}');
+          expect(server.expectedServerId, 'remote-${server.id}');
+          expect(server.displayName, 'Alias ${server.id}');
+          final credential = await credentials.read(
+            server.effectiveCredentialRef,
+          );
+          expect(credential!.accessToken, 'secret-${server.id}');
+          await controller.register(server);
+          if (server.id != 'emby') {
+            expect(controller.allows(server.id), isFalse);
+            expect(await controller.unlock(server.id, '1234'), isTrue);
+          }
         }
-      }
-      controller.dispose();
-      final plex = result.snapshot.servers[1];
-      expect(plex.cloudCredentialRef, 'cloud-ref');
-      expect(plex.resourceCredentialRef, 'resource-ref');
-      expect(plex.homeUserId, 'home-user');
-      expect(plex.cloudAccountId, 'cloud-user');
-      await FileServerListStore(source).save(result.snapshot);
-      final persisted = jsonDecode(await source.readAsString()) as Map;
-      expect(persisted['version'], 4);
-      expect(
-        (persisted['servers'] as List)[1]['protectionRef'],
-        plex.protectionRef,
-      );
-      expect((persisted['servers'] as List)[1].containsKey('region'), isFalse);
-      expect(
-        (await migration.migrate()).snapshot.servers[1].protectionRef,
-        plex.protectionRef,
-      );
-    }
-  });
+        controller.dispose();
+        final plex = result.snapshot.servers[1];
+        expect(plex.cloudCredentialRef, 'cloud-ref');
+        expect(plex.resourceCredentialRef, 'resource-ref');
+        expect(plex.homeUserId, 'home-user');
+        expect(plex.cloudAccountId, 'cloud-user');
+        await FileServerListStore(source).save(result.snapshot);
+        final persisted = jsonDecode(await source.readAsString()) as Map;
+        expect(persisted['version'], 4);
+        expect(
+          (persisted['servers'] as List)[1]['protectionRef'],
+          plex.protectionRef,
+        );
+        expect(
+          (persisted['servers'] as List)[1].containsKey('region'),
+          isFalse,
+        );
+        expect(
+          (await migration.migrate()).snapshot.servers[1].protectionRef,
+          plex.protectionRef,
+        );
+      },
+    );
+  }
 
   test(
     'interrupted protection writes retain original and resume idempotently',
