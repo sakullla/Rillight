@@ -190,11 +190,14 @@ class MediaShelf extends StatefulWidget {
     return AppSpacing.xxs + title + lineHeightOf(context, textTheme.bodySmall);
   }
 
-  /// 竖版海报行的标签高度:xs 间距 + 一行标题。
+  /// 竖版海报行的标签高度:xs 间距 + 一行标题 + 2px + 一行年份/评分副信息。
   /// 续播进度画在封面上，不另占标题行。
   static double posterLabelExtentFor(BuildContext context) {
+    final textTheme = AppUiTheme.of(context).textTheme;
     return AppSpacing.xs +
-        lineHeightOf(context, AppUiTheme.of(context).textTheme.titleSmall);
+        lineHeightOf(context, textTheme.titleSmall) +
+        2 +
+        lineHeightOf(context, textTheme.labelSmall);
   }
 
   @override
