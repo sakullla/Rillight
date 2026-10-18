@@ -466,7 +466,7 @@ class _TvActionState extends State<TvAction>
           style: (textStyle ?? const TextStyle()).copyWith(
             color: foreground ?? scheme.onSurface,
             fontWeight: widget.selected || widget.emphasized
-                ? FontWeight.w700
+                ? FontWeight.w600
                 : null,
           ),
           child: content,
@@ -575,11 +575,11 @@ class TvStageTheme extends StatelessWidget {
       letterSpacing: 0,
     );
     final text = t.copyWith(
-      displayLarge: size(t.displayLarge, 40, weight: FontWeight.w800),
+      displayLarge: size(t.displayLarge, 40, weight: FontWeight.w700),
       displayMedium: size(
         t.displayMedium,
         34,
-        weight: FontWeight.w800,
+        weight: FontWeight.w700,
         height: 1.12,
       ),
       displaySmall: size(
@@ -1032,7 +1032,7 @@ class _TvCardState extends State<TvCard> {
     final defaults = TvCard.labelsFor(item, wide: widget.wide);
     final title = widget.title ?? defaults.$1;
     final subtitle = widget.subtitle ?? defaults.$2;
-    final radius = BorderRadius.circular(TvDesign.cardRadius * s);
+    final radius = BorderRadius.circular(AppRadii.card * s);
     final duration = AppMotion.durationOf(context, AppMotion.fast);
     return TvAction(
       autofocus: widget.autofocus,
@@ -1051,15 +1051,14 @@ class _TvCardState extends State<TvCard> {
             decoration: BoxDecoration(
               color: scheme.surfaceContainerHigh,
               borderRadius: radius,
+              // 聚焦时的柔和投影:放大 + 白环 + 投影三者叠加,远距离也清晰。
+              boxShadow: focused ? AppShadow.cardHover(theme.brightness) : null,
             ),
             foregroundDecoration: BoxDecoration(
               borderRadius: radius,
               border: Border.all(
-                color: focused
-                    ? scheme.onSurface
-                    : widget.current
-                    ? scheme.primary
-                    : const Color(0x00000000),
+                // 当前项不用彩色描边,改用封面上的 primaryContainer 染色区分。
+                color: focused ? scheme.onSurface : const Color(0x00000000),
                 width: TvAction.focusRingWidth * s,
                 strokeAlign: BorderSide.strokeAlignOutside,
               ),
@@ -1082,6 +1081,12 @@ class _TvCardState extends State<TvCard> {
                       preferBackdrop: widget.preferBackdrop ?? false,
                     ),
                   ),
+                  if (widget.current)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: scheme.primaryContainer.withValues(alpha: .55),
+                      ),
+                    ),
                   if (progress > 0 && !played)
                     Positioned(
                       left: 0,
@@ -1135,7 +1140,7 @@ class _TvCardState extends State<TvCard> {
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: const Color(0xffffffff),
                               fontSize: 10 * s,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               height: 1.2,
                             ),
                           ),
@@ -1175,11 +1180,12 @@ class _TvCardState extends State<TvCard> {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
+                style: theme.textTheme.bodyLarge?.copyWith(
                   color: widget.current ? scheme.primary : scheme.onSurface,
                   fontWeight: focused || widget.current
-                      ? FontWeight.w700
+                      ? FontWeight.w600
                       : FontWeight.w500,
+                  height: 1.2,
                 ),
               ),
               if (subtitle != null && subtitle.isNotEmpty)
@@ -1187,8 +1193,11 @@ class _TvCardState extends State<TvCard> {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: .8),
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontSize: 14 * s,
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w400,
+                    height: 1.1,
                   ),
                 ),
             ],
@@ -1539,7 +1548,7 @@ class TvRowSkeleton extends StatelessWidget {
                 height: metrics.imageHeight,
                 decoration: BoxDecoration(
                   color: color,
-                  borderRadius: BorderRadius.circular(TvDesign.cardRadius * s),
+                  borderRadius: BorderRadius.circular(AppRadii.card * s),
                 ),
               ),
               SizedBox(height: 10 * s),

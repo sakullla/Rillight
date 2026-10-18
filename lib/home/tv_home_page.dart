@@ -619,7 +619,9 @@ class _TvFeaturedCopy extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(pill ? 999 : AppRadii.lg * s),
+        borderRadius: BorderRadius.circular(
+          pill ? AppRadii.pill : AppRadii.lg * s,
+        ),
         border: Border.all(color: scheme.outlineVariant),
         boxShadow: [
           BoxShadow(
@@ -698,11 +700,11 @@ class _TvFeaturedCaption extends StatelessWidget {
             SizedBox(width: 6 * s),
             Text(
               heroKicker(l, item),
-              style: theme.textTheme.labelMedium?.copyWith(
+              style: theme.textTheme.labelLarge?.copyWith(
                 color: onPaper
                     ? scheme.onSurface
                     : const Color(0xffffffff).withValues(alpha: .85),
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -742,7 +744,10 @@ class _TvFeaturedCaption extends StatelessWidget {
                     meta.join('  ·  '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      height: 1.3,
+                      color: muted,
+                    ),
                   ),
                 ),
             ],
@@ -754,7 +759,8 @@ class _TvFeaturedCaption extends StatelessWidget {
             overview,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            style: theme.textTheme.bodyLarge?.copyWith(
+              height: 1.3,
               color: onPaper
                   ? scheme.onSurface.withValues(alpha: .78)
                   : const Color(0xffffffff).withValues(alpha: .75),
