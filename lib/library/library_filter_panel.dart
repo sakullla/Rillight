@@ -283,7 +283,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
               const AppDivider(height: 1),
               Expanded(child: _buildFlatBody(context, phone: false)),
               if (!widget.television) ...[
-                const AppDivider(height: 1),
+                _footerHairline(context),
                 SafeArea(
                   top: false,
                   child: Padding(
@@ -406,7 +406,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 ),
               const AppDivider(height: 1),
               Expanded(child: _buildFlatBody(context, phone: true)),
-              const AppDivider(height: 1),
+              _footerHairline(context),
               SafeArea(
                 top: false,
                 child: Padding(
@@ -455,38 +455,100 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       ('genre', l.libraryFilterGenre),
     ];
     final horizontalPad = widget.television ? 24.0 : (phone ? 16.0 : 20.0);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(horizontalPad, 2, horizontalPad, 6),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        children: [
-          for (final (id, label) in sections)
-            if (widget.television)
+    final padding = EdgeInsets.fromLTRB(horizontalPad, 2, horizontalPad, 6);
+    if (widget.television) {
+      return Padding(
+        padding: padding,
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final (id, label) in sections)
               TvAction(
                 key: _key('section-$id'),
                 pill: true,
                 selected: _activeSection == id,
                 onPressed: () => _chooseSection(id),
                 child: Text(label),
-              )
-            else
-              Semantics(
-                selected: _activeSection == id,
-                child: AppButton(
-                  key: _key('section-$id'),
-                  onPressed: () => _chooseSection(id),
-                  style: const AppButtonStyle(
-                    minimumSize: Size(48, 48),
-                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  variant: _activeSection == id
-                      ? AppButtonVariant.filled
-                      : AppButtonVariant.outlined,
-                  child: Text(label),
+              ),
+          ],
+        ),
+      );
+    }
+    // 分段控件：安静的轨道 + 选中段实底强调色，全页只保留一个实心主操作。
+    return Padding(
+      padding: padding,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: ShapeDecoration(
+              color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: AppEdge.of(AppUiTheme.of(context).brightness),
                 ),
               ),
-        ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (id, label) in sections)
+                  _buildSectionSegment(
+                    context,
+                    id: id,
+                    label: label,
+                    selected: _activeSection == id,
+                    phone: phone,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionSegment(
+    BuildContext context, {
+    required String id,
+    required String label,
+    required bool selected,
+    required bool phone,
+  }) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: AppSurfaceAction(
+        key: _key('section-$id'),
+        onTap: () => _chooseSection(id),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        child: AnimatedContainer(
+          duration: AppMotion.durationOf(context, AppMotion.fast),
+          curve: AppMotion.standard,
+          constraints: BoxConstraints(
+            minWidth: 64,
+            // 手机端保持原有 48 的触达区。
+            minHeight: phone ? 48 : AppControlHeight.md,
+          ),
+          decoration: ShapeDecoration(
+            color: selected ? scheme.primary : const Color(0x00000000),
+            shape: const StadiumBorder(),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -524,29 +586,42 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     child: RemovablePill(label: label, onDeleted: () => setState(change)),
   );
 
+  /// 页脚与内容之间的发丝分隔线。
+  Widget _footerHairline(BuildContext context) => ColoredBox(
+    color: AppEdge.of(AppUiTheme.of(context).brightness),
+    child: const SizedBox(height: 1, width: double.infinity),
+  );
+
   Widget _buildFlatBody(BuildContext context, {required bool phone}) {
     final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
     final query = _search.text.trim().toLowerCase();
     final tv = widget.television;
     final horizontalPad = tv ? 24.0 : (phone ? 16.0 : 20.0);
-    return SingleChildScrollView(
+    final body = SingleChildScrollView(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(horizontalPad, 12, horizontalPad, 20),
+      // 底部留白让最后一行滚到渐隐区之上仍可完整看到。
+      padding: EdgeInsets.fromLTRB(
+        horizontalPad,
+        12,
+        horizontalPad,
+        tv ? 20 : 32,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_sort != null) ...[
             _buildSortSection(context, l),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
           ],
           if (widget.typeFilterable) ...[
             _buildTypeSection(context, l),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
           ],
           _buildWatchSection(context, l),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           _buildGenreSection(context, l, query),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           _buildYearSection(context, l, query),
           if (tv) ...[
             const SizedBox(height: 20),
@@ -582,6 +657,33 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
         ],
       ),
     );
+    if (tv) return body;
+    // 底部渐隐提示内容还能继续滚动，不挡点击。
+    final fadeColor = phone
+        ? theme.colorScheme.surface
+        : theme.colorScheme.surfaceContainerLow;
+    return Stack(
+      children: [
+        Positioned.fill(child: body),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 24,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [fadeColor.withValues(alpha: 0), fadeColor],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _sectionHeader(
@@ -596,16 +698,16 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     final anchorKey = _sectionAnchorKeys[section];
     return Container(
       key: anchorKey,
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
           Icon(icon, size: 16, color: scheme.primary),
           const SizedBox(width: 6),
           Text(
-            '$title ·',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurface,
+            // 只有右侧有内容时才显示分隔点，避免悬空的「排序 ·」。
+            trailing == null ? title : '$title ·',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: scheme.onSurfaceVariant,
             ),
           ),
           const Spacer(),
