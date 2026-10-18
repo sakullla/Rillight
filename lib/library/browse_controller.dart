@@ -14,7 +14,7 @@ class BrowseController extends ChangeNotifier {
     required this.parentId,
     this.includeItemTypes = 'Movie,Series',
   }) {
-    sortBy = defaultSort.sortBy;
+    _restoreSortFromMemory();
     _identity = _currentIdentity;
     auth.addListener(_onAuth);
   }
@@ -36,9 +36,60 @@ class BrowseController extends ChangeNotifier {
   int? year;
   List<int> years = const [];
   List<String> genres = const [];
+  String searchTerm = '';
   late String sortBy;
+  String? _sortOrderOverride;
+
   CatalogSort get defaultSort =>
       CatalogSort.initialFor(auth.client.capabilities);
+
+  CatalogSort get currentSort =>
+      CatalogSort.tryBySortBy(sortBy) ?? defaultSort;
+
+  String get sortOrder {
+    final override = _sortOrderOverride;
+    if (override != null && override.isNotEmpty) {
+      return override;
+    }
+    return _defaultSortOrderFor(sortBy);
+  }
+
+  set sortOrder(String value) {
+    _sortOrderOverride = CatalogSort.normalizeSortOrder(
+      value,
+      fallback: currentSort,
+    );
+  }
+
+  String get _serverKey =>
+      auth.session?.server.id ?? auth.client.baseUrl?.toString() ?? '';
+
+  void _restoreSortFromMemory() {
+    final remembered = LibrarySortMemory.read(
+      serverKey: _serverKey,
+      parentId: parentId,
+      capabilities: auth.client.capabilities,
+    );
+    if (remembered != null) {
+      sortBy = remembered.$1.sortBy;
+      _sortOrderOverride = remembered.$2;
+    } else {
+      sortBy = defaultSort.sortBy;
+      _sortOrderOverride = defaultSort.sortOrder;
+    }
+  }
+
+  void _persistSortToMemory() {
+    final resolved = CatalogSort.tryBySortBy(sortBy);
+    if (resolved == null) return;
+    LibrarySortMemory.write(
+      serverKey: _serverKey,
+      parentId: parentId,
+      sort: resolved,
+      sortOrder: sortOrder,
+    );
+  }
+
   MediaServerException? error;
   int _revision = 0, _offset = 0;
   bool _disposed = false;
@@ -48,7 +99,8 @@ class BrowseController extends ChangeNotifier {
   void _onAuth() {
     if (_identity == _currentIdentity) return;
     _identity = _currentIdentity;
-    sortBy = defaultSort.sortBy;
+    _restoreSortFromMemory();
+    searchTerm = '';
     _revision++;
     items = const [];
     _offset = 0;
@@ -61,15 +113,17 @@ class BrowseController extends ChangeNotifier {
   bool _owns(int revision) =>
       !_disposed && revision == _revision && _identity == _currentIdentity;
   CatalogRequest _request(int startIndex) {
+    final trimmedSearch = searchTerm.trim();
     return catalogItemsRequest(
       userId: auth.client.userId ?? '',
       parentId: parentId,
+      searchTerm: trimmedSearch.isEmpty ? null : trimmedSearch,
       recursive: true,
       includeItemTypes: type ?? includeItemTypes,
       limit: pageSize,
       startIndex: startIndex,
       sortBy: sortBy,
-      sortOrder: _sortOrder,
+      sortOrder: sortOrder,
       filters: watch == null ? null : [watch!],
       genres: genres.isNotEmpty
           ? genres
@@ -171,32 +225,105 @@ class BrowseController extends ChangeNotifier {
     String? type,
     String? watch,
     required String sortBy,
+    String? sortOrder,
     int? year,
     String? genre,
     List<int>? years,
     List<String>? genres,
+    String? searchTerm,
   }) {
     this.type = type;
     this.watch = watch;
     this.years = years ?? (year == null ? const [] : [year]);
     this.year = this.years.firstOrNull;
-    this.genres = (genres ?? (genre == null ? const [] : [genre]))
+    this.genres = (genres ?? (genre == null ? const <String>[] : [genre]))
         .map((g) => g.trim())
         .where((g) => g.isNotEmpty)
         .toSet()
         .toList();
     this.genre = this.genres.firstOrNull;
     this.sortBy = sortBy;
+    final resolvedSort = CatalogSort.tryBySortBy(sortBy);
+    if (resolvedSort != null && !resolvedSort.supportsOrderToggle) {
+      _sortOrderOverride = resolvedSort.sortOrder;
+    } else if (sortOrder != null && sortOrder.isNotEmpty) {
+      _sortOrderOverride = CatalogSort.normalizeSortOrder(
+        sortOrder,
+        fallback: resolvedSort,
+      );
+    } else {
+      _sortOrderOverride = _defaultSortOrderFor(sortBy);
+    }
+    if (searchTerm != null) {
+      this.searchTerm = searchTerm.trim();
+    }
+    _persistSortToMemory();
     return load();
   }
 
-  String get _sortOrder {
+  /// 切换排序字段或正/倒序；若再次选择当前非随机排序且未显式指定方向，则翻转方向。
+  Future<void> selectSort(CatalogSort sort, {String? sortOrder}) {
+    final String nextOrder;
+    if (!sort.supportsOrderToggle) {
+      nextOrder = sort.sortOrder;
+    } else if (sortOrder != null && sortOrder.isNotEmpty) {
+      nextOrder = CatalogSort.normalizeSortOrder(sortOrder, fallback: sort);
+    } else if (sort.sortBy == sortBy) {
+      nextOrder = CatalogSort.flipSortOrder(this.sortOrder);
+    } else {
+      nextOrder = sort.sortOrder;
+    }
+    sortBy = sort.sortBy;
+    _sortOrderOverride = nextOrder;
+    _persistSortToMemory();
+    return load();
+  }
+
+  /// 一键翻转当前正/倒序。
+  Future<void> toggleSortOrder() {
+    if (!currentSort.supportsOrderToggle) return Future<void>.value();
+    _sortOrderOverride = CatalogSort.flipSortOrder(sortOrder);
+    _persistSortToMemory();
+    return load();
+  }
+
+  /// 设置库内搜索词并刷新。
+  Future<void> setSearchTerm(String value) {
+    final next = value.trim();
+    if (next == searchTerm) return Future<void>.value();
+    searchTerm = next;
+    return load();
+  }
+
+  /// 切换单个流派胶囊选中态并立即刷新。
+  Future<void> toggleGenre(String? targetGenre) {
+    if (targetGenre == null || targetGenre.trim().isEmpty) {
+      genres = const [];
+      genre = null;
+      return load();
+    }
+    final normalized = targetGenre.trim();
+    final next = [...genres];
+    if (next.isEmpty && genre != null && genre!.isNotEmpty) {
+      next.add(genre!);
+    }
+    if (next.contains(normalized)) {
+      next.remove(normalized);
+    } else {
+      next.add(normalized);
+    }
+    genres = next;
+    genre = genres.firstOrNull;
+    return load();
+  }
+
+  String _defaultSortOrderFor(String targetSortBy) {
     for (final sort in CatalogSort.values) {
-      if (sort.sortBy == sortBy) {
+      if (sort.sortBy == targetSortBy) {
         return sort.sortOrder;
       }
     }
-    return sortBy == 'SortName' ? 'Ascending' : 'Descending';
+    return targetSortBy == 'SortName' ? 'Ascending' : 'Descending';
   }
 
   @override

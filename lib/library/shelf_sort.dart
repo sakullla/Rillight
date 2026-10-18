@@ -30,6 +30,27 @@ enum CatalogSort {
   bool supportedBy(ServiceCapabilities capabilities) =>
       !capabilities.unsupportedSorts.contains(sortBy);
 
+  /// 随机排序没有正/倒序之分。
+  bool get supportsOrderToggle => this != CatalogSort.random;
+
+  static CatalogSort? tryBySortBy(String? sortBy) {
+    if (sortBy == null || sortBy.isEmpty) return null;
+    for (final value in values) {
+      if (value.sortBy == sortBy) return value;
+    }
+    return null;
+  }
+
+  static String normalizeSortOrder(String? order, {CatalogSort? fallback}) {
+    final normalized = (order ?? '').trim().toLowerCase();
+    if (normalized == 'ascending') return 'Ascending';
+    if (normalized == 'descending') return 'Descending';
+    return fallback?.sortOrder ?? 'Descending';
+  }
+
+  static String flipSortOrder(String order) =>
+      normalizeSortOrder(order) == 'Ascending' ? 'Descending' : 'Ascending';
+
   String label(AppLocalizations l10n) {
     switch (this) {
       case CatalogSort.dateUpdated:
@@ -74,15 +95,70 @@ enum CatalogSort {
         : const [
             CatalogSort.dateUpdated,
             CatalogSort.dateCreated,
+            CatalogSort.premiereDate,
+            CatalogSort.datePlayed,
             CatalogSort.name,
             CatalogSort.productionYear,
             CatalogSort.communityRating,
+            CatalogSort.criticRating,
+            CatalogSort.runtime,
             CatalogSort.random,
           ];
     return capabilities == null
         ? options
         : options.where((sort) => sort.supportedBy(capabilities)).toList();
   }
+}
+
+/// 按片库（`parentId` / `viewId`）独立记忆用户上次选择的排序字段与正/倒序方向。
+abstract final class LibrarySortMemory {
+  static final Map<String, (CatalogSort, String)> _entries = {};
+
+  static String _key(String? serverKey, String? parentId) {
+    final p = (parentId ?? '').trim();
+    if (p.isEmpty) return '';
+    final s = (serverKey ?? '').trim();
+    return '$s|$p';
+  }
+
+  static (CatalogSort, String)? read({
+    String? serverKey,
+    required String? parentId,
+    ServiceCapabilities? capabilities,
+  }) {
+    final key = _key(serverKey, parentId);
+    if (key.isEmpty) return null;
+    final stored = _entries[key];
+    if (stored == null) return null;
+    if (capabilities != null && !stored.$1.supportedBy(capabilities)) {
+      return null;
+    }
+    return stored;
+  }
+
+  static void write({
+    String? serverKey,
+    required String? parentId,
+    required CatalogSort sort,
+    required String sortOrder,
+  }) {
+    final key = _key(serverKey, parentId);
+    if (key.isEmpty) return;
+    _entries[key] = (
+      sort,
+      sort.supportsOrderToggle
+          ? CatalogSort.normalizeSortOrder(sortOrder, fallback: sort)
+          : sort.sortOrder,
+    );
+  }
+
+  static void remove({String? serverKey, required String? parentId}) {
+    final key = _key(serverKey, parentId);
+    if (key.isEmpty) return;
+    _entries.remove(key);
+  }
+
+  static void clear() => _entries.clear();
 }
 
 /// 片库已看状态筛选,映射到服务端 `Filters` 官方参数。
@@ -136,6 +212,12 @@ class ShelfFilters {
       genres.isEmpty;
 
   bool get isNotEmpty => !isEmpty;
+
+  int get activeCount =>
+      (type == CatalogTypeFilter.all ? 0 : 1) +
+      (watch == CatalogWatchFilter.all ? 0 : 1) +
+      years.length +
+      genres.length;
 
   ShelfFilters copyWith({
     CatalogTypeFilter? type,

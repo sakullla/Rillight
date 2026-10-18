@@ -420,4 +420,102 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'single-page filter panel renders all dimensions, collapses historical years and toggles sort order',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 810);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      ShelfFilters? appliedFilters;
+      CatalogSort? appliedSort;
+      String? appliedSortOrder;
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          theme: AppUiTheme.dark(),
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => CupertinoPageScaffold(
+              child: ui.AppButton(
+                onPressed: () => showAppDialog<void>(
+                  context: context,
+                  builder: (_) => AppModalFrame(
+                    child: LibraryFilterPanel(
+                      keyPrefix: 'flat',
+                      initial: const ShelfFilters(),
+                      sort: CatalogSort.dateUpdated,
+                      sortOrder: 'Descending',
+                      genres: const ['科幻', '动作'],
+                      onApply: (filters, sort) {
+                        appliedFilters = filters;
+                        appliedSort = sort;
+                      },
+                      onApplyWithOrder: (filters, sort, sortOrder) {
+                        appliedFilters = filters;
+                        appliedSort = sort;
+                        appliedSortOrder = sortOrder;
+                      },
+                    ),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await settle(tester);
+
+      // All dimension sections are simultaneously present in the single-page scroll view.
+      expect(find.byKey(const Key('flat-sort-section')), findsOneWidget);
+      expect(find.byKey(const Key('flat-type-section')), findsOneWidget);
+      expect(find.byKey(const Key('flat-watch-section')), findsOneWidget);
+      expect(find.byKey(const Key('flat-genre-section')), findsOneWidget);
+      expect(find.byKey(const Key('flat-year-section')), findsOneWidget);
+
+      // Older years (< currentYear - 14) are collapsed by default until expanded.
+      expect(find.byKey(const Key('flat-year-1999')), findsNothing);
+      final expandYears = find.byKey(const Key('flat-year-expand'));
+      expect(expandYears, findsOneWidget);
+      await tester.ensureVisible(expandYears);
+      await tester.tap(expandYears);
+      await settle(tester);
+      expect(find.byKey(const Key('flat-year-1999')), findsOneWidget);
+
+      // Sort order can be toggled in the panel and committed on apply.
+      final sortOrderBtn = find.byKey(const Key('flat-sort-order'));
+      await tester.ensureVisible(sortOrderBtn);
+      await tester.tap(sortOrderBtn);
+      await settle(tester);
+
+      // Random sort hides the sort order toggle.
+      final randomSort = find.byKey(const Key('flat-sort-Random'));
+      await tester.ensureVisible(randomSort);
+      await tester.tap(randomSort);
+      await settle(tester);
+      expect(find.byKey(const Key('flat-sort-order')), findsNothing);
+
+      // Switch to premiereDate and flip to Ascending.
+      final premiereSort = find.byKey(const Key('flat-sort-PremiereDate'));
+      await tester.ensureVisible(premiereSort);
+      await tester.tap(premiereSort);
+      await settle(tester);
+      final sortOrderAfterPremiere = find.byKey(
+        const Key('flat-sort-order'),
+      );
+      expect(sortOrderAfterPremiere, findsOneWidget);
+      await tester.ensureVisible(sortOrderAfterPremiere);
+      await tester.tap(sortOrderAfterPremiere);
+      await settle(tester);
+
+      await tester.tap(find.byKey(const Key('flat-apply')));
+      await settle(tester);
+      expect(appliedFilters, isNotNull);
+      expect(appliedSort, CatalogSort.premiereDate);
+      expect(appliedSortOrder, 'Ascending');
+    },
+  );
 }
