@@ -193,7 +193,10 @@ final AppButtonStyle _phoneChromeButton = AppButtonStyle(
   shape: const CircleBorder(),
 );
 
-final Color _phoneSecondaryFill = CupertinoColors.white.withValues(alpha: .16);
+// 等价于 0x29FFFFFF，保持 41/255 的精确透明度。
+final Color _phoneSecondaryFill = CupertinoColors.white.withValues(
+  alpha: 41 / 255,
+);
 
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
   double? _seek;
