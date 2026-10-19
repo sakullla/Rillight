@@ -2442,7 +2442,49 @@
   "sourceSelectionRetry": "部分来源加载失败，重试",
   "sourceSelectionMore": "继续查找",
   "sourceSelectionCheckDetails": "请核对影片详情",
-  "sourceSelectionHint": "选择来源查看详情，播放不会自动切换。",
+  "sourceSelectionHint": "打开对应详情，不会直接播放。",
+  "sourceSelectionFound": "找到 {count} 个来源",
+  "@sourceSelectionFound": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sourceSelectionSearching": "正在其他服务器上查找",
+  "sourceSelectionFilterAny": "不限",
+  "sourceSelectionResolution": "清晰度",
+  "sourceSelectionRange": "动态范围",
+  "sourceSelectionVideo": "编码",
+  "sourceSelectionSubtitle": "字幕",
+  "sourceSelectionSubtitleChinese": "中字",
+  "sourceSelectionSubtitleEnglish": "英字",
+  "sourceSelectionSubtitleExternal": "外挂",
+  "sourceSelectionSubtitlePresent": "有字幕",
+  "sourceSelectionSubtitleNone": "无字幕",
+  "sourceSelectionSound": "声音",
+  "sourceSelectionNoMatch": "没有符合条件的来源",
+  "sourceSelectionClearFilters": "清除筛选",
+  "sourceSelectionBestBitrate": "最高码率",
+  "sourceSelectionClearest": "最清晰",
+  "sourceSelectionWatchedToday": "今天看过",
+  "sourceSelectionWatchedYesterday": "昨天看过",
+  "sourceSelectionWatchedDays": "{days} 天前看过",
+  "@sourceSelectionWatchedDays": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "sourceSelectionEpisodeCount": "共 {count} 集",
+  "@sourceSelectionEpisodeCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "sourceSelectionPasswordTitle": "输入访问密码",
   "sourceSelectionPasswordPrompt": "输入这台服务器的本机密码，查看可选来源。",
   "sourceSelectionUnlock": "解锁",

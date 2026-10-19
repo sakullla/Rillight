@@ -329,12 +329,17 @@ class EpisodeThumbCard extends StatelessWidget {
                 height: height,
                 // Reserve the same 3dp frame for every episode. Painting a ring
                 // over only the selected image hides its edges and makes that
-                // picture visibly smaller than its neighbours.
+                // picture visibly smaller than its neighbours. The frame stays
+                // neutral: a primary stroke lights up the top-right corner and
+                // fuses with the progress into one thick bar.
                 padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(AppRadii.sm),
-                  color: selected || highlighted
-                      ? AppUiTheme.of(context).colorScheme.primary
+                  color: highlighted
+                      ? (AppUiTheme.of(context).brightness == Brightness.light
+                            ? AppUiTheme.of(context).colorScheme.onSurface
+                                  .withValues(alpha: 0.38)
+                            : const Color(0xffffffff).withValues(alpha: 0.5))
                       : AppUiTheme.of(context)
                             .colorScheme
                             .surfaceContainerHighest,
@@ -363,9 +368,12 @@ class EpisodeThumbCard extends StatelessWidget {
                         playKey: PosterCard.playButtonKey(item.id),
                       ),
                       if (item.canResume)
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: MediaProgressBar(
+                        Positioned(
+                          left: 8,
+                          right: 8,
+                          bottom: 7,
+                          child: _EpisodeThumbProgress(
+                            key: ValueKey('episode-thumb-progress-${item.id}'),
                             value: progress,
                             label: l10n.playbackProgress(
                               (progress * 100).round(),
@@ -418,6 +426,50 @@ class EpisodeThumbCard extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// 分集封面上的续播进度。细圆轨贴在画面内侧，不用主题色光晕，
+/// 这样它读作“看到哪了”，而不是卡片的一条边。
+class _EpisodeThumbProgress extends StatelessWidget {
+  const _EpisodeThumbProgress({
+    super.key,
+    required this.value,
+    required this.label,
+  });
+
+  final double value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = value.clamp(0.0, 1.0);
+    return Semantics(
+      container: true,
+      label: label,
+      child: SizedBox(
+        height: 3,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xff000000).withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: fraction,
+              heightFactor: 1,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Color(0xeaffffff),
+                  borderRadius: BorderRadius.all(Radius.circular(99)),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -7,30 +7,34 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'app/app_shell_top_bar_test.dart',
+    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
+  );
+  group(
     'catalog/filter_panel_test.dart',
     caseEntrypoints['catalog/filter_panel_cases.dart']!,
-  );
-  group(
-    'catalog/item_detail_test.dart [part 2]',
-    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
-  );
-  group(
-    'home/shelf_hover_clip_test.dart',
-    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
-  );
-  group(
-    'mobile/detail_route_identity_test.dart',
-    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
   );
   group(
     'mobile/motion_behaviors_test.dart',
     caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
   );
   group(
-    'player/desktop_player_page_test.dart',
-    caseEntrypoints['player/desktop_player_page_cases.dart']!,
+    'player/subtitle_menu_test.dart',
+    caseEntrypoints['player/subtitle_menu_cases.dart']!,
   );
   group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
+  group(
+    'tv/tv_lan_pair_test.dart [part 1]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
+  );
+  group(
+    'tv/tv_lan_pair_test.dart [part 2]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
+  );
+  group(
+    'widgets/liquid_glass_test.dart',
+    caseEntrypoints['widgets/liquid_glass_cases.dart']!,
+  );
   group(
     'widgets/media_image_test.dart',
     caseEntrypoints['widgets/media_image_cases.dart']!,

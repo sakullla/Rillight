@@ -647,9 +647,22 @@ void main() {
           ),
         );
 
-        // 媒体库下拉直接列出片库并跳转。
+        // 媒体库下拉直接列出片库并跳转。菜单不是页面，左边不出现返回。
         await tester.tap(find.byKey(AppShell.librariesNavKey));
+        await tester.pump();
+        expect(find.byType(DesktopBackButton), findsNothing);
+        final menu = find.byKey(const Key('app-menu-content'));
+        expect(menu, findsOneWidget);
+        final button = tester.getRect(find.byKey(AppShell.librariesNavKey));
+        final opening = tester.getRect(menu);
+        // 从按钮顶缘向下展开，不从屏幕中心扑到原位。
+        expect(opening.top, greaterThan(button.bottom - 40));
+        expect((opening.left - button.left).abs(), lessThan(48));
         await settle(tester);
+        expect(find.byType(DesktopBackButton), findsNothing);
+        final settled = tester.getRect(menu);
+        expect(settled.top, closeTo(button.bottom, 20));
+        expect(settled.left, closeTo(button.left, 24));
         final entry = find.byKey(AppShell.libraryNavEntryKey('view-movies'));
         expect(entry, findsOneWidget);
         await tester.tap(entry);

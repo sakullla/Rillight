@@ -250,6 +250,74 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('current episode stays marked without a side rail', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      CupertinoTestApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: [
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: CupertinoPageScaffold(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 320,
+              child: EpisodeRow(
+                item: MediaItem(
+                  id: 'e39',
+                  name: '终圆房',
+                  type: 'Episode',
+                  indexNumber: 39,
+                  overview: '圣上宠信宦官。',
+                  premiereDate: DateTime(2026, 10, 1),
+                ),
+                selected: true,
+                busyPlayed: false,
+                onTap: () {},
+                onPlay: () {},
+                onTogglePlayed: () {},
+              ),
+            ),
+          ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: AppUiTheme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(EpisodeCurrentMark), findsOneWidget);
+    final title = tester.widget<Text>(find.text('39. 终圆房'));
+    expect(title.style?.fontWeight, FontWeight.w700);
+
+    final rails = <RenderBox>[];
+    void visit(Element element) {
+      final object = element.renderObject;
+      if (object is RenderBox && object.hasSize) {
+        final size = object.size;
+        if (size.width > 0 && size.width <= 4 && size.height > 24) {
+          rails.add(object);
+        }
+      }
+      element.visitChildren(visit);
+    }
+
+    visit(tester.element(find.byType(EpisodeRow)));
+    expect(rails, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   test(
     'series reading scale stays flat through 1080p and trails the panel scale',
     () {

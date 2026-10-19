@@ -243,109 +243,198 @@ Future<T?> showAppMenu<T>({
   String? title,
   RelativeRect? position,
   BoxConstraints? constraints,
-}) => showAppDialog<T>(
-  context: context,
-  builder: (context) {
-    final scheme = AppUiTheme.of(context).colorScheme;
-    final anchored = position != null;
-    final content = Column(
-      key: const Key('app-menu-content'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final entry in items)
+}) {
+  final anchor = position;
+  if (anchor == null) {
+    return showAppDialog<T>(
+      context: context,
+      builder: (context) => AppDialog(
+        maxWidth: constraints?.maxWidth ?? 400,
+        title: title == null ? null : Text(title),
+        content: _menuColumn<T>(
+          context: context,
+          items: items,
+          selected: selected,
+          anchored: false,
+        ),
+        actions: [
           AppButton(
-            key: entry.key,
-            autofocus:
-                entry.enabled &&
-                (entry.value == selected ||
-                    selected == null && identical(entry, items.first)),
-            onPressed: entry.enabled
-                ? () => Navigator.of(context).pop(entry.value)
-                : null,
-            // 锚定菜单是一列左对齐的条目:正文用墨色,当前项用强调色浅底和勾,
-            // 不再整列染成蓝色链接。
-            color: anchored && entry.value == selected
-                ? scheme.primaryContainer
-                : null,
-            foregroundColor: entry.destructive
-                ? scheme.error
-                : anchored
-                ? (entry.value == selected
-                      ? scheme.onPrimaryContainer
-                      : scheme.onSurface)
-                : null,
-            padding: anchored
-                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: DefaultTextStyle.merge(
-              textAlign: anchored ? TextAlign.start : null,
-              style: anchored && entry.value == selected
-                  ? const TextStyle(fontWeight: FontWeight.w600)
-                  : null,
-              child: Row(
-                children: [
-                  Expanded(child: entry.child),
-                  if (entry.value == selected)
-                    Icon(
-                      CupertinoIcons.check_mark,
-                      size: 16,
-                      color: anchored ? scheme.primary : null,
-                    ),
-                ],
-              ),
-            ),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
           ),
-      ],
+        ],
+      ),
     );
-    if (position != null) {
-      return Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.arrowDown): NextFocusIntent(),
-          SingleActivator(LogicalKeyboardKey.arrowUp): PreviousFocusIntent(),
-        },
-        child: CustomSingleChildLayout(
-          delegate: _AppMenuLayout(position, constraints),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              border: Border.all(
-                color: AppUiTheme.of(context).colorScheme.outlineVariant,
+  }
+  // 锚定菜单从按钮向下展开。系统对话框会把整层从 1.3 倍弹簧缩回，
+  // 菜单会从屏幕中间扑过来，不像是从这个按钮里打开的。
+  final theme = AppUiTheme.of(context);
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: '关闭',
+    barrierColor: const Color(0x00000000),
+    transitionDuration: AppMotion.durationOf(context, AppMotion.fast),
+    transitionBuilder: (context, animation, secondaryAnimation, child) => child,
+    pageBuilder: (dialogContext, animation, secondaryAnimation) {
+      return AppUiTheme(
+        data: theme,
+        child: Shortcuts(
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+            SingleActivator(LogicalKeyboardKey.arrowDown): NextFocusIntent(),
+            SingleActivator(LogicalKeyboardKey.arrowUp): PreviousFocusIntent(),
+          },
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              DismissIntent: CallbackAction<DismissIntent>(
+                onInvoke: (_) {
+                  Navigator.of(dialogContext).pop();
+                  return null;
+                },
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppUiTheme.of(context).colorScheme.scrim.withValues(
-                    alpha: AppUiTheme.of(context).brightness == Brightness.dark
-                        ? 0.42
-                        : 0.16,
+            },
+            child: CustomSingleChildLayout(
+              delegate: _AppMenuLayout(anchor, constraints),
+              child: _AnchoredMenuReveal(
+                animation: animation,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(AppRadii.lg),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.scrim.withValues(
+                          alpha: theme.brightness == Brightness.dark
+                              ? 0.42
+                              : 0.16,
+                        ),
+                        blurRadius: 24,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(6),
+                    child: _menuColumn<T>(
+                      context: dialogContext,
+                      items: items,
+                      selected: selected,
+                      anchored: true,
+                    ),
+                  ),
                 ),
-              ],
-            ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(6),
-              child: content,
+              ),
             ),
           ),
         ),
       );
-    }
-    return AppDialog(
-      maxWidth: constraints?.maxWidth ?? 400,
-      title: title == null ? null : Text(title),
-      content: content,
-      actions: [
+    },
+  );
+}
+
+Widget _menuColumn<T>({
+  required BuildContext context,
+  required List<AppMenuEntry<T>> items,
+  required T? selected,
+  required bool anchored,
+}) {
+  final scheme = AppUiTheme.of(context).colorScheme;
+  return Column(
+    key: const Key('app-menu-content'),
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final entry in items)
         AppButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          key: entry.key,
+          autofocus:
+              entry.enabled &&
+              (entry.value == selected ||
+                  selected == null && identical(entry, items.first)),
+          onPressed: entry.enabled
+              ? () => Navigator.of(context).pop(entry.value)
+              : null,
+          // 锚定菜单是一列左对齐的条目:正文用墨色,当前项用强调色浅底和勾,
+          // 不再整列染成蓝色链接。
+          color: anchored && entry.value == selected
+              ? scheme.primaryContainer
+              : null,
+          foregroundColor: entry.destructive
+              ? scheme.error
+              : anchored
+              ? (entry.value == selected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurface)
+              : null,
+          padding: anchored
+              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+              : const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: DefaultTextStyle.merge(
+            textAlign: anchored ? TextAlign.start : null,
+            style: anchored && entry.value == selected
+                ? const TextStyle(fontWeight: FontWeight.w600)
+                : null,
+            child: Row(
+              children: [
+                Expanded(child: entry.child),
+                if (entry.value == selected)
+                  Icon(
+                    CupertinoIcons.check_mark,
+                    size: 16,
+                    color: anchored ? scheme.primary : null,
+                  ),
+              ],
+            ),
+          ),
         ),
-      ],
+    ],
+  );
+}
+
+/// 菜单面板在自己的位置上展开，而不是带着整屏布局一起缩放。
+class _AnchoredMenuReveal extends StatefulWidget {
+  const _AnchoredMenuReveal({required this.animation, required this.child});
+
+  final Animation<double> animation;
+  final Widget child;
+
+  @override
+  State<_AnchoredMenuReveal> createState() => _AnchoredMenuRevealState();
+}
+
+class _AnchoredMenuRevealState extends State<_AnchoredMenuReveal> {
+  late final CurvedAnimation _curved = CurvedAnimation(
+    parent: widget.animation,
+    curve: AppMotion.emphasized,
+    reverseCurve: AppMotion.exit,
+  );
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, -0.08),
+          end: Offset.zero,
+        ).animate(_curved),
+        child: ScaleTransition(
+          alignment: Alignment.topCenter,
+          scale: Tween<double>(begin: 0.94, end: 1).animate(_curved),
+          child: widget.child,
+        ),
+      ),
     );
-  },
-);
+  }
+}
 
 class _AppMenuLayout extends SingleChildLayoutDelegate {
   _AppMenuLayout(this.position, this.constraints);

@@ -1476,14 +1476,29 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           }
           current();
           Duration remaining() => deadline!.difference(DateTime.now().toUtc());
-          final target = await runtime!
-              .resolveLine(
-                actual,
-                line,
-                command['version'] as String?,
-                timeout: remaining(),
-              )
-              .timeout(remaining());
+          // Already playing this address. Saving automatic or the same fixed
+          // line must not probe the server again: a failed probe was shown as
+          // "line was not switched" while the current playback stayed up.
+          final stored = runtime!.registry
+              .project()
+              .where((s) => s.id == actual.source.account.configuredServerId)
+              .firstOrNull
+              ?.lines
+              .where((candidate) => candidate.id == line)
+              .firstOrNull;
+          final alreadyPlaying =
+              stored != null &&
+              Uri.tryParse(stored.address) == actual.client.baseUrl;
+          final target = alreadyPlaying
+              ? actual
+              : await runtime!
+                    .resolveLine(
+                      actual,
+                      line,
+                      command['version'] as String?,
+                      timeout: remaining(),
+                    )
+                    .timeout(remaining());
           current();
           await _observationTail.timeout(remaining());
           current();

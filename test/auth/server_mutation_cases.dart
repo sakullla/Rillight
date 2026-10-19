@@ -646,6 +646,195 @@ void main() {
     },
   );
 
+  test('paste reads SenPlayer, Rodel and Hills import links', () {
+    final senPlayer = ServerPastePreview.parse(
+      'senplayer://importserver?type=emby&name=百度服务&note=&address=https://www.baidu.com:443'
+      '&username=123&password=456&icon=https://icon.example/a.png'
+      '&address1name=百度线路1&address1=https://www.baidu1.com:443'
+      '&address2name=百度线路2&address2=https://baidu2.com:443',
+    );
+    final sen = senPlayer.groups.single;
+    expect(senPlayer.unrecognized, isEmpty);
+    expect(sen.serviceType, MediaServerType.emby);
+    expect([sen.name, sen.username, sen.password], ['百度服务', '123', '456']);
+    // https on 443 is the same address with or without the default port.
+    expect(sen.lines, [
+      'https://www.baidu.com',
+      'https://www.baidu1.com',
+      'https://baidu2.com',
+    ]);
+    expect(sen.unrecognized, isEmpty);
+
+    final encoded = ServerPastePreview.parse(
+      'SenPlayer://importserver?type=jellyfin&name=JF'
+      '&address=https://jf.example.com:8920/jellyfin'
+      '&username=ada&password=c%2Bd&note=ignore-me',
+    ).groups.single;
+    expect(encoded.serviceType, MediaServerType.jellyfin);
+    expect(encoded.password, 'c+d');
+    expect(encoded.lines, ['https://jf.example.com:8920/jellyfin']);
+
+    final plex = ServerPastePreview.parse(
+      'senplayer://importserver?type=plex&name=Plex'
+      '&address=https://plex.example.com:32400&username=ada&password=secret',
+    ).groups.single;
+    expect(plex.serviceType, MediaServerType.plex);
+    expect(plex.lines, ['https://plex.example.com:32400']);
+
+    final partial = ServerPastePreview.parse(
+      'senplayer://importserver?type=emby&name=Partial'
+      '&address=ftp://bad.example.com&username=ada&password=secret'
+      '&address1=https://good.example.com',
+    ).groups.single;
+    expect(
+      [partial.name, partial.username, partial.password],
+      ['Partial', 'ada', 'secret'],
+    );
+    expect(partial.lines, ['https://good.example.com']);
+
+    final rodel = ServerPastePreview.parse(
+      'rodelplayer://import?type=emby&title=MyEmby&scheme=http&host=xxx.xxx.com'
+      '&port=8096&username=xxx&password=xxx'
+      '&line1=http%3A%2F%2F127.0.0.1%3A8096&line1title=Local',
+    ).groups.single;
+    expect(rodel.name, 'MyEmby');
+    expect([rodel.username, rodel.password], ['xxx', 'xxx']);
+    expect(rodel.lines, ['http://xxx.xxx.com:8096', 'http://127.0.0.1:8096']);
+
+    final proxy = ServerPastePreview.parse(
+      'rodelplayer://import?type=jellyfin&title=Proxy&scheme=https'
+      '&host=media.example.com&port=8096&path=emby&username=ada&password=a%26b'
+      '&line10=https%3A%2F%2Ften.example.com'
+      '&line2=https%3A%2F%2Ftwo.example.com'
+      '&line3=https%3A%2F%2Fu%3Ap%40secret.example.com',
+    ).groups.single;
+    expect(proxy.serviceType, MediaServerType.jellyfin);
+    expect(proxy.password, 'a&b');
+    expect(proxy.lines, [
+      'https://media.example.com:8096/emby',
+      'https://two.example.com',
+      'https://ten.example.com',
+    ]);
+
+    final hills = ServerPastePreview.parse(
+      'hills://import?scheme=https&host=emby.example.com&port=443'
+      '&username=alice&password=secret&type=jellyfin'
+      '&line1=https://backup.example.com&line1title=Backup'
+      '&line2=ftp://files.example.com/media'
+      '&line3=https://backup2.example.com/emby',
+    ).groups.single;
+    expect(hills.serviceType, MediaServerType.jellyfin);
+    expect(hills.name, isEmpty);
+    expect([hills.username, hills.password], ['alice', 'secret']);
+    expect(hills.lines, [
+      'https://emby.example.com',
+      'https://backup.example.com',
+      'https://backup2.example.com/emby',
+    ]);
+
+    final implied = ServerPastePreview.parse(
+      'HILLS://import?scheme=HTTPS&host=Emby.Example.com&port=8096'
+      '&username=Alice&password=secret',
+    ).groups.single;
+    expect(implied.serviceType, MediaServerType.emby);
+    expect(implied.username, 'Alice');
+    expect(implied.lines, ['https://emby.example.com:8096']);
+
+    final gapped = ServerPastePreview.parse(
+      'hills://import?scheme=https&host=emby.example.com&username=alice'
+      '&password=secret&line1=https://backup.example.com'
+      '&line3=https://skip.example.com',
+    ).groups.single;
+    expect(gapped.lines, [
+      'https://emby.example.com',
+      'https://backup.example.com',
+    ]);
+
+    final extras = [
+      for (var i = 1; i <= 40; i++)
+        'line$i=${Uri.encodeComponent('https://line$i.example.com')}',
+    ].join('&');
+    final capped = ServerPastePreview.parse(
+      'rodelplayer://import?type=emby&title=Many&scheme=https'
+      '&host=primary.example.com&username=ada&password=secret&$extras',
+    ).groups.single;
+    expect(capped.lines, hasLength(32));
+    expect(capped.lines.first, 'https://primary.example.com');
+    expect(capped.lines[1], 'https://line1.example.com');
+    expect(capped.lines.last, 'https://line31.example.com');
+  });
+
+  test(
+    'paste keeps an import link out of the surrounding labeled accounts',
+    () {
+      final preview = ServerPastePreview.parse(
+        '名称: A\n地址: https://a.test\n用户名: alice\n密码: one\n'
+        'senplayer://importserver?type=jellyfin&name=J'
+        '&address=https://j.test&username=jay&password=two\n'
+        '名称: B\n地址: https://b.test\n用户名: bob\n密码: three',
+      );
+      expect(preview.groups, hasLength(3));
+      expect(preview.unrecognized, isEmpty);
+      expect(preview.groups.map((group) => group.username), [
+        'alice',
+        'jay',
+        'bob',
+      ]);
+      expect(preview.groups.map((group) => group.lines.single), [
+        'https://a.test',
+        'https://j.test',
+        'https://b.test',
+      ]);
+      expect(preview.groups[1].serviceType, MediaServerType.jellyfin);
+      expect(preview.groups[1].password, 'two');
+      expect(preview.groups.first.password, 'one');
+
+      final wrapped = ServerPastePreview.parse(
+        '地址: (senplayer://importserver?type=emby&name=Wrapped'
+        '&address=https://wrap.example.com&username=ada&password=secret)',
+      ).groups.single;
+      expect(wrapped.name, 'Wrapped');
+      expect(wrapped.lines, ['https://wrap.example.com']);
+      expect(wrapped.unrecognized, isEmpty);
+    },
+  );
+
+  test('paste leaves unsupported import links unrecognized', () {
+    for (final text in [
+      'senplayer://importserver?type=webdav&name=Disk'
+          '&address=https://dav.example.com&username=u&password=p',
+      'senplayer://importserver?type=feiniu&address=https://nas.example.com',
+      'rodelplayer://import?type=webdav&title=Disk&scheme=https'
+          '&host=dav.example.com&username=u&password=p',
+      'rodelplayer://import?type=alist&title=Disk&scheme=https'
+          '&host=alist.example.com&username=u&password=p',
+      'hills://import?scheme=https&host=plex.example.com'
+          '&username=alice&password=secret&type=plex',
+      'hills://import?scheme=https&host=emby.example.com&type=',
+      'hills://import?scheme=ftp&host=emby.example.com&username=alice'
+          '&password=secret&line1=https://backup.example.com',
+      'rodelplayer://import-icon?type=emby&title=Icon&scheme=http&host=h.test',
+      'senplayer://x-callback-url/play?url=https://example.com/video',
+      'hills://trakt?code=abc',
+      'senplayer://importserver',
+    ]) {
+      final preview = ServerPastePreview.parse(text);
+      expect(preview.groups, isEmpty, reason: text);
+      expect(preview.unrecognized, [text], reason: text);
+    }
+
+    final mixed = ServerPastePreview.parse(
+      '名称: A\n地址: https://a.test\n用户名: alice\n密码: one\n'
+      'senplayer://importserver?type=webdav&address=https://dav.example.com'
+      '&username=u&password=p\n'
+      '名称: B\n地址: https://b.test\n用户名: bob\n密码: two',
+    );
+    expect(mixed.groups, hasLength(2));
+    expect(mixed.groups.map((group) => group.username), ['alice', 'bob']);
+    expect(mixed.unrecognized.single, contains('type=webdav'));
+    expect(mixed.groups.every((group) => group.unrecognized.isEmpty), isTrue);
+  });
+
   test('address validation preserves port and prefix and rejects credential-bearing URLs', () {
     expect(
       normalizeServerAddress(' https://HOST.test:8443/emby/ ').toString(),

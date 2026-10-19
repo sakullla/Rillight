@@ -7,24 +7,20 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'catalog/catalog_controller_test.dart',
-    caseEntrypoints['catalog/catalog_controller_cases.dart']!,
-  );
-  group(
-    'home/library_latest_row_test.dart',
-    caseEntrypoints['home/library_latest_row_cases.dart']!,
+    'catalog/item_detail_test.dart [part 2]',
+    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
   );
   group(
     'library/album_test.dart',
     caseEntrypoints['library/album_cases.dart']!,
   );
   group(
-    'media_image/blurred_artwork_test.dart',
-    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
+    'library/episode_list_scroll_test.dart',
+    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 4]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
+    'mobile/mobile_flow_test.dart [part 3]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#2']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 1]',
@@ -35,10 +31,13 @@ void main() {
     caseEntrypoints['mobile/phone_pages_cases.dart#2']!,
   );
   group(
-    'player/playback_image_release_test.dart',
-    caseEntrypoints['player/playback_image_release_cases.dart']!,
+    'player/desktop_player_page_test.dart',
+    caseEntrypoints['player/desktop_player_page_cases.dart']!,
   );
-  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
+  group(
+    'player/player_window_test.dart',
+    caseEntrypoints['player/player_window_cases.dart']!,
+  );
   group(
     'widgets/app_hover_card_test.dart',
     caseEntrypoints['widgets/app_hover_card_cases.dart']!,

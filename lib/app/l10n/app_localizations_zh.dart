@@ -2703,7 +2703,76 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sourceSelectionCheckDetails => '请核对影片详情';
 
   @override
-  String get sourceSelectionHint => '选择来源查看详情，播放不会自动切换。';
+  String get sourceSelectionHint => '打开对应详情，不会直接播放。';
+
+  @override
+  String sourceSelectionFound(int count) {
+    return '找到 $count 个来源';
+  }
+
+  @override
+  String get sourceSelectionSearching => '正在其他服务器上查找';
+
+  @override
+  String get sourceSelectionFilterAny => '不限';
+
+  @override
+  String get sourceSelectionResolution => '清晰度';
+
+  @override
+  String get sourceSelectionRange => '动态范围';
+
+  @override
+  String get sourceSelectionVideo => '编码';
+
+  @override
+  String get sourceSelectionSubtitle => '字幕';
+
+  @override
+  String get sourceSelectionSubtitleChinese => '中字';
+
+  @override
+  String get sourceSelectionSubtitleEnglish => '英字';
+
+  @override
+  String get sourceSelectionSubtitleExternal => '外挂';
+
+  @override
+  String get sourceSelectionSubtitlePresent => '有字幕';
+
+  @override
+  String get sourceSelectionSubtitleNone => '无字幕';
+
+  @override
+  String get sourceSelectionSound => '声音';
+
+  @override
+  String get sourceSelectionNoMatch => '没有符合条件的来源';
+
+  @override
+  String get sourceSelectionClearFilters => '清除筛选';
+
+  @override
+  String get sourceSelectionBestBitrate => '最高码率';
+
+  @override
+  String get sourceSelectionClearest => '最清晰';
+
+  @override
+  String get sourceSelectionWatchedToday => '今天看过';
+
+  @override
+  String get sourceSelectionWatchedYesterday => '昨天看过';
+
+  @override
+  String sourceSelectionWatchedDays(int days) {
+    return '$days 天前看过';
+  }
+
+  @override
+  String sourceSelectionEpisodeCount(int count) {
+    return '共 $count 集';
+  }
 
   @override
   String get sourceSelectionPasswordTitle => '输入访问密码';

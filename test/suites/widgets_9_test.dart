@@ -20,8 +20,12 @@ void main() {
     caseEntrypoints['home/home_page_cases.dart']!,
   );
   group(
-    'library/episode_thumb_test.dart',
-    caseEntrypoints['library/episode_thumb_cases.dart']!,
+    'home/shelf_hover_clip_test.dart',
+    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+  );
+  group(
+    'mobile/detail_route_identity_test.dart',
+    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
   );
   group(
     'mobile/phone_player_interaction_test.dart',
@@ -31,7 +35,6 @@ void main() {
     'player/phone_presentation_lifecycle_test.dart',
     caseEntrypoints['player/phone_presentation_lifecycle_cases.dart']!,
   );
-  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
   group(
     'tv/tv_home_featured_test.dart',
     caseEntrypoints['tv/tv_home_featured_cases.dart']!,

@@ -382,7 +382,9 @@ class _TopBar extends StatelessWidget {
               : AppShell.topBarHeight)
         : AppShell.topBarHeight;
 
-    final canPop = GoRouter.of(context).canPop();
+    // 下拉菜单也是一条路由。用导航器的 canPop 会把菜单当成页面，
+    // 首页一点「媒体库」，左边就多出「返回」，按钮还被挤开。
+    final canPop = _shellPageCanPop(context);
     final l10n = AppLocalizations.of(context);
     final library = libraries
         .where((entry) => AppRoutes.library(entry.id) == location)
@@ -621,6 +623,31 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 顶栏「返回」只看页面栈。对话框和锚定菜单是无页面路由，不算可返回的一页。
+bool _shellPageCanPop(BuildContext context) {
+  final delegate = GoRouter.of(context).routerDelegate;
+  if (_navigatorHasPageStack(delegate.navigatorKey.currentState)) {
+    return true;
+  }
+  return _shellMatchHasPageStack(delegate.currentConfiguration.matches);
+}
+
+bool _navigatorHasPageStack(NavigatorState? navigator) {
+  final pages = navigator?.widget.pages;
+  return pages != null && pages.length > 1;
+}
+
+bool _shellMatchHasPageStack(List<RouteMatchBase> matches) {
+  for (final match in matches) {
+    if (match is ShellRouteMatch &&
+        (_navigatorHasPageStack(match.navigatorKey.currentState) ||
+            _shellMatchHasPageStack(match.matches))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool _pageHasHeading(String location) =>

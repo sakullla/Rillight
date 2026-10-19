@@ -115,6 +115,12 @@ class _Client extends EmbyClient {
   @override
   Future<void> logout() async => clearSession();
 
+  /// The auth client would otherwise call the live extension endpoint.
+  /// Widget tests await restore without pumping, so a real socket plus the
+  /// four-second discovery timeout never elapses.
+  @override
+  Future<List<Uri>> loadExtendedServerDomains() async => const [];
+
   @override
   Future<List<MediaItem>> getViews() async => [await getItem('library')];
 

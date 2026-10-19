@@ -808,6 +808,61 @@ void main() {
     );
   }
 
+  test(
+    'desktop auto on the playing line saves without probing that line',
+    () async {
+      final runtime = player.runtime!;
+      await player.disposeAsync();
+      final item = a.items.firstWhere((entry) => entry.id == 'movie-up');
+      item.mediaStreams = const [
+        FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+      ];
+      final process = _Process();
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        runtime: runtime,
+        processControl: process,
+        watchInterval: const Duration(milliseconds: 5),
+      );
+      try {
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final launch = PlayerWindowLaunch.fromArguments(
+          process.spawnedArguments.single,
+        );
+        process.command = {
+          'pid': process.lastPid,
+          'source': encodeSource(launch.request.source!),
+          'generation': launch.accessGeneration,
+          'sequence': 1,
+          'action': 'commitLine',
+          'line': aId,
+          'selection': const LineSelection.auto().toJson(),
+          'item': 'movie-up',
+          // The playing source is absent from the item catalogue. Re-resolving
+          // would reject the preference even though this line is already open.
+          'version': 'playing-source',
+          'deadlineUtc': DateTime.now()
+              .toUtc()
+              .add(const Duration(seconds: 2))
+              .toIso8601String(),
+        };
+        final reply = await process.receipt.future.timeout(
+          const Duration(seconds: 2),
+        );
+        expect(reply['accepted'], true);
+        expect(reply['selection'], const LineSelection.auto().toJson());
+        expect(
+          (await store.load()).servers.single.lineSelection.isAutomatic,
+          isTrue,
+        );
+        expect(auth.client.baseUrl, a.baseUrl);
+      } finally {
+        await host.close();
+        host.dispose();
+      }
+    },
+  );
+
   for (final outcome in [
     'commit',
     'cancel',

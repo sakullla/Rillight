@@ -495,7 +495,8 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final premiere = item.premiereDate;
     final overview = plainOverview(item.overview);
     final revealed = _hovered || _focused;
-    // 当前集:主色淡染底 + 左缘主色细条,不用描边。悬停只在非当前集上加浅底。
+    // 当前集只留淡染底、加粗标题和剧照中央的播放标记。
+    // 侧边主色细条会切进画面，读起来像一条多余的边。悬停只在非当前集上加浅底。
     final fill = selected
         ? scheme.primaryContainer.withValues(alpha: 0.5)
         : revealed
@@ -510,86 +511,69 @@ class _EpisodeRowState extends State<EpisodeRow> {
           borderRadius: BorderRadius.circular(AppRadii.lg),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: [
-            AppSurfaceAction(
-              key: CatalogKeys.episode(item.id),
-              onTap: widget.onTap,
-              onFocusChange: (value) => setState(() => _focused = value),
-              onSecondaryTapDown: (details) {
-                unawaited(_openMenu(context, details.globalPosition));
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(EpisodeGridMetrics.inset),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: _EpisodeThumb(
-                        item: item,
-                        runtime: runtime,
-                        hovered: revealed,
-                        selected: selected,
-                        playLabel: playLabel,
-                        onPlay: widget.onPlay,
-                        played: played,
-                        busyPlayed: widget.busyPlayed,
-                        onTogglePlayed: widget.onTogglePlayed,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _EpisodeCardStyles.title(theme)?.copyWith(
-                        fontWeight: selected ? FontWeight.w700 : null,
-                        color: played && !selected
-                            ? scheme.onSurfaceVariant
-                            : scheme.onSurface,
-                      ),
-                    ),
-
-                    if (premiere != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        formatDateYmd(premiere),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _EpisodeCardStyles.meta(theme)?.copyWith(
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
-                    if (overview != null && overview.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        overview,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: _EpisodeCardStyles.overview(theme),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            if (selected)
-              Positioned(
-                left: 0,
-                top: AppSpacing.md,
-                bottom: AppSpacing.md,
-                child: Container(
-                  width: 3,
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(AppRadii.xs),
+        child: AppSurfaceAction(
+          key: CatalogKeys.episode(item.id),
+          onTap: widget.onTap,
+          onFocusChange: (value) => setState(() => _focused = value),
+          onSecondaryTapDown: (details) {
+            unawaited(_openMenu(context, details.globalPosition));
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(EpisodeGridMetrics.inset),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: _EpisodeThumb(
+                    item: item,
+                    runtime: runtime,
+                    hovered: revealed,
+                    selected: selected,
+                    playLabel: playLabel,
+                    onPlay: widget.onPlay,
+                    played: played,
+                    busyPlayed: widget.busyPlayed,
+                    onTogglePlayed: widget.onTogglePlayed,
                   ),
                 ),
-              ),
-          ],
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _EpisodeCardStyles.title(theme)?.copyWith(
+                    fontWeight: selected ? FontWeight.w700 : null,
+                    color: played && !selected
+                        ? scheme.onSurfaceVariant
+                        : scheme.onSurface,
+                  ),
+                ),
+
+                if (premiere != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    formatDateYmd(premiere),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _EpisodeCardStyles.meta(theme)?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+                if (overview != null && overview.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    overview,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: _EpisodeCardStyles.overview(theme),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

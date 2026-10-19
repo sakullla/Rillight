@@ -39,7 +39,12 @@ void main() {
                 children: [
                   for (final id in ['first', 'second'])
                     EpisodeThumbCard(
-                      item: MediaItem(id: id, name: id, type: 'Episode'),
+                      item: MediaItem(
+                        id: id,
+                        name: id,
+                        type: 'Episode',
+                        userData: const MediaUserData(playedPercentage: 42),
+                      ),
                       width: 296,
                       selected: selected == id,
                       onTap: () {},
@@ -78,6 +83,48 @@ void main() {
     }
 
     expectEqualFrames();
+    BoxDecoration frameOf(String id) {
+      return tester
+              .widget<Container>(
+                find.byKey(ValueKey('episode-thumb-frame-$id')),
+              )
+              .decoration!
+          as BoxDecoration;
+    }
+
+    // Selection does not paint a primary corner. Both frames stay neutral.
+    final scheme = AppUiTheme.of(
+      tester.element(find.byType(EpisodeThumbCard).first),
+    ).colorScheme;
+    expect(frameOf('first').color, scheme.surfaceContainerHighest);
+    expect(frameOf('second').color, scheme.surfaceContainerHighest);
+    for (final id in ['first', 'second']) {
+      final picture = tester.getRect(find.byKey(ValueKey(id)));
+      final bar = tester.getRect(
+        find.byKey(ValueKey('episode-thumb-progress-$id')),
+      );
+      expect(bar.left - picture.left, greaterThanOrEqualTo(8));
+      expect(picture.right - bar.right, greaterThanOrEqualTo(8));
+      expect(picture.bottom - bar.bottom, greaterThanOrEqualTo(7));
+      expect(bar.height, lessThanOrEqualTo(3));
+      expect(
+        tester
+            .widget<DecoratedBox>(
+              find
+                  .descendant(
+                    of: find.byKey(ValueKey('episode-thumb-progress-$id')),
+                    matching: find.byType(DecoratedBox),
+                  )
+                  .first,
+            )
+            .decoration,
+        isA<BoxDecoration>().having(
+          (decoration) => decoration.boxShadow,
+          'boxShadow',
+          anyOf(isNull, isEmpty),
+        ),
+      );
+    }
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     await mouse.moveTo(tester.getCenter(find.byKey(const ValueKey('first'))));

@@ -150,6 +150,9 @@ String? _hdrLabel({String? range, String? rangeType}) {
   return null;
 }
 
+/// 和片源标题里的编码段使用同一套写法，例如 `hevc` → `H.265`。
+String? videoCodecLabel(String? codec) => _videoCodecLabel(codec);
+
 String? _videoCodecLabel(String? codec) {
   final value = codec?.trim().toLowerCase();
   if (value == null || value.isEmpty) {

@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'dart:io';
 
 import 'package:rillight/app/ui/ui.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -1736,6 +1737,10 @@ void main() {
             matching: find.text('电影'),
           ),
         );
+        await tester.pump();
+        expect(find.byType(ServerSelectionPage), findsNothing);
+        expect(find.byType(TvServerSelectionPage), findsNothing);
+        expect(find.byKey(const Key('server-search')), findsNothing);
         await _settle(tester);
         expect(
           find.byType(
@@ -1823,13 +1828,33 @@ void main() {
         ),
         findsNothing,
       );
-      final poster = find.descendant(
-        of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
-        matching: find.text('合成作品'),
+      final row = find.byKey(ValueKey('aggregation-server-${f.bId}'));
+      final card = find.descendant(of: row, matching: find.byType(PosterCard));
+      await tester.ensureVisible(card.first);
+      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await pointer.addPointer(location: tester.getCenter(card.first));
+      addTearDown(pointer.removePointer);
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: row,
+          matching: find.byKey(PosterCard.playButtonKey('shared-id')),
+        ),
       );
+      await _settle(tester);
+      expect(find.byType(ServerSelectionPage), findsNothing);
+      expect(find.byType(ItemDetailPage), findsNothing);
+      expect(host.current?.itemId, 'shared-id');
+      expect(host.current?.source?.account.configuredServerId, f.bId);
+      expect(f.auth.session!.server.id, f.aId);
+      await host.close();
+      final poster = find.descendant(of: row, matching: find.text('合成作品'));
       await tester.ensureVisible(poster);
       await tester.pump();
       await tester.tap(poster);
+      await tester.pump();
+      expect(find.byType(ServerSelectionPage), findsNothing);
+      expect(find.byKey(const Key('server-search')), findsNothing);
       await _settle(tester);
       expect(
         DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
@@ -2312,6 +2337,67 @@ void main() {
         ]) {
           expect(visibleCopy, isNot(contains(internal)));
         }
+        final resolutionFilter = find.byKey(
+          const Key('source-selection-filter-resolution'),
+        );
+        expect(resolutionFilter, findsOneWidget);
+        expect(
+          find.byKey(const Key('source-selection-filter-range')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('source-selection-filter-video')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('source-selection-filter-subtitle')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('source-selection-filter-audio')),
+          findsNothing,
+        );
+        await tester.ensureVisible(resolutionFilter);
+        await tester.tap(resolutionFilter);
+        await _settle(tester);
+        expect(
+          find.byKey(const Key('app-menu-content')),
+          findsOneWidget,
+          reason: '筛选从按钮向下展开，不再套一层对话框',
+        );
+        expect(find.text('清晰度'), findsNothing);
+        expect(
+          find.byKey(const Key('source-selection-filter-option-1080p')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('source-selection-filter-option-4K')),
+          findsOneWidget,
+        );
+        await tester.tap(
+          find.byKey(const Key('source-selection-filter-option-1080p')),
+        );
+        await _settle(tester);
+        expect(find.byKey(const Key('app-menu-content')), findsNothing);
+        expect(
+          find.descendant(of: resolutionFilter, matching: find.text('1080p')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
+          findsOneWidget,
+        );
+        final clearFilters = find.byKey(
+          const Key('source-selection-filter-clear'),
+        );
+        await tester.ensureVisible(clearFilters);
+        await tester.tap(clearFilters);
+        await _settle(tester);
+        expect(clearFilters, findsNothing);
+        expect(
+          find.descendant(of: resolutionFilter, matching: find.text('不限')),
+          findsOneWidget,
+        );
         final titlePosition = tester.getTopLeft(
           find.byKey(const Key('source-selection-title')),
         );
@@ -2936,6 +3022,8 @@ void main() {
       await tester.tap(find.descendant(of: row, matching: find.text('进入服务器')));
       await _settle(tester);
       expect(find.byKey(const Key('server-unlock-password')), findsOneWidget);
+      expect(find.byType(ServerSelectionPage), findsNothing);
+      expect(find.byKey(const Key('server-search')), findsNothing);
       await tester.enterText(
         find.byKey(const Key('server-unlock-password')),
         '1234',
@@ -3080,6 +3168,13 @@ void main() {
           f.bId,
         );
         if (environment.isTv) {
+          // Startup pumps longer than the OSD hide delay. Reveal controls
+          // before asserting the line button, same as the TV control tests.
+          final tv = tester.state<TvPlayerPageState>(find.byType(TvPlayerPage));
+          if (!tv.controller!.controlsVisible) {
+            tv.controller!.onUserActivity();
+            await tester.pump();
+          }
           expect(
             find.byKey(const Key('player-playback-lines')),
             findsOneWidget,
@@ -3598,7 +3693,11 @@ void main() {
             var step = 0;
             step < 3 &&
                 (find.byType(ServerSelectionPage).evaluate().isNotEmpty ||
-                    find.byType(TvServerSelectionPage).evaluate().isNotEmpty);
+                    find.byType(TvServerSelectionPage).evaluate().isNotEmpty ||
+                    find
+                        .byKey(const Key('server-unlock-password'))
+                        .evaluate()
+                        .isNotEmpty);
             step++
           ) {
             await tester.binding.handlePopRoute();

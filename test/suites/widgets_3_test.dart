@@ -15,12 +15,12 @@ void main() {
     caseEntrypoints['auth/library_counts_cases.dart']!,
   );
   group(
-    'auth/provider_connect_routing_test.dart',
-    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
+    'catalog/catalog_browse_test.dart',
+    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 3]',
-    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
+    'library/source_detail_route_test.dart [part 1]',
+    caseEntrypoints['library/source_detail_route_cases.dart#0']!,
   );
   group(
     'mobile/phone_home_rails_test.dart',
@@ -35,15 +35,15 @@ void main() {
     caseEntrypoints['player/desktop_player_window_host_cases.dart']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+  );
+  group(
+    'widgets/app_button_test.dart',
+    caseEntrypoints['widgets/app_button_cases.dart']!,
   );
   group(
     'widgets/backdrop_scrim_test.dart',
     caseEntrypoints['widgets/backdrop_scrim_cases.dart']!,
-  );
-  group(
-    'widgets/scrim_icon_button_test.dart',
-    caseEntrypoints['widgets/scrim_icon_button_cases.dart']!,
   );
 }

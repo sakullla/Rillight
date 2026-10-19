@@ -5215,8 +5215,134 @@ abstract class AppLocalizations {
   /// No description provided for @sourceSelectionHint.
   ///
   /// In zh, this message translates to:
-  /// **'选择来源查看详情，播放不会自动切换。'**
+  /// **'打开对应详情，不会直接播放。'**
   String get sourceSelectionHint;
+
+  /// No description provided for @sourceSelectionFound.
+  ///
+  /// In zh, this message translates to:
+  /// **'找到 {count} 个来源'**
+  String sourceSelectionFound(int count);
+
+  /// No description provided for @sourceSelectionSearching.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在其他服务器上查找'**
+  String get sourceSelectionSearching;
+
+  /// No description provided for @sourceSelectionFilterAny.
+  ///
+  /// In zh, this message translates to:
+  /// **'不限'**
+  String get sourceSelectionFilterAny;
+
+  /// No description provided for @sourceSelectionResolution.
+  ///
+  /// In zh, this message translates to:
+  /// **'清晰度'**
+  String get sourceSelectionResolution;
+
+  /// No description provided for @sourceSelectionRange.
+  ///
+  /// In zh, this message translates to:
+  /// **'动态范围'**
+  String get sourceSelectionRange;
+
+  /// No description provided for @sourceSelectionVideo.
+  ///
+  /// In zh, this message translates to:
+  /// **'编码'**
+  String get sourceSelectionVideo;
+
+  /// No description provided for @sourceSelectionSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕'**
+  String get sourceSelectionSubtitle;
+
+  /// No description provided for @sourceSelectionSubtitleChinese.
+  ///
+  /// In zh, this message translates to:
+  /// **'中字'**
+  String get sourceSelectionSubtitleChinese;
+
+  /// No description provided for @sourceSelectionSubtitleEnglish.
+  ///
+  /// In zh, this message translates to:
+  /// **'英字'**
+  String get sourceSelectionSubtitleEnglish;
+
+  /// No description provided for @sourceSelectionSubtitleExternal.
+  ///
+  /// In zh, this message translates to:
+  /// **'外挂'**
+  String get sourceSelectionSubtitleExternal;
+
+  /// No description provided for @sourceSelectionSubtitlePresent.
+  ///
+  /// In zh, this message translates to:
+  /// **'有字幕'**
+  String get sourceSelectionSubtitlePresent;
+
+  /// No description provided for @sourceSelectionSubtitleNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'无字幕'**
+  String get sourceSelectionSubtitleNone;
+
+  /// No description provided for @sourceSelectionSound.
+  ///
+  /// In zh, this message translates to:
+  /// **'声音'**
+  String get sourceSelectionSound;
+
+  /// No description provided for @sourceSelectionNoMatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有符合条件的来源'**
+  String get sourceSelectionNoMatch;
+
+  /// No description provided for @sourceSelectionClearFilters.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除筛选'**
+  String get sourceSelectionClearFilters;
+
+  /// No description provided for @sourceSelectionBestBitrate.
+  ///
+  /// In zh, this message translates to:
+  /// **'最高码率'**
+  String get sourceSelectionBestBitrate;
+
+  /// No description provided for @sourceSelectionClearest.
+  ///
+  /// In zh, this message translates to:
+  /// **'最清晰'**
+  String get sourceSelectionClearest;
+
+  /// No description provided for @sourceSelectionWatchedToday.
+  ///
+  /// In zh, this message translates to:
+  /// **'今天看过'**
+  String get sourceSelectionWatchedToday;
+
+  /// No description provided for @sourceSelectionWatchedYesterday.
+  ///
+  /// In zh, this message translates to:
+  /// **'昨天看过'**
+  String get sourceSelectionWatchedYesterday;
+
+  /// No description provided for @sourceSelectionWatchedDays.
+  ///
+  /// In zh, this message translates to:
+  /// **'{days} 天前看过'**
+  String sourceSelectionWatchedDays(int days);
+
+  /// No description provided for @sourceSelectionEpisodeCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 集'**
+  String sourceSelectionEpisodeCount(int count);
 
   /// No description provided for @sourceSelectionPasswordTitle.
   ///
