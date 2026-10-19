@@ -19,6 +19,7 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/emby/emby_url.dart';
 import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/server_address.dart';
 
 /// 图和 JSON 共用一个 Host。Dart 默认不限制每主机连接数；这里显式限制为 16，
 /// 为有界图片并发之外的目录/API 请求保留空间。
@@ -409,6 +410,33 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
   /// Frozen Emby branding exposes configuration and CSS, not a logo image.
   /// Callers keep the existing Emby mark instead of guessing a path.
   Future<Uint8List?> loadBrandingLogo() async => null;
+
+  /// Optional extension supplied by emby_ext_domains. Servers that do not
+  /// install it return an error/empty payload; callers intentionally ignore
+  /// those failures and keep the configured line set unchanged.
+  Future<List<Uri>> loadExtendedServerDomains() async {
+    if (!hasSession) return const [];
+    try {
+      final response = await _requestJson('GET', '/System/Ext/ServerDomains');
+      final raw = response['data'];
+      if (raw is! List) return const [];
+      final result = <Uri>[];
+      for (final item in raw) {
+        if (item is! Map) continue;
+        final value = item['url']?.toString().trim();
+        if (value == null || value.isEmpty) continue;
+        try {
+          result.add(normalizeServerAddress(value));
+        } on Object {
+          // A malformed extension entry is ignored with the rest of the
+          // optional extension; it must never break a successful login.
+        }
+      }
+      return result;
+    } on Object {
+      return const [];
+    }
+  }
 
   @override
   Future<AuthenticationResult> authenticateByName({

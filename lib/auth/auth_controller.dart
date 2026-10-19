@@ -149,6 +149,7 @@ class AuthController extends ChangeNotifier {
 
   MediaServerClient _client;
   MediaServerClient? _guardedClient;
+  final Set<String> _extendedDomainChecks = <String>{};
   Object _contentOwner = Object();
   MediaServerClient get client => _guardedClient ?? _client;
   late final MediaServerClient Function(MediaServerType) _providerClientFactory;
@@ -468,6 +469,7 @@ class AuthController extends ChangeNotifier {
     }
     try {
       await _activate(last, stored, generation: generation);
+      await _discoverExtendedLines(last.id);
     } catch (error) {
       if (!_ownsActivation(generation)) return;
       _session = null;
@@ -579,6 +581,10 @@ class AuthController extends ChangeNotifier {
         generation: generation,
         usePrepared: true,
       );
+      // emby_ext_domains is optional. Its bounded, fully swallowed discovery
+      // runs after publication so an absent, blocked, or malformed extension
+      // can never make a valid login fail.
+      await _discoverExtendedLines(server.id);
       _prefill = null;
       connectDraft = null;
       return true;
@@ -591,6 +597,30 @@ class AuthController extends ChangeNotifier {
       candidate.clearSession();
       _busy = false;
       if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> _discoverExtendedLines(String id) async {
+    final current = _session;
+    if (current?.server.id != id ||
+        _client is! EmbyClient ||
+        !_extendedDomainChecks.add(id)) {
+      return;
+    }
+    try {
+      final addresses = await (_client as EmbyClient)
+          .loadExtendedServerDomains()
+          .timeout(const Duration(seconds: 4), onTimeout: () => const []);
+      for (final address in addresses) {
+        try {
+          await addLine(id, address.toString());
+        } on Object {
+          // Extension entries are hints. Identity failures, duplicates and
+          // unreachable domains are all silently ignored.
+        }
+      }
+    } on Object {
+      // Unsupported extension endpoint: keep the configured lines untouched.
     }
   }
 
@@ -740,6 +770,7 @@ class AuthController extends ChangeNotifier {
         remember: !deferPublication,
       );
       await refreshServers();
+      await _discoverExtendedLines(server.id);
       _lineSwitchFailure = null;
       _failure = null;
       connectDraft = null;
@@ -817,9 +848,7 @@ class AuthController extends ChangeNotifier {
       if (_ownsActivation(generation) &&
           _session?.server.id == id &&
           previous?.server.id == id &&
-          (previous!.server.baseUrl != next.baseUrl ||
-              previous.server.normalizedUserAgent !=
-                  next.normalizedUserAgent)) {
+          previous!.server.baseUrl != next.baseUrl) {
         final stored = await credentials.read(id);
         if (stored != null &&
             _ownsActivation(generation) &&
@@ -831,6 +860,16 @@ class AuthController extends ChangeNotifier {
             usePrepared: true,
           );
         }
+      }
+      if (_ownsActivation(generation) &&
+          _session?.server.id == id &&
+          previous?.server.id == id &&
+          previous!.server.baseUrl == next.baseUrl &&
+          previous.server.normalizedUserAgent != next.normalizedUserAgent) {
+        // The registry has already published the metadata and updated its
+        // source client. Keep the active session mounted while applying the
+        // same header to the controller-owned client.
+        _client.setUserAgent(next.userAgent);
       }
       if (_prefill?.id == id) _prefill = next;
       _lineSwitchFailure = null;

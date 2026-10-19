@@ -1436,8 +1436,13 @@ class SourceSessionRegistry {
             ))) {
       throw StateError('Unknown selected line');
     }
-    final connectionChanged =
-        candidate.baseUrl != original.baseUrl ||
+    // Changing the server-level User-Agent is metadata. It must not trigger a
+    // second anonymous identity probe: some Emby reverse proxies route or
+    // filter that request based on the custom header and can return a response
+    // which looks like a different server. Only an address change changes the
+    // endpoint identity and therefore requires a probe.
+    final connectionChanged = candidate.baseUrl != original.baseUrl;
+    final userAgentChanged =
         candidate.normalizedUserAgent != original.normalizedUserAgent;
     final prepared = <MediaServerClient>[];
     MediaServerClient? replacement;
@@ -1520,6 +1525,9 @@ class SourceSessionRegistry {
             value.clearSession();
           };
         }
+      }
+      if (userAgentChanged && !connectionChanged) {
+        _sessions[id]?.client.setUserAgent(candidate.userAgent);
       }
       _notifySourceChange(id);
     } finally {
