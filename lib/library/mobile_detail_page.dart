@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
@@ -409,7 +410,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 height: 4,
                 decoration: BoxDecoration(
                   color: scheme.onSurfaceVariant.withValues(alpha: .32),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
               ),
             ),
@@ -430,7 +431,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                   DecoratedBox(
                     decoration: BoxDecoration(
                       color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -973,12 +974,10 @@ class _PhoneDetailBar extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: immersive
-                      ? const Color(0xff000000).withValues(alpha: .38)
-                      : const Color(0x00000000),
+                      ? AppInk.scrim(AppScrim.of(context, .38))
+                      : AppInk.transparent,
                   border: immersive
-                      ? Border.all(
-                          color: const Color(0xffffffff).withValues(alpha: .16),
-                        )
+                      ? Border.all(color: AppInk.white.withValues(alpha: .16))
                       : null,
                 ),
               ),
@@ -986,8 +985,8 @@ class _PhoneDetailBar extends StatelessWidget {
           ),
         PhoneTopBar(
           centerTitle: label != null,
-          backgroundColor: immersive ? const Color(0x00000000) : null,
-          foregroundColor: immersive ? const Color(0xFFFFFFFF) : null,
+          backgroundColor: immersive ? AppInk.transparent : null,
+          foregroundColor: immersive ? AppInk.white : null,
           border: immersive
               ? null
               : Border(
@@ -1145,7 +1144,8 @@ class _DetailPlayActions extends StatelessWidget {
         ),
         onPressed: enabled ? onPlay : null,
         icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 24),
-        label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+        // 200% 字号下标题换行而不是省略，主操作始终读得完整。
+        label: Text(label, maxLines: 3),
         variant: AppButtonVariant.filled,
       ),
     );
@@ -1162,7 +1162,7 @@ class _DetailPlayActions extends StatelessWidget {
               children: [
                 Expanded(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
                     child: AppLoadingBar(
                       key: const Key('phone-detail-progress'),
                       value: progress.clamp(0, 1),
@@ -1242,12 +1242,12 @@ class _SecondaryAction extends StatelessWidget {
     final iconColor = !enabled
         ? scheme.onSurface.withValues(alpha: .38)
         : highlighted
-        ? scheme.primary
+        ? scheme.onPrimaryContainer
         : scheme.onSurface;
     final labelColor = !enabled
         ? scheme.onSurface.withValues(alpha: .38)
         : highlighted
-        ? scheme.primary
+        ? scheme.onPrimaryContainer
         : scheme.onSurface;
     final animatedIcon = AnimatedSwitcher(
       duration: duration,
@@ -1275,19 +1275,15 @@ class _SecondaryAction extends StatelessWidget {
           duration: duration,
           curve: AppMotion.standard,
           constraints: BoxConstraints(minHeight: compact ? 34 : 44),
-          decoration: BoxDecoration(
-            borderRadius: borderRadius,
-            color: highlighted
-                ? scheme.primary.withValues(alpha: .18)
-                : scheme.surfaceContainerHigh.withValues(
+          decoration: highlighted
+              ? AppSelectionDecoration.of(scheme, radius: AppRadii.pill)
+              : BoxDecoration(
+                  borderRadius: borderRadius,
+                  color: scheme.surfaceContainerHigh.withValues(
                     alpha: compact ? .76 : .68,
                   ),
-            border: Border.all(
-              color: highlighted
-                  ? scheme.primary.withValues(alpha: .44)
-                  : AppEdge.of(theme.brightness),
-            ),
-          ),
+                  border: Border.all(color: AppEdge.of(theme.brightness)),
+                ),
           clipBehavior: Clip.antiAlias,
           child: AppSurfaceAction(
             onTap: onPressed,
@@ -1306,8 +1302,9 @@ class _SecondaryAction extends StatelessWidget {
                   Flexible(
                     child: Text(
                       label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      // 大字号下两行放得下全称，不再用省略号截断操作名。
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
                       style:
                           (compact
                                   ? theme.textTheme.labelMedium

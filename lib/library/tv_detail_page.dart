@@ -192,7 +192,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         final gutter = tvSafeGutter(size.width);
         final pad = EdgeInsets.symmetric(horizontal: gutter);
         Widget section(String title, Widget child) => Padding(
-          padding: EdgeInsets.fromLTRB(gutter, 18 * s, gutter, 0),
+          padding: EdgeInsets.fromLTRB(gutter, AppSpacing.lg * s, gutter, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -258,8 +258,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
                           section(
                             l.mediaSource,
                             Wrap(
-                              spacing: 8 * s,
-                              runSpacing: 8 * s,
+                              spacing: AppSpacing.xs * s,
+                              runSpacing: AppSpacing.xs * s,
                               children: [
                                 for (final option in item.mediaSources)
                                   TvAction(
@@ -309,7 +309,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                         Padding(
                           padding: EdgeInsets.fromLTRB(
                             gutter,
-                            24 * s,
+                            AppSpacing.xl * s,
                             gutter,
                             0,
                           ),
@@ -431,7 +431,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                 style: AppUiTheme.of(context).textTheme.titleLarge,
               ),
             ),
-            SizedBox(width: 18 * s),
+            SizedBox(width: AppSpacing.lg * s),
             Expanded(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -447,7 +447,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                         onPressed: () => c.selectSeason(season.id),
                         child: Text(season.name),
                       ),
-                      SizedBox(width: 4 * s),
+                      SizedBox(width: AppSpacing.xxs * s),
                     ],
                   ],
                 ),
@@ -472,7 +472,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         ),
       if (!c.episodesLoading && c.episodes.isEmpty && c.episodeError == null)
         Padding(
-          padding: EdgeInsets.fromLTRB(gutter, 8 * s, gutter, 0),
+          padding: EdgeInsets.fromLTRB(gutter, AppSpacing.xs * s, gutter, 0),
           child: Builder(
             builder: (context) => Text(
               l.mobileEmpty,
@@ -806,13 +806,13 @@ class _TvDetailHeader extends StatelessWidget {
         '${item.childCount} ${l.seasons}',
     ];
     final badges = item.isSeries ? const <String>[] : mediaTechBadges(source);
-    const shadow = [Shadow(blurRadius: 12, color: Color(0x8a000000))];
+    final shadow = [Shadow(blurRadius: 12, color: AppInk.scrim(.54))];
     final titleText = Text(
       item.name,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.displaySmall?.copyWith(
-        color: const Color(0xffffffff),
+        color: AppInk.white,
         shadows: shadow,
       ),
     );
@@ -821,7 +821,12 @@ class _TvDetailHeader extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(minHeight: size.height * .74),
         child: Padding(
-          padding: EdgeInsets.fromLTRB(gutter, 40 * s, gutter, 8 * s),
+          padding: EdgeInsets.fromLTRB(
+            gutter,
+            AppSpacing.xxxl * s,
+            gutter,
+            AppSpacing.xs * s,
+          ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.end,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -846,7 +851,7 @@ class _TvDetailHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                SizedBox(height: 4 * s),
+                SizedBox(height: AppSpacing.xxs * s),
               ],
               SizedBox(
                 width: textWidth,
@@ -874,7 +879,7 @@ class _TvDetailHeader extends StatelessWidget {
                       Text(
                         rating.toStringAsFixed(1),
                         style: theme.textTheme.labelLarge?.copyWith(
-                          color: const Color(0xffffffff),
+                          color: AppInk.white,
                         ),
                       ),
                       SizedBox(width: 12 * s),
@@ -890,12 +895,12 @@ class _TvDetailHeader extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyLarge?.copyWith(
                           height: 1.3,
-                          color: const Color(0xffffffff).withValues(alpha: .82),
+                          color: AppInk.white.withValues(alpha: .82),
                         ),
                       ),
                     ),
                     for (final badge in badges) ...[
-                      SizedBox(width: 8 * s),
+                      SizedBox(width: AppSpacing.xs * s),
                       _TvBadge(label: badge),
                     ],
                   ],
@@ -911,7 +916,7 @@ class _TvDetailHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyLarge?.copyWith(
                       height: 1.3,
-                      color: const Color(0xffffffff).withValues(alpha: .78),
+                      color: AppInk.white.withValues(alpha: .78),
                     ),
                   ),
                 ),
@@ -920,7 +925,7 @@ class _TvDetailHeader extends StatelessWidget {
                 SizedBox(height: 14 * s),
                 _TvResumeBar(item: resume!),
               ],
-              SizedBox(height: 18 * s),
+              SizedBox(height: AppSpacing.lg * s),
               Wrap(spacing: 10 * s, runSpacing: 10 * s, children: actions),
             ],
           ),
@@ -950,7 +955,7 @@ class _TvBadge extends StatelessWidget {
         child: Text(
           label,
           style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
-            color: const Color(0xffffffff).withValues(alpha: .78),
+            color: AppInk.white.withValues(alpha: .78),
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -984,7 +989,7 @@ class _TvResumeBar extends StatelessWidget {
               value: item.playbackProgress.clamp(0, 1),
               minHeight: 3 * s,
               color: theme.colorScheme.primary,
-              backgroundColor: const Color(0xffffffff).withValues(alpha: .22),
+              backgroundColor: AppInk.white.withValues(alpha: .22),
             ),
           ),
         ),
@@ -993,7 +998,7 @@ class _TvResumeBar extends StatelessWidget {
           Text(
             [?code, remaining].join(' · '),
             style: theme.textTheme.labelLarge?.copyWith(
-              color: const Color(0xffffffff).withValues(alpha: .82),
+              color: AppInk.white.withValues(alpha: .82),
             ),
           ),
         ],
@@ -1074,7 +1079,7 @@ class _TvDetailSkeleton extends StatelessWidget {
           bone(220 * s, 14 * s),
           bone(480 * s, 14 * s),
           bone(420 * s, 14 * s),
-          SizedBox(height: 8 * s),
+          SizedBox(height: AppSpacing.xs * s),
           Row(
             children: [
               bone(120 * s, 38 * s),

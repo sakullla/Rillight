@@ -371,7 +371,7 @@ void main() {
     await login(tester, server);
     expect(find.byKey(TvHomeKeys.featured), findsNothing);
     expect(find.byKey(TvHomeKeys.featuredNext), findsNothing);
-    expect(find.text('暂无内容'), findsOneWidget);
+    expect(find.text('这个服务器还没有内容'), findsOneWidget);
     // The page stays navigable: the refresh action is a D-pad target.
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focusedAction(), findsOneWidget);

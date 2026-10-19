@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -101,7 +102,7 @@ class DetailGenreRow extends StatelessWidget {
           for (final genre in genres)
             _GenrePill(
               child: AppSurfaceAction(
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadii.pill),
                 onTap: () => openGenreShelf(context, item, genre),
                 child: SizedBox(
                   height: AppControlHeight.sm,
@@ -1049,8 +1050,10 @@ class _AlbumViewerState extends State<_AlbumViewer> {
             phone ? 12 : 0,
           )
         : const EdgeInsets.all(16);
-    final ink = light ? scheme.onSurface : const Color(0xffffffff);
-    final headerInk = light ? scheme.onSurface : const Color(0xb3ffffff);
+    final ink = light ? scheme.onSurface : AppInk.white;
+    final headerInk = light
+        ? scheme.onSurface
+        : AppInk.white.withValues(alpha: .70);
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
@@ -1073,7 +1076,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
       child: Focus(
         autofocus: true,
         child: AppModalFrame(
-          backgroundColor: light ? null : const Color(0xff000000),
+          backgroundColor: light ? null : AppInk.black,
           insetPadding: inset,
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
@@ -1115,9 +1118,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
                 ),
                 Expanded(
                   child: ColoredBox(
-                    color: light
-                        ? scheme.surfaceContainerHigh
-                        : const Color(0xff000000),
+                    color: light ? scheme.surfaceContainerHigh : AppInk.black,
                     child: Stack(
                       children: [
                         PageView.builder(

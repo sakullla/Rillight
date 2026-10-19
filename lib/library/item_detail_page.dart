@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
@@ -1769,7 +1770,7 @@ class _ChapterTile extends StatelessWidget {
       width: width,
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0x00000000),
+          color: AppInk.transparent,
           borderRadius: BorderRadius.circular(AppRadii.md),
         ),
         child: AppSurfaceAction(
@@ -1811,7 +1812,7 @@ class _ChapterTile extends StatelessWidget {
                             child: Text(
                               chapterClock(chapter.startPosition),
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: const Color(0xffffffff),
+                                color: AppInk.white,
                                 fontFeatures: const [
                                   FontFeature.tabularFigures(),
                                 ],
@@ -2584,7 +2585,6 @@ class _DetailPoster extends StatelessWidget {
     final scheme = AppUiTheme.of(context).colorScheme;
     final episode = item.isEpisode;
     final series = item.isSeries || item.isSeason;
-    final light = scheme.brightness == Brightness.light;
     final width =
         (episode
             ? thumbWidthFor(layoutWidth)
@@ -2597,14 +2597,8 @@ class _DetailPoster extends StatelessWidget {
       key: ItemDetailPage.posterKey,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: scheme.onSurface.withValues(alpha: 0.12)),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.shadow.withValues(alpha: light ? .14 : .45),
-            blurRadius: light ? 18 : 28,
-            offset: Offset(0, light ? 8 : 14),
-          ),
-        ],
+        border: Border.all(color: AppEdge.of(scheme.brightness, strong: true)),
+        boxShadow: AppShadow.cardHover(scheme.brightness),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),

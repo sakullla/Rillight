@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
@@ -1020,9 +1021,7 @@ class _PersonPosterState extends State<_PersonPoster> {
           borderRadius: radius,
           border: metrics.tv
               ? Border.all(
-                  color: widget.focused
-                      ? scheme.onSurface
-                      : const Color(0x00000000),
+                  color: widget.focused ? scheme.onSurface : AppInk.transparent,
                   width: TvAction.focusRingWidth * scale,
                   strokeAlign: BorderSide.strokeAlignOutside,
                 )
@@ -1604,7 +1603,7 @@ class _PhoneSelectorRow extends StatelessWidget {
               DecoratedBox(
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -1699,7 +1698,7 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
             height: 4,
             decoration: BoxDecoration(
               color: scheme.onSurfaceVariant.withValues(alpha: .32),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadii.pill),
             ),
           ),
         ),
@@ -1717,7 +1716,7 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
               DecoratedBox(
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -1752,17 +1751,17 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
               final isSelected = option.value == selected;
               final subtitle = option.subtitle;
               return DecoratedBox(
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? scheme.primary.withValues(alpha: .14)
-                      : scheme.surfaceContainerHigh.withValues(alpha: .55),
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  border: Border.all(
-                    color: isSelected
-                        ? scheme.primary.withValues(alpha: .48)
-                        : scheme.outlineVariant.withValues(alpha: .28),
-                  ),
-                ),
+                decoration: isSelected
+                    ? AppSelectionDecoration.of(scheme, radius: AppRadii.md)
+                    : BoxDecoration(
+                        color: scheme.surfaceContainerHigh.withValues(
+                          alpha: .55,
+                        ),
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                        border: Border.all(
+                          color: scheme.outlineVariant.withValues(alpha: .28),
+                        ),
+                      ),
                 child: AppSurfaceAction(
                   key: option.key,
                   borderRadius: BorderRadius.circular(AppRadii.md),
@@ -1787,7 +1786,7 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.bodyLarge?.copyWith(
                                     color: isSelected
-                                        ? scheme.primary
+                                        ? scheme.onPrimaryContainer
                                         : scheme.onSurface,
                                     fontSize: 15,
                                     fontWeight: isSelected
@@ -1935,26 +1934,20 @@ class _StreamChoiceWrap extends StatelessWidget {
       maxLines: expand ? 2 : 1,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.bodyMedium?.copyWith(
-        color: selected ? scheme.primary : scheme.onSurface,
+        color: selected ? scheme.onPrimaryContainer : scheme.onSurface,
         fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
       ),
     );
     return Container(
-      decoration: BoxDecoration(
-        color: selected
-            ? scheme.primary.withValues(
-                alpha: scheme.brightness == Brightness.light ? 0.10 : 0.18,
-              )
-            : (scheme.brightness == Brightness.light
+      decoration: selected
+          ? AppSelectionDecoration.of(scheme, radius: AppRadii.sm)
+          : BoxDecoration(
+              color: scheme.brightness == Brightness.light
                   ? scheme.surfaceContainer
-                  : scheme.surfaceContainerHigh),
-        borderRadius: BorderRadius.circular(AppRadii.sm),
-        border: Border.all(
-          color: selected
-              ? scheme.primary.withValues(alpha: 0.45)
-              : const Color(0x00000000),
-        ),
-      ),
+                  : scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+              border: Border.all(color: AppInk.transparent),
+            ),
       key: ValueKey('media-stream-${choice.index}'),
       clipBehavior: Clip.antiAlias,
       child: AppSurfaceAction(

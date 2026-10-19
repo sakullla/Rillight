@@ -202,10 +202,8 @@ class PhoneItemBanner extends StatelessWidget {
                         end: Alignment.bottomCenter,
                         stops: const [0, .38],
                         colors: [
-                          const Color(0xff000000).withValues(
-                            alpha: AppScrim.of(context, AppScrim.top),
-                          ),
-                          const Color(0x00000000),
+                          AppInk.scrim(AppScrim.of(context, AppScrim.top)),
+                          AppInk.transparent,
                         ],
                       ),
                     ),
@@ -355,7 +353,7 @@ class _PosterCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.md),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xff000000).withValues(alpha: light ? .22 : .55),
+            color: AppInk.scrim(light ? .22 : .55),
             blurRadius: light ? 18 : 24,
             offset: const Offset(0, 10),
           ),
@@ -376,8 +374,8 @@ class _PosterCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(AppRadii.md),
                     border: Border.all(
                       color: light
-                          ? const Color(0xff000000).withValues(alpha: .08)
-                          : const Color(0xffffffff).withValues(alpha: .12),
+                          ? AppInk.scrim(.08)
+                          : AppInk.white.withValues(alpha: .12),
                     ),
                   ),
                 ),
@@ -469,10 +467,9 @@ class _BannerTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
+    // 标题按可用宽度自然换行；200% 字号下也不省略，宁可增高头部。
     final heading = Text(
       title,
-      maxLines: compact ? 3 : 2,
-      overflow: TextOverflow.ellipsis,
       style: phoneDetailTitleStyle(
         theme,
         compact: compact,
@@ -612,7 +609,7 @@ class _MetaChip extends StatelessWidget {
       return chip;
     }
     return Container(
-      decoration: BoxDecoration(color: const Color(0x00000000)),
+      decoration: const BoxDecoration(color: AppInk.transparent),
       child: AppSurfaceAction(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -657,7 +654,7 @@ class PhoneGenreChips extends StatelessWidget {
               return Container(
                 decoration: BoxDecoration(
                   color: scheme.onSurface.withValues(alpha: .06),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                   border: Border.all(
                     color: scheme.onSurface.withValues(alpha: .14),
                     width: 0.8,
@@ -1418,10 +1415,7 @@ class _EpisodeThumb extends StatelessWidget {
                 fit: BoxFit.cover,
                 maxWidth: 480,
               ),
-              if (played && !current)
-                ColoredBox(
-                  color: const Color(0xff000000).withValues(alpha: .38),
-                ),
+              if (played && !current) ColoredBox(color: AppInk.scrim(.38)),
               if (showProgress)
                 Positioned(
                   left: 0,
@@ -1435,8 +1429,7 @@ class _EpisodeThumb extends StatelessWidget {
                       value: progress,
                       minHeight: 4,
                       color: scheme.primary,
-                      backgroundColor: const Color(0xff000000)
-                          .withValues(alpha: .45),
+                      backgroundColor: AppInk.scrim(.45),
                     ),
                   ),
                 ),
@@ -1461,10 +1454,10 @@ class _EpisodeThumb extends StatelessWidget {
                   bottom: showProgress ? 8 : 6,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: const Color(0xff000000).withValues(alpha: .58),
+                      color: AppInk.scrim(.58),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: const Color(0xffffffff).withValues(alpha: .22),
+                        color: AppInk.white.withValues(alpha: .22),
                         width: 0.8,
                       ),
                     ),
@@ -1474,7 +1467,7 @@ class _EpisodeThumb extends StatelessWidget {
                         AppIcons.play,
                         fill: AppIcons.filled,
                         size: 13,
-                        color: Color(0xffffffff),
+                        color: AppInk.white,
                       ),
                     ),
                   ),
