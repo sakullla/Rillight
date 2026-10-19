@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/widgets/hero_palette_overlay.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/featured_items.dart';
@@ -235,27 +236,35 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                       ),
                     ),
                 ColoredBox(color: scheme.surfaceContainerHigh),
-                PageView.builder(
-                  controller: _page,
-                  allowImplicitScrolling: true,
-                  physics: items.length > 1
-                      ? const PageScrollPhysics()
-                      : const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
-                  onPageChanged: (value) {
-                    // A light tick when a swipe settles on a new slide;
-                    // timed rotation stays silent.
-                    if (_touching) HapticFeedback.selectionClick();
-                    setState(() => _index = value);
-                    resetAutoRotate(items.length);
-                  },
-                  itemBuilder: (context, slide) => _slide(
-                    items[slide],
-                    page: slide,
-                    index: index,
-                    count: items.length,
-                    width: width,
-                    requestWidth: requestWidth,
+                // 覆盖层只认当前页的规范 paletteKey;相邻页的上报被丢弃。
+                HeroPaletteOverlay(
+                  paletteKey: HeroPaletteOverlay.paletteKeyFor(
+                    context,
+                    item,
+                    series: widget.catalog.latestSeries.items,
+                  ),
+                  child: PageView.builder(
+                    controller: _page,
+                    allowImplicitScrolling: true,
+                    physics: items.length > 1
+                        ? const PageScrollPhysics()
+                        : const NeverScrollableScrollPhysics(),
+                    itemCount: items.length,
+                    onPageChanged: (value) {
+                      // A light tick when a swipe settles on a new slide;
+                      // timed rotation stays silent.
+                      if (_touching) HapticFeedback.selectionClick();
+                      setState(() => _index = value);
+                      resetAutoRotate(items.length);
+                    },
+                    itemBuilder: (context, slide) => _slide(
+                      items[slide],
+                      page: slide,
+                      index: index,
+                      count: items.length,
+                      width: width,
+                      requestWidth: requestWidth,
+                    ),
                   ),
                 ),
                 // 顶带:状态栏与透明顶栏上的图标始终读得清。

@@ -13,6 +13,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
+import 'package:rillight/app/widgets/hero_palette_overlay.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -2416,16 +2417,20 @@ class _DetailHeader extends StatelessWidget {
         // The canonical theme artwork is the same image in both themes. In
         // light it sits behind a surface wash so the reported bytes and the
         // palette key always describe the artwork that actually painted.
-        final backdropImage = MediaImage(
-          key: const ValueKey('detail-hero'),
-          contributesToTheme: true,
-          smartCrop: true,
-          item: backdropItem ?? artworkItem ?? item,
-          preferBackdrop: !item.isEpisode,
-          preferParentBackdrop: item.isEpisode,
-          maxWidth: mediaBackdropRequestWidth(
-            layoutWidth: width,
-            devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+        final themeArtwork = backdropItem ?? artworkItem ?? item;
+        final backdropImage = HeroPaletteOverlay(
+          paletteKey: HeroPaletteOverlay.paletteKeyFor(context, themeArtwork),
+          child: MediaImage(
+            key: const ValueKey('detail-hero'),
+            contributesToTheme: true,
+            smartCrop: true,
+            item: themeArtwork,
+            preferBackdrop: !item.isEpisode,
+            preferParentBackdrop: item.isEpisode,
+            maxWidth: mediaBackdropRequestWidth(
+              layoutWidth: width,
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+            ),
           ),
         );
         return SizedBox(

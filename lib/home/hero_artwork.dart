@@ -123,7 +123,7 @@ class HeroArtwork extends StatefulWidget {
   final bool posterFirst;
 
   /// Ambient mode: whatever resolves is drawn only as a soft blurred fill; the
-  /// parent tints and fades it into the page. Never reports a theme colour.
+  /// parent tints and fades it into the page.
   final bool ambient;
 
   /// Prefetch mode: resolve and decode the artwork the carousel will show next,
@@ -387,6 +387,15 @@ class _HeroArtworkState extends State<HeroArtwork> {
           final image = snapshot.data;
           if (image == null) return const SizedBox.expand();
           _notifyResolved(image);
+          // Report before the ambient/spotlight branches so every painted
+          // path (full bleed, poster spotlight, ambient) supplies the same
+          // bytes exactly once. Prefetch returns early above and never
+          // reports, so an offstage neighbour cannot leak its colour.
+          ArtworkColorScope.maybeOf(context)?.report(
+            widget.sources.themeItem?.id ?? '',
+            image.identity,
+            image.bytes,
+          );
           if (widget.ambient) {
             return _blurredFill(image.bytes, opacity: 1, sigma: 40);
           }
@@ -402,13 +411,6 @@ class _HeroArtworkState extends State<HeroArtwork> {
             cacheWidth: _cacheWidth(image),
             filterQuality: FilterQuality.medium,
             frameBuilder: (context, child, frame, synchronous) {
-              if (frame != null || synchronous) {
-                ArtworkColorScope.maybeOf(context)?.report(
-                  widget.sources.themeItem?.id ?? '',
-                  image.identity,
-                  image.bytes,
-                );
-              }
               // An already-decoded frame shows at once; a fresh decode fades
               // in over the placeholder instead of popping.
               if (synchronous) return child;

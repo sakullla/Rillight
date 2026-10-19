@@ -649,11 +649,16 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             ? seasonArtworkItem(selectedSeason, item)
             : null;
         final imageSource = failed ? null : seasonArt ?? entryItem;
+        // 取色必须和横幅实际绘制的第一张图一致:单集自带背景时把 entryItem
+        // 直接交给 ContentTheme 会先解析到剧集海报,和画面错位(T6 评审 P2)。
+        final themeSource = imageSource == null
+            ? null
+            : (heroArtworkSources(imageSource).themeItem ?? imageSource);
         final preferBackdrop = handoff?.preferBackdrop ?? true;
         final imageWidth = handoff?.maxWidth ?? PhoneMotion.pageRequestWidth;
         final immersive = imageSource != null && !_barSolid;
         return ContentTheme(
-          item: failed ? null : entryItem,
+          item: themeSource,
           preferBackdrop: preferBackdrop,
           child: CupertinoPageScaffold(
             child: Stack(

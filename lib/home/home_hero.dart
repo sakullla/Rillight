@@ -4,6 +4,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/widgets/hero_palette_overlay.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -284,6 +285,22 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             onResolved: (data) => _onArtworkResolved(item, artwork, data),
           );
 
+    // 单层氛围只覆盖全幅画面;海报聚光仍保持品牌静态外观。
+    final paletteKey = HeroPaletteOverlay.paletteKeyFor(
+      context,
+      item,
+      series: widget.catalog.latestSeries.items,
+    );
+    final backdropSlide = AnimatedSwitcher(
+      duration: AppMotion.durationOf(context, heroBackdropDuration),
+      transitionBuilder: heroBackdropTransition,
+      layoutBuilder: heroBackdropLayout,
+      child: RepaintBoundary(
+        key: ValueKey('home-hero-slide-${item.id}'),
+        child: backdrop,
+      ),
+    );
+
     // 只预取下一条(悬停/聚焦时连上一条),换页时新图已解码就绪。
     final prefetch = <MediaItem>{
       if (multiple) items[(index + 1) % items.length],
@@ -318,15 +335,10 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
               ],
             ),
           ),
-        AnimatedSwitcher(
-          duration: AppMotion.durationOf(context, heroBackdropDuration),
-          transitionBuilder: heroBackdropTransition,
-          layoutBuilder: heroBackdropLayout,
-          child: RepaintBoundary(
-            key: ValueKey('home-hero-slide-${item.id}'),
-            child: backdrop,
-          ),
-        ),
+        if (layout == HeroLayout.fullBleed)
+          HeroPaletteOverlay(paletteKey: paletteKey, child: backdropSlide)
+        else
+          backdropSlide,
         HeroScrim(
           top: _fadesIntoPage && !_gallery,
           leading: true,
@@ -518,16 +530,24 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
       onPaper: light,
       actions: actions,
     );
+    final paletteKey = HeroPaletteOverlay.paletteKeyFor(
+      context,
+      item,
+      series: widget.catalog.latestSeries.items,
+    );
     final Widget visual = layout == HeroLayout.fullBleed
         ? Stack(
             fit: StackFit.expand,
             children: [
-              HeroArtwork(
-                key: ValueKey('hero-artwork-${item.id}'),
-                sources: artwork,
-                requestWidth: requestWidth,
-                compact: true,
-                onResolved: (data) => _onArtworkResolved(item, artwork, data),
+              HeroPaletteOverlay(
+                paletteKey: paletteKey,
+                child: HeroArtwork(
+                  key: ValueKey('hero-artwork-${item.id}'),
+                  sources: artwork,
+                  requestWidth: requestWidth,
+                  compact: true,
+                  onResolved: (data) => _onArtworkResolved(item, artwork, data),
+                ),
               ),
               HeroScrim(top: _stage && !light, fadeTo: fade, gallery: light),
               Positioned(left: 20, right: 20, bottom: 20, child: text),
