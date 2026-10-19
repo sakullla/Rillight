@@ -534,11 +534,11 @@ void main() {
   });
 
   test('saved servers get distinct, rename-stable avatar colours', () {
-    final ids = [for (var i = 0; i < 12; i++) 'server-$i-${i * 7919}'];
+    final ids = [for (var i = 0; i < 8; i++) 'server-$i-${i * 7919}'];
     final colours = {
       for (final id in ids) ServerUi.gradientOf(id, among: ids).$1,
     };
-    // Up to twelve servers never share a colour.
+    // 品牌家族共八组渐变,八台以内不重色。
     expect(colours, hasLength(ids.length));
     // The colour depends on the id and the saved set, not on list order.
     expect(

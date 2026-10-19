@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import '../app/l10n/app_localizations.dart';
+import '../app/theme/brand.dart';
 import '../app/ui/app_icons.dart';
 import '../app/ui/ui.dart';
 import '../media_server/capabilities.dart';
@@ -18,9 +19,9 @@ import 'server_list_store.dart';
 abstract final class ServerUi {
   static const double panelWidth = 660;
   static const double panelHeight = 820;
-  static const double panelRadius = 24;
-  static const double cardRadius = 16;
-  static const double rowRadius = 12;
+  static const double panelRadius = AppRadii.overlay;
+  static const double cardRadius = AppRadii.lg;
+  static const double rowRadius = AppRadii.md;
 
   static Color accentOf(MediaServerType type) => switch (type) {
     MediaServerType.emby => const Color(0xFF52B54B),
@@ -35,22 +36,15 @@ abstract final class ServerUi {
     _ => null,
   };
 
-  /// Curated avatar gradients, ordered so neighbouring slots contrast (a
-  /// collision moves to the next slot).
-  static const List<(Color, Color)> _palette = [
-    (Color(0xFF6D5DFC), Color(0xFF3B2FC9)), // indigo
-    (Color(0xFFF5A524), Color(0xFFE2661B)), // amber
-    (Color(0xFF14B8A6), Color(0xFF0E7C86)), // teal
-    (Color(0xFFEC4899), Color(0xFFBE185D)), // pink
-    (Color(0xFF3B9DF8), Color(0xFF2563EB)), // azure
-    (Color(0xFFF97362), Color(0xFFD9365E)), // coral
-    (Color(0xFF34C77B), Color(0xFF15803D)), // green
-    (Color(0xFFB45CF0), Color(0xFF7C3AED)), // violet
-    (Color(0xFFFB923C), Color(0xFFC2410C)), // orange
-    (Color(0xFF22D3EE), Color(0xFF0E7490)), // cyan
-    (Color(0xFF8B9BB4), Color(0xFF475569)), // slate
-    (Color(0xFF84CC16), Color(0xFF3F6212)), // lime
-  ];
+  /// 品牌家族头像渐变,与手机库封面共用同一组粉/梅/紫/青/石板色。
+  ///
+  /// 相邻槽位按色相错开,冲突时顺移一格;同一 id 始终落在同一槽。
+  static const List<List<Color>> _palette = AppBrand.libraryGradients;
+
+  static (Color, Color) _slot(int index) {
+    final colors = _palette[index];
+    return (colors.first, colors.last);
+  }
 
   static int _hashOf(String seed) {
     var hash = 0x811C9DC5;
@@ -63,7 +57,7 @@ abstract final class ServerUi {
   /// Stable gradient for one server, seeded by the persistent server id so
   /// renaming keeps the colour users have learned.
   ///
-  /// With [among] (every saved server id) colours are unique for up to twelve
+  /// With [among] (every saved server id) colours are unique for up to eight
   /// servers: slots are claimed in a fixed id order and a taken slot moves to
   /// the next one. Without it the hash slot is used directly.
   static (Color, Color) gradientOf(String seed, {Iterable<String>? among}) {
@@ -78,11 +72,11 @@ abstract final class ServerUi {
             slot = (slot + 1) % count;
           }
           used.add(slot);
-          if (id == seed) return _palette[slot];
+          if (id == seed) return _slot(slot);
         }
       }
     }
-    return _palette[_hashOf(seed) % count];
+    return _slot(_hashOf(seed) % count);
   }
 
   /// [gradientOf] against the saved servers visible from [context].
@@ -242,8 +236,8 @@ class ServerIdentityBadge extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.center,
                 colors: [
-                  const Color(0xFFFFFFFF).withValues(alpha: .18),
-                  const Color(0x00FFFFFF),
+                  AppInk.white.withValues(alpha: .18),
+                  AppInk.white.withValues(alpha: 0),
                 ],
               ),
             ),
@@ -260,13 +254,13 @@ class ServerIdentityBadge extends StatelessWidget {
                 ? Icon(
                     custom,
                     size: size * .48,
-                    color: const Color(0xFFFFFFFF),
+                    color: AppInk.white,
                     fill: AppIcons.filled,
                   )
                 : Text(
                     ServerUi.monogramOf(name ?? ''),
                     style: TextStyle(
-                      color: const Color(0xFFFFFFFF),
+                      color: AppInk.white,
                       fontSize: size * .44,
                       fontWeight: FontWeight.w700,
                       height: 1,
@@ -299,7 +293,7 @@ class ServerIdentityBadge extends StatelessWidget {
                     borderRadius: BorderRadius.circular(badge * .32),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF000000).withValues(alpha: .18),
+                        color: AppInk.black.withValues(alpha: .18),
                         blurRadius: 4,
                         offset: const Offset(0, 1),
                       ),
@@ -1122,7 +1116,7 @@ class ServerMarkWithGlyph extends StatelessWidget {
                 size: ring * .52,
                 color: colors.brightness == Brightness.dark
                     ? colors.surface
-                    : const Color(0xFFFFFFFF),
+                    : AppInk.white,
                 fill: AppIcons.filled,
               ),
             ),
@@ -1149,7 +1143,9 @@ class ServerScrim extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
           child: ColoredBox(
-            color: const Color(0xFF000000).withValues(alpha: dark ? .5 : .28),
+            color: AppInk.black.withValues(
+              alpha: AppScrim.of(context, dark ? .5 : .28),
+            ),
           ),
         ),
       ),

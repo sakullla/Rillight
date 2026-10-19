@@ -5,6 +5,7 @@ import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 
 import 'package:rillight/media_server/server_address.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 
 import 'dart:async';
@@ -694,7 +695,7 @@ class _ConnectPageState extends State<ConnectPage> {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
             decoration: BoxDecoration(
               color: scheme.onSurface.withValues(alpha: .08),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadii.pill),
             ),
             child: Text(
               '${auth.savedServers.length}',
@@ -835,14 +836,14 @@ class _ConnectPageState extends State<ConnectPage> {
       duration: AppMotion.durationOf(context, AppMotion.fast),
       decoration: BoxDecoration(
         color: selected
-            ? colorScheme.primary.withValues(alpha: .08)
+            ? colorScheme.primaryContainer
             : colorScheme.surfaceContainer.withValues(alpha: .7),
         borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(
           color: selected
               ? colorScheme.primary
               : colorScheme.outlineVariant.withValues(alpha: .7),
-          width: selected ? 1.5 : 1,
+          width: selected ? AppSelectionDecoration.borderWidth : 1,
         ),
       ),
       child: Container(
@@ -892,7 +893,7 @@ class _ConnectPageState extends State<ConnectPage> {
                       selected ? AppIcons.checkCircle : AppIcons.chevronRight,
                       fill: AppIcons.filled,
                       color: selected
-                          ? colorScheme.primary
+                          ? colorScheme.onPrimaryContainer
                           : colorScheme.onSurfaceVariant,
                       size: 20,
                     ),
@@ -935,10 +936,12 @@ class _ConnectPageState extends State<ConnectPage> {
       padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
       child: Container(
         decoration: BoxDecoration(
-          color: selected
-              ? colorScheme.primaryContainer.withValues(alpha: 0.35)
-              : const Color(0x00000000),
+          color: selected ? colorScheme.primaryContainer : AppInk.transparent,
           borderRadius: BorderRadius.circular(AppRadii.md),
+          border: Border.all(
+            color: selected ? colorScheme.primary : AppInk.transparent,
+            width: selected ? AppSelectionDecoration.borderWidth : 1,
+          ),
         ),
         child: AppSurfaceAction(
           key: Key('saved-line-${line.id}'),
@@ -956,7 +959,7 @@ class _ConnectPageState extends State<ConnectPage> {
                   fill: AppIcons.filled,
                   size: 18,
                   color: selected
-                      ? colorScheme.primary
+                      ? colorScheme.onPrimaryContainer
                       : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: AppSpacing.sm),
@@ -972,7 +975,7 @@ class _ConnectPageState extends State<ConnectPage> {
                   Icon(
                     AppIcons.check,
                     fill: AppIcons.filled,
-                    color: colorScheme.primary,
+                    color: colorScheme.onPrimaryContainer,
                     size: 18,
                   ),
               ],
@@ -1017,7 +1020,7 @@ class _SupportedServices extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(6, 5, 12, 5),
             decoration: BoxDecoration(
               color: scheme.surface.withValues(alpha: .55),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadii.pill),
               border: Border.all(
                 color: scheme.outlineVariant.withValues(alpha: .6),
               ),
@@ -1064,7 +1067,7 @@ class _HeroPanel extends StatelessWidget {
               scheme.surfaceContainerLow,
             ),
             Color.alphaBlend(
-              scheme.tertiary.withValues(alpha: dark ? .10 : .06),
+              scheme.secondary.withValues(alpha: dark ? .10 : .06),
               scheme.surfaceContainerLowest,
             ),
           ],

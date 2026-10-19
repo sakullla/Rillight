@@ -673,25 +673,22 @@ class _ServerIconChoice extends StatelessWidget {
     final colors = theme.colorScheme;
     return AppSurfaceAction(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(AppRadii.lg),
       child: Semantics(
         selected: selected,
         child: AnimatedContainer(
           duration: AppMotion.fast,
           width: width,
           padding: const EdgeInsets.fromLTRB(4, 10, 4, 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: selected
-                ? colors.primary.withValues(alpha: .10)
-                : const Color(0x00000000),
-            border: Border.all(
-              color: selected
-                  ? colors.primary.withValues(alpha: .7)
-                  : colors.outlineVariant.withValues(alpha: .7),
-              width: selected ? 1.6 : .8,
-            ),
-          ),
+          decoration: selected
+              ? AppSelectionDecoration.of(colors, radius: AppRadii.lg)
+              : BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  border: Border.all(
+                    color: colors.outlineVariant.withValues(alpha: .7),
+                    width: .8,
+                  ),
+                ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -708,7 +705,9 @@ class _ServerIconChoice extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: selected ? colors.primary : colors.onSurfaceVariant,
+                  color: selected
+                      ? colors.onPrimaryContainer
+                      : colors.onSurfaceVariant,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),

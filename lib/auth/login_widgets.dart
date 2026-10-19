@@ -1,6 +1,7 @@
 import 'package:rillight/app/ui/ui.dart';
 
 import '../app/l10n/app_localizations.dart';
+import '../app/theme/brand.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/emby_mark.dart';
 import '../media_server/capabilities.dart';
@@ -82,13 +83,13 @@ class _JellyfinMarkPainter extends CustomPainter {
     canvas.drawPath(
       mark,
       Paint()
-        ..color = const Color(0xffffffff)
+        ..color = AppInk.white
         ..style = PaintingStyle.fill,
     );
     canvas.drawPath(
       outer,
       Paint()
-        ..color = const Color(0xffffffff)
+        ..color = AppInk.white
         ..style = PaintingStyle.stroke
         ..strokeJoin = StrokeJoin.round
         ..strokeWidth = size.shortestSide * 0.05,
@@ -134,25 +135,24 @@ class LoginBrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = AppUiTheme.of(context).colorScheme;
+    final theme = AppUiTheme.of(context);
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * .28),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [scheme.primary, scheme.secondary],
-        ),
+        gradient: AppBrandGradient.primaryFor(theme.brightness),
         border: Border.all(
-          color: const Color(0xffffffff).withValues(alpha: 0.24),
+          color: AppInk.white.withValues(alpha: AppGlass.edgeLight),
         ),
+        boxShadow: AppShadow.glow(theme.colorScheme.primary, theme.brightness),
       ),
       child: Icon(
         AppIcons.play,
         fill: AppIcons.filled,
-        color: scheme.onPrimary,
+        color: theme.brightness == Brightness.dark
+            ? AppBrand.onPink
+            : AppInk.white,
         size: size * .58,
       ),
     );
@@ -213,18 +213,12 @@ class ProviderSwitcher extends StatelessWidget {
                   bottom: 0,
                   width: segment,
                   child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: dark
-                          ? scheme.surfaceBright
-                          : scheme.surfaceContainerLowest,
-                      borderRadius: BorderRadius.circular(AppRadii.pill),
-                      border: Border.all(
-                        color: AppEdge.of(theme.brightness, strong: true),
-                      ),
+                    decoration: AppSelectionDecoration.of(scheme).copyWith(
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xff000000)
-                              .withValues(alpha: dark ? .28 : .08),
+                          color: AppInk.black.withValues(
+                            alpha: dark ? .28 : .08,
+                          ),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -307,7 +301,7 @@ class _ProviderSegment extends StatelessWidget {
                               ? FontWeight.w600
                               : FontWeight.w500,
                           color: selected
-                              ? scheme.onSurface
+                              ? scheme.onPrimaryContainer
                               : scheme.onSurfaceVariant,
                         ),
                       ),

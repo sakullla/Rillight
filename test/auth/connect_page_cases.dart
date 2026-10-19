@@ -212,9 +212,15 @@ void main() {
     final tileFill = tester.widget<Container>(
       find.ancestor(of: lanTile, matching: find.byType(Container)).first,
     );
+    final selection = ui.AppSelectionDecoration.of(
+      ui.AppUiTheme.of(tester.element(lanTile)).colorScheme,
+      radius: ui.AppRadii.md,
+    );
+    final tileDecoration = tileFill.decoration! as BoxDecoration;
+    expect(tileDecoration.color, selection.color);
     expect(
-      (tileFill.decoration! as BoxDecoration).color?.a,
-      closeTo(0.35, 0.01),
+      (tileDecoration.border! as Border).top.width,
+      ui.AppSelectionDecoration.borderWidth,
     );
     expect(
       tester

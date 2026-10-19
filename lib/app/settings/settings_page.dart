@@ -13,6 +13,7 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/webdav/webdav_backup.dart';
 import 'package:rillight/webdav/webdav_client.dart';
 import 'package:rillight/webdav/webdav_config.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/phone_nav_style.dart';
@@ -1501,7 +1502,7 @@ class _AppearancePreviewTileState extends State<_AppearancePreviewTile> {
                         : _hovered
                         ? scheme.outline
                         : scheme.outlineVariant,
-                    width: selected ? 2 : 1,
+                    width: selected ? AppSelectionDecoration.borderWidth : 1,
                   ),
                 ),
                 padding: const EdgeInsets.all(3),
@@ -1519,9 +1520,7 @@ class _AppearancePreviewTileState extends State<_AppearancePreviewTile> {
                     height: 18,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: selected
-                          ? scheme.primary
-                          : const Color(0x00000000),
+                      color: selected ? scheme.primary : AppInk.transparent,
                       border: Border.all(
                         color: selected ? scheme.primary : scheme.outline,
                         width: 1.5,
@@ -1673,12 +1672,16 @@ class _SettingsNavItemState extends State<_SettingsNavItem> {
           decoration: BoxDecoration(
             borderRadius: radius,
             color: selected
-                ? scheme.primaryContainer.withValues(
-                    alpha: theme.brightness == Brightness.dark ? 0.72 : 1,
-                  )
+                ? scheme.primaryContainer
                 : _hovered
                 ? scheme.surfaceContainerHigh
-                : const Color(0x00000000),
+                : AppInk.transparent,
+            border: selected
+                ? Border.all(
+                    color: scheme.primary,
+                    width: AppSelectionDecoration.borderWidth,
+                  )
+                : null,
           ),
           child: Row(
             children: [

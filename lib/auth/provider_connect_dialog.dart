@@ -566,7 +566,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           padding: EdgeInsets.all(16 * s),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest.withValues(alpha: .45),
-            borderRadius: BorderRadius.circular(14 * s),
+            borderRadius: BorderRadius.circular(AppRadii.md * s),
             border: Border.all(
               color: MediaServerType.plex.brandColor.withValues(alpha: .28),
             ),
@@ -720,7 +720,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         padding: EdgeInsets.fromLTRB(16 * s, 12 * s, 8 * s, 12 * s),
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest.withValues(alpha: .55),
-          borderRadius: BorderRadius.circular(14 * s),
+          borderRadius: BorderRadius.circular(AppRadii.md * s),
           border: Border.all(color: c.type.brandColor.withValues(alpha: .4)),
         ),
         child: Row(
@@ -996,7 +996,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           padding: EdgeInsets.all(12 * s),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest.withValues(alpha: .35),
-            borderRadius: BorderRadius.circular(14 * s),
+            borderRadius: BorderRadius.circular(AppRadii.md * s),
             border: Border.all(
               color: scheme.outlineVariant.withValues(alpha: .6),
             ),
@@ -1030,7 +1030,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                                     ? c.type.brandColor
                                     : scheme.secondary)
                                 .withValues(alpha: .16),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
                       ),
                       child: Text(
                         resource.owned! ? l.providerOwned : l.providerShared,
@@ -1083,7 +1083,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                       Padding(
                         padding: EdgeInsets.only(bottom: 12 * s),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(99),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
                           child: const AppLoadingBar(minHeight: 3),
                         ),
                       ),
