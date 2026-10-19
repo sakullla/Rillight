@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
@@ -7,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/widgets/browse_menu_button.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
+import 'package:rillight/app/widgets/top_bar_backdrop.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -42,6 +43,13 @@ class AppShell extends StatefulWidget {
   static const homeNavKey = Key('app-shell-home');
   static const overflowNavKey = Key('app-shell-libraries-overflow');
 
+  /// 非浏览页面顶栏的「浏览」菜单入口。
+  static const browseMenuKey = BrowseMenuButton.buttonKey;
+
+  /// 顶栏「浏览」显示文字的最小窗口宽度;更窄只显示图标,
+  /// 让搜索与账户在 1024 宽度下仍能同排。
+  static const browseLabelMinWidth = 1200.0;
+
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
   ///
   /// 有系统标题按钮时,导航、编辑首页、搜索、设置和账号收进同一条
@@ -50,7 +58,7 @@ class AppShell extends StatefulWidget {
   static const topBarHeight = 56.0;
 
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
-  static const topFadeHeight = 36.0;
+  static const topFadeHeight = TopBarBackdrop.fadeHeight;
 
   /// 窗口不窄于此宽度时,顶栏搜索入口展开为带提示与快捷键的胶囊。
   static const searchPillMinWidth = 900.0;
@@ -412,107 +420,29 @@ class _TopBar extends StatelessWidget {
               });
     final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
-    final scrim = light
-        ? AppUiTheme.of(context).scaffoldBackgroundColor
-        : scheme.scrim;
-    final overlayHeight = height + AppShell.topFadeHeight;
     final item = AppRoutes.isItem(location);
     // 片库与货架页自带大标题:未滚动时顶栏不重复,滚过标题后再收进顶栏。
     final pageHasHeading = _pageHasHeading(location);
     final showTitle = !item && (!pageHasHeading || scrolled);
-    final highContrast = MediaQuery.highContrastOf(context);
     // 宽窗口用带提示文字的搜索胶囊,窄窗口退回图标。
     final wideSearch =
         MediaQuery.sizeOf(context).width >= AppShell.searchPillMinWidth;
+    final showBrowseMenu = !AppRoutes.showsBrowseNav(location);
+    final showBrowseLabel =
+        MediaQuery.sizeOf(context).width >= AppShell.browseLabelMinWidth;
     return SizedBox(
       height: height,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (opaque && item)
-            // 详情页底色随作品取色,实心的应用底色会切出一条色差。
-            // 改为磨砂:模糊下方画面再压一层中性薄色,随页面色调变化。
-            Positioned.fill(
-              child: ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(
-                    sigmaX: AppGlass.barBlur,
-                    sigmaY: AppGlass.barBlur,
-                  ),
-                  child: ColoredBox(
-                    color:
-                        (light
-                                ? const Color(0xffffffff)
-                                : const Color(0xff000000))
-                            .withValues(
-                              alpha: highContrast
-                                  ? AppGlass.reducedTint
-                                  : (light ? 0.62 : 0.42),
-                            ),
-                  ),
-                ),
-              ),
-            )
-          else if (opaque)
-            Positioned.fill(
-              child: ColoredBox(
-                color: AppUiTheme.of(context).scaffoldBackgroundColor,
-              ),
-            )
-          else
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              height: overlayHeight,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: light
-                          ? [0, height / overlayHeight, 1]
-                          : AppScrim.topBarStops,
-                      colors: [
-                        scrim.withValues(
-                          alpha: light
-                              ? AppScrim.of(context, AppScrim.lightTopBar)
-                              : AppScrim.of(context, AppScrim.topBar),
-                        ),
-                        scrim.withValues(
-                          alpha: light
-                              ? AppScrim.of(context, AppScrim.lightTopBar)
-                              : AppScrim.of(context, AppScrim.topBarMid),
-                        ),
-                        scrim.withValues(alpha: 0),
-                      ],
-                    ),
-                  ),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
-          if (opaque)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 1,
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: light || scrolled ? 1 : 0,
-                  duration: AppMotion.durationOf(context, AppMotion.fast),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: light
-                          ? scheme.outlineVariant
-                          : scheme.outlineVariant.withValues(alpha: 0.35),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          // 近实底 surface 带加下沿淡出:白海报上的文字与图标不再依赖
+          // 图片明暗。沉浸页多一层模糊,滚动后的详情也不再铺黑色薄层。
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: TopBarBackdrop(height: height, blur: !opaque),
+          ),
           Container(
             decoration: BoxDecoration(),
             key: AppShell.topBarKey,
@@ -599,6 +529,15 @@ class _TopBar extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (showBrowseMenu) ...[
+                              BrowseMenuButton(
+                                key: AppShell.browseMenuKey,
+                                libraries: libraries,
+                                currentLocation: location,
+                                showLabel: showBrowseLabel,
+                              ),
+                              const SizedBox(width: AppSpacing.xxs),
+                            ],
                             if (wideSearch)
                               const SizedBox(width: AppSpacing.xs),
                             SearchAction(

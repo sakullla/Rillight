@@ -1,26 +1,71 @@
+import '../emby/fake_emby_server.dart';
 import '../helpers/cupertino_test_app.dart';
+import '../helpers/synthetic_source_fixture.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
+import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/ui/app_icons.dart';
+import 'package:rillight/app/widgets/browse_menu_button.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
+import 'package:rillight/app/widgets/top_bar_backdrop.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/home/catalog_controller.dart';
+import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/media_server/device.dart';
+
+double _contrast(Color a, Color b) {
+  final values = [a.computeLuminance(), b.computeLuminance()]..sort();
+  return (values.last + .05) / (values.first + .05);
+}
 
 void main() {
   Future<void> pump(
     WidgetTester tester,
     String location, {
     bool light = false,
+    bool loggedIn = false,
   }) async {
-    final auth = AuthController.memory();
+    final AuthController auth;
+    if (loggedIn) {
+      final emby = FakeEmbyServer();
+      final connected = SyntheticSourceAuth(
+        adapter: FakeEmbyAdapter([emby]),
+        device: const ClientDeviceInfo(
+          clientName: 'Rillight',
+          deviceName: 'test',
+          deviceId: 'device-top-bar',
+          version: '0.1.0',
+        ),
+        libraryIds: const {'view-movies'},
+      );
+      await tester.runAsync(
+        () => connected.connect(
+          address: emby.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      auth = connected;
+    } else {
+      auth = AuthController.memory();
+    }
     addTearDown(auth.dispose);
+    final catalog = CatalogController(
+      auth: auth,
+      cache: CatalogCache()..debugSetDiskStore(null),
+    );
+    addTearDown(catalog.dispose);
     final router = GoRouter(
       initialLocation: location,
       routes: [
@@ -49,6 +94,16 @@ void main() {
                 ),
               ),
             ),
+            GoRoute(
+              path: '/item/:id',
+              builder: (context, state) =>
+                  const ColoredBox(color: Color(0xff000000)),
+            ),
+            GoRoute(
+              path: '/shelf/:id',
+              builder: (context, state) =>
+                  const ColoredBox(color: Color(0xff000000)),
+            ),
           ],
         ),
       ],
@@ -64,7 +119,13 @@ void main() {
           ...GlobalCupertinoLocalizations.delegates,
         ],
         routerConfig: router,
-        builder: (context, child) => AuthScope(controller: auth, child: child!),
+        builder: (context, child) => PresentationScope(
+          environment: PresentationEnvironment.desktop,
+          child: AuthScope(
+            controller: auth,
+            child: CatalogScope(controller: catalog, child: child!),
+          ),
+        ),
       ),
     );
     await settle(tester);
@@ -77,70 +138,49 @@ void main() {
       )
       .first;
 
-  testWidgets('aggregation navigation blends into the page background', (
+  TopBarBackdrop backdrop(WidgetTester tester) => tester.widget<TopBarBackdrop>(
+    find.descendant(of: barStack(), matching: find.byType(TopBarBackdrop)),
+  );
+
+  Finder fadeGradient() => find.descendant(
+    of: barStack(),
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is DecoratedBox &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration as BoxDecoration).gradient != null,
+    ),
+  );
+
+  testWidgets('aggregation bar uses the near-solid surface band', (
     tester,
   ) async {
     await pump(tester, AppRoutes.aggregation);
-    final stack = barStack();
-    expect(
-      find.descendant(
-        of: stack,
-        matching: find.byWidgetPredicate(
-          (widget) =>
-              widget is DecoratedBox &&
-              widget.decoration is BoxDecoration &&
-              (widget.decoration as BoxDecoration).gradient != null,
-        ),
-      ),
-      findsNothing,
-    );
-    final fill = tester.widget<ColoredBox>(
-      find.descendant(of: stack, matching: find.byType(ColoredBox)),
-    );
-    expect(
-      fill.color,
-      AppUiTheme.of(tester.element(find.byKey(AppShell.topBarKey)))
-          .scaffoldBackgroundColor,
-    );
+    expect(AppShell.topBarHeight, 56);
+    expect(AppShell.topFadeHeight, 36);
+    expect(backdrop(tester).height, AppShell.topBarHeight);
+    expect(backdrop(tester).blur, isFalse);
+    expect(fadeGradient(), findsOneWidget);
   });
 
   testWidgets('light home bar is solid instead of fogging the hero', (
     tester,
   ) async {
     await pump(tester, AppRoutes.home, light: true);
-    final stack = barStack();
-    expect(
-      find.descendant(
-        of: stack,
-        matching: find.byWidgetPredicate(
-          (widget) =>
-              widget is DecoratedBox &&
-              widget.decoration is BoxDecoration &&
-              (widget.decoration as BoxDecoration).gradient != null,
-        ),
-      ),
-      findsNothing,
-    );
-    expect(
-      find.descendant(of: stack, matching: find.byType(ColoredBox)),
-      findsOneWidget,
-    );
+    expect(backdrop(tester).blur, isFalse);
+    expect(fadeGradient(), findsOneWidget);
   });
 
   testWidgets('home keeps the fading top scrim', (tester) async {
     await pump(tester, AppRoutes.home);
-    expect(
-      find.descendant(
-        of: barStack(),
-        matching: find.byWidgetPredicate(
-          (widget) =>
-              widget is DecoratedBox &&
-              widget.decoration is BoxDecoration &&
-              (widget.decoration as BoxDecoration).gradient != null,
-        ),
-      ),
-      findsOneWidget,
-    );
+    expect(backdrop(tester).blur, isTrue);
+    expect(fadeGradient(), findsOneWidget);
+  });
+
+  testWidgets('detail and shelf pages share the same backdrop', (tester) async {
+    await pump(tester, AppRoutes.item('movie-inception'));
+    expect(backdrop(tester).blur, isTrue);
+    expect(fadeGradient(), findsOneWidget);
   });
 
   testWidgets('library pages hand their heading to the bar after scrolling', (
@@ -165,4 +205,60 @@ void main() {
     await settle(tester);
     expect(titleOpacity(), 1);
   });
+
+  testWidgets('browse menu appears off browse pages only', (tester) async {
+    await pump(tester, AppRoutes.home);
+    expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
+    await pump(tester, AppRoutes.aggregation);
+    expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
+    await pump(tester, AppRoutes.library('movies'));
+    expect(find.byKey(BrowseMenuButton.buttonKey), findsOneWidget);
+  });
+
+  testWidgets('closing search returns focus to the search trigger', (
+    tester,
+  ) async {
+    await pump(tester, AppRoutes.library('movies'), loggedIn: true);
+    final searchButton = find.widgetWithIcon(AppIconButton, AppIcons.search);
+    await tester.tap(searchButton);
+    await settle(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(
+      tester.widget<AppIconButton>(searchButton).focusNode?.hasFocus,
+      isTrue,
+    );
+  });
+
+  for (final (name, theme) in [
+    ('dark', AppUiTheme.dark()),
+    ('light', AppUiTheme.light()),
+  ]) {
+    test('$name top bar foregrounds stay readable over white and black', () {
+      final scheme = theme.colorScheme;
+      final tint = TopBarBackdrop.tintFor(scheme);
+      final foregrounds = [
+        ('onSurface', scheme.onSurface),
+        ('onSurfaceVariant', scheme.onSurfaceVariant),
+        ('primary', scheme.primary),
+        ('secondary', scheme.secondary),
+        ('error', scheme.error),
+      ];
+      for (final base in [const Color(0xffffffff), const Color(0xff000000)]) {
+        final background = Color.alphaBlend(tint, base);
+        for (final (label, foreground) in foregrounds) {
+          expect(
+            _contrast(foreground, background),
+            greaterThanOrEqualTo(4.5),
+            reason: '$label over $background',
+          );
+        }
+        expect(
+          _contrast(scheme.outline, background),
+          greaterThanOrEqualTo(3),
+          reason: 'icon boundary over $background',
+        );
+      }
+    });
+  }
 }
