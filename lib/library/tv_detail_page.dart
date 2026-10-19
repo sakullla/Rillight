@@ -807,10 +807,10 @@ class _TvDetailHeader extends StatelessWidget {
     ];
     final badges = item.isSeries ? const <String>[] : mediaTechBadges(source);
     final shadow = [Shadow(blurRadius: 12, color: AppInk.scrim(.54))];
+    // 长标题在 200% 字号下按宽度自然换行，头部随内容增高，不省略。
     final titleText = Text(
       item.name,
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
+      key: const Key('tv-detail-title'),
       style: theme.textTheme.displaySmall?.copyWith(
         color: AppInk.white,
         shadows: shadow,
@@ -891,8 +891,7 @@ class _TvDetailHeader extends StatelessWidget {
                           if (item.genres.isNotEmpty)
                             item.genres.take(3).join(' / '),
                         ].join('  ·  '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        key: const Key('tv-detail-meta'),
                         style: theme.textTheme.bodyLarge?.copyWith(
                           height: 1.3,
                           color: AppInk.white.withValues(alpha: .82),

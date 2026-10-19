@@ -1706,12 +1706,15 @@ class _PhoneDetailPending extends StatelessWidget {
         animated: !MediaQuery.disableAnimationsOf(context),
       );
     }
+    // 与载入后的头部一致：按可用宽度自然换行，200% 字号下不省略。
     return Text(
       name,
       key: titleKey,
-      maxLines: compact ? 3 : 2,
-      overflow: TextOverflow.ellipsis,
-      style: phoneDetailTitleStyle(theme, compact: compact),
+      style: phoneDetailTitleStyle(
+        theme,
+        compact: compact,
+        titleLength: name.runes.length,
+      ),
     );
   }
 
