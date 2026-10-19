@@ -23,14 +23,14 @@ abstract final class AppRadii {
   static const double xs = 4;
   static const double sm = 8;
   static const double md = 12;
-  static const double lg = 16;
-  static const double xl = 20;
+  static const double lg = 18;
+  static const double xl = 24;
 
   /// 对话框、面板、底部弹层等浮层表面。
-  static const double overlay = 24;
+  static const double overlay = 28;
 
   /// 海报/媒体卡默认圆角。比通用 md 更圆润,是内容卡片的面孔。
-  static const double card = 14;
+  static const double card = 18;
 
   /// 胶囊:主按钮、筛选项、标签。足够大的值让任意高度都是半圆端。
   static const double pill = 999;
@@ -291,7 +291,7 @@ abstract final class AppMobileNav {
   static const Duration pillDuration = AppMotion.normal;
 
   /// 选中 pill 指示器圆角(胶囊)。
-  static const double pillRadius = AppRadii.md;
+  static const double pillRadius = AppRadii.pill;
 
   /// 导航栏底色 alpha(透明底,内容可从背后透出)。
   static const double backgroundAlpha = 0.0;
@@ -314,19 +314,19 @@ abstract final class AppMobileNav {
 
 /// Liquid Glass 浮层材质:只用于顶栏/面板/控件,不铺在海报内容上。
 abstract final class AppGlass {
-  static const double barBlur = 26;
-  static const double panelBlur = 32;
-  static const double controlBlur = 22;
-  static const double pillBlur = 18;
+  static const double barBlur = 28;
+  static const double panelBlur = 34;
+  static const double controlBlur = 24;
+  static const double pillBlur = 20;
 
-  static const double barTint = 0.40;
-  static const double panelTint = 0.48;
-  static const double controlTint = 0.36;
-  static const double pillTint = 0.30;
+  static const double barTint = 0.44;
+  static const double panelTint = 0.54;
+  static const double controlTint = 0.40;
+  static const double pillTint = 0.34;
 
   static const double reducedTint = 0.92;
-  static const double edgeLight = 0.16;
-  static const double specular = 0.14;
+  static const double edgeLight = 0.22;
+  static const double specular = 0.18;
 }
 
 /// 投影 token:每档由"贴地的接触影 + 远处的环境影"两层组成,
