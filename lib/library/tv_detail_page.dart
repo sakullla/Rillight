@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
@@ -867,7 +868,7 @@ class _TvDetailHeader extends StatelessWidget {
                       Icon(
                         CupertinoIcons.star_fill,
                         size: 16 * s,
-                        color: const Color(0xFFFFC94D),
+                        color: AppBrand.ratingStar(theme.brightness),
                       ),
                       SizedBox(width: 3 * s),
                       Text(

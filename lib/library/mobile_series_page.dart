@@ -1,3 +1,4 @@
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -595,11 +596,11 @@ class _MetaChip extends StatelessWidget {
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
+              Icon(
                 AppIcons.star,
                 fill: AppIcons.filled,
                 size: 15,
-                color: phoneRatingStarColor,
+                color: AppBrand.ratingStar(theme.brightness),
               ),
               const SizedBox(width: 3),
               Text(entry.label, style: style),
@@ -688,7 +689,7 @@ class PhoneGenreChips extends StatelessWidget {
   }
 }
 
-/// 季切换：单选标签。选中项实心主色，不画多选筛选那种勾。
+/// 季切换：单选标签。选中项用 accentContainer 填充加 accent 描边。
 class PhoneSeasonTab extends StatelessWidget {
   const PhoneSeasonTab({
     super.key,
@@ -714,13 +715,13 @@ class PhoneSeasonTab extends StatelessWidget {
         child: AnimatedContainer(
           duration: AppMotion.durationOf(context, AppMotion.fast),
           curve: AppMotion.standard,
-          decoration: BoxDecoration(
-            color: selected ? scheme.primary : scheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: selected
-                ? null
-                : Border.all(color: AppEdge.of(theme.brightness)),
-          ),
+          decoration: selected
+              ? AppSelectionDecoration.of(scheme)
+              : BoxDecoration(
+                  color: scheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                  border: Border.all(color: AppEdge.of(theme.brightness)),
+                ),
           clipBehavior: Clip.antiAlias,
           child: AppSurfaceAction(
             borderRadius: BorderRadius.circular(AppRadii.pill),
@@ -735,7 +736,9 @@ class PhoneSeasonTab extends StatelessWidget {
                     label,
                     maxLines: 1,
                     style: theme.textTheme.labelLarge?.copyWith(
-                      color: selected ? scheme.onPrimary : scheme.onSurface,
+                      color: selected
+                          ? scheme.onPrimaryContainer
+                          : scheme.onSurface,
                       fontWeight: selected ? FontWeight.w600 : null,
                     ),
                   ),
@@ -1570,4 +1573,3 @@ class _SimilarRow extends StatelessWidget {
 }
 
 /// 评分星标的固定金色，不随画面取色变化，一眼认出是评分。
-const Color phoneRatingStarColor = Color(0xFFF5C518);

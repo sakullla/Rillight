@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart' show kTouchSlop;
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -385,7 +386,6 @@ class PhonePosterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context);
     final seasonCount = item.childCount;
     final showSeasonCaption =
@@ -482,7 +482,7 @@ class PhonePosterCard extends StatelessWidget {
                         AppIcons.star,
                         fill: AppIcons.filled,
                         size: 10,
-                        color: scheme.primary,
+                        color: AppBrand.ratingStar(theme.brightness),
                       ),
                       const SizedBox(width: 2),
                       Text(
@@ -869,23 +869,12 @@ IconData phoneLibraryIcon(String? collectionType) => switch (collectionType) {
 
 /// 没有封面的片库取一组深色渐变。按库 id 在色板里轮换，同类型的多个库
 /// （「电影」「纪录片」「动画」）并排时也不撞色。
-const List<List<Color>> _libraryGradients = [
-  [Color(0xFF5A3A12), Color(0xFF1B140B)],
-  [Color(0xFF1E3D66), Color(0xFF0C1522)],
-  [Color(0xFF14504A), Color(0xFF0A1C1A)],
-  [Color(0xFF5A2346), Color(0xFF1C0D17)],
-  [Color(0xFF3F2F6B), Color(0xFF141022)],
-  [Color(0xFF5C2A22), Color(0xFF1C0F0C)],
-  [Color(0xFF2D4A1E), Color(0xFF10180B)],
-  [Color(0xFF3A3F4A), Color(0xFF14161A)],
-];
-
 List<Color> _libraryGradient(MediaItem library) {
   var hash = 0;
   for (final unit in library.id.codeUnits) {
     hash = (hash * 31 + unit) & 0x7fffffff;
   }
-  return _libraryGradients[hash % _libraryGradients.length];
+  return AppBrand.libraryGradients[hash % AppBrand.libraryGradients.length];
 }
 
 /// 16:9 片库磁贴：有封面铺满封面，没有就按类型画渐变和大图标；

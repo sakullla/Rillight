@@ -37,8 +37,8 @@ abstract final class TvDesign {
   static const double sectionGap = 28;
 
   /// 卡片/按钮圆角。
-  static const double cardRadius = 8;
-  static const double controlRadius = 10;
+  static const double cardRadius = 10;
+  static const double controlRadius = 12;
 
   static double scaleFor(Size size) =>
       (size.width / canvasWidth).clamp(1.0, maxScale).toDouble();
@@ -222,8 +222,8 @@ class TvAction extends StatefulWidget {
   /// 聚焦放大档位,落在 1.05–1.1。
   static const double focusedScale = 1.06;
 
-  /// 卡片焦点环宽度(960 画布下 3,4K 面板上 12 物理像素)。
-  static const double focusRingWidth = 3;
+  /// 卡片焦点环宽度(960 画布下 4,4K 面板上 16 物理像素)。
+  static const double focusRingWidth = 4;
 
   /// 当前子树是否处在聚焦的 [TvAction] 内。
   static bool focusedOf(BuildContext context) =>

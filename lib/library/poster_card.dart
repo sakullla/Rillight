@@ -1,3 +1,4 @@
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -277,7 +278,7 @@ class _PosterYearRatingMeta extends StatelessWidget {
                 AppIcons.star,
                 fill: AppIcons.filled,
                 size: 11,
-                color: scheme.primary,
+                color: AppBrand.ratingStar(theme.brightness),
               ),
               const SizedBox(width: 2),
               Text(rating.toStringAsFixed(1), maxLines: 1, style: metaStyle),

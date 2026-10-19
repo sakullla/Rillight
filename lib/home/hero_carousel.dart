@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -121,24 +122,22 @@ class HeroRatingBadge extends StatelessWidget {
     final value = rating;
     if (value == null) return const SizedBox.shrink();
     final theme = AppUiTheme.of(context);
+    // 压在图片遮罩上时恒用深色主题的亮金,浅色纸面才用压深的金色。
+    final star = AppBrand.ratingStar(
+      onScrim ? Brightness.dark : theme.brightness,
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xffffc107).withValues(alpha: onScrim ? 0.18 : 0.14),
+        color: star.withValues(alpha: onScrim ? 0.18 : 0.14),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: const Color(0xffffc107).withValues(alpha: 0.32),
-        ),
+        border: Border.all(color: star.withValues(alpha: 0.32)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              CupertinoIcons.star_fill,
-              size: 13,
-              color: Color(0xffffc107),
-            ),
+            Icon(CupertinoIcons.star_fill, size: 13, color: star),
             const SizedBox(width: 3),
             Text(
               value.toStringAsFixed(1),

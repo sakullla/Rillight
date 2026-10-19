@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/brand.dart';
 import '../theme/tokens.dart';
 import 'theme.dart';
 
@@ -306,12 +307,22 @@ class _AppButtonState extends State<AppButton> {
         enabled &&
         customFill == null &&
         !tvFocus;
+    final brandGradient = AppBrandGradient.primaryFor(theme.brightness);
     return _ButtonFace(
       fill: fill,
+      // 静止态用完整品牌渐变;悬停/按下时首个 stop 跟随状态底色,
+      // 第二个 stop 仍是品牌渐变终点,不退回主色与次色的浑浊混色。
       gradient: brand
-          ? LinearGradient(
-              colors: [fill, Color.lerp(fill, colors.secondary, .55)!],
-            )
+          ? (fill == resting
+                ? brandGradient
+                : LinearGradient(
+                    begin: brandGradient.begin,
+                    end: brandGradient.end,
+                    colors: [
+                      fill,
+                      Color.lerp(fill, brandGradient.colors.last, .55)!,
+                    ],
+                  ))
           : null,
       foreground: _foreground(colors, enabled, tvFocus),
       side: side,
@@ -921,6 +932,23 @@ class _AppTextFieldState extends FormFieldState<String> {
     _owned?.dispose();
     super.dispose();
   }
+}
+
+/// 选中胶囊的统一表面:accentContainer 填充 + 1.5dp accent 描边。
+///
+/// 填充与描边都来自品牌强调色,不随剧照动态色变化;
+/// 选中文字用 [AppColorScheme.onPrimaryContainer]。
+abstract final class AppSelectionDecoration {
+  static const double borderWidth = 1.5;
+
+  static BoxDecoration of(
+    AppColorScheme colors, {
+    double radius = AppRadii.pill,
+  }) => BoxDecoration(
+    color: colors.primaryContainer,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: colors.primary, width: borderWidth),
+  );
 }
 
 class AppChoiceChip extends StatelessWidget {
