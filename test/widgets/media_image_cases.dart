@@ -287,9 +287,6 @@ void main() {
           ),
         ),
       );
-      final expected = (await tester.runAsync(
-        () => contentPaletteFromBytes(good, AppUiTheme.dark().colorScheme),
-      ))!;
       Future<void> verify() async {
         await tester.pumpWidget(subject());
         for (var i = 0; i < 16; i++) {
@@ -300,8 +297,13 @@ void main() {
         }
         expect(find.byType(Image), findsOneWidget);
         expect(find.byType(PosterPlaceholder), findsNothing);
-        expect(displayed.surface, expected.surface);
-        expect(displayed.surface, isNot(AppUiTheme.dark().colorScheme.surface));
+        // The canonical backdrop failed, so the fallback poster is displayed
+        // but must not choose the detail palette: only the canonical key may.
+        expect(displayed.surface, AppUiTheme.dark().colorScheme.surface);
+        expect(
+          displayed.primaryContainer,
+          AppUiTheme.dark().colorScheme.primaryContainer,
+        );
         expect(tester.takeException(), isNull);
         expect(disk.files.containsKey(badKey), isFalse);
       }

@@ -15,6 +15,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
+import 'package:rillight/app/artwork_theme_source.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
@@ -242,12 +243,16 @@ class MediaImage extends StatefulWidget {
 class _LoadedImage {
   const _LoadedImage({
     required this.bytes,
+    required this.itemId,
     required this.type,
+    required this.tag,
     required this.cacheKey,
   });
 
   final Uint8List bytes;
+  final String itemId;
   final String type;
+  final String? tag;
   final String cacheKey;
 }
 
@@ -537,7 +542,9 @@ class _MediaImageState extends State<MediaImage> {
         _knownValidation(cacheKey, bytes) == true) {
       return _LoadedImage(
         bytes: bytes,
+        itemId: candidate.itemId,
         type: candidate.type,
+        tag: candidate.tag,
         cacheKey: cacheKey,
       );
     }
@@ -804,7 +811,13 @@ class _MediaImageState extends State<MediaImage> {
       maxWidth: maxWidth,
     );
     if (!await _validate(cacheKey, bytes)) return null;
-    return _LoadedImage(bytes: bytes, type: candidate.type, cacheKey: cacheKey);
+    return _LoadedImage(
+      bytes: bytes,
+      itemId: candidate.itemId,
+      type: candidate.type,
+      tag: candidate.tag,
+      cacheKey: cacheKey,
+    );
   }
 
   bool _canRetryLoad() {
@@ -882,7 +895,9 @@ class _MediaImageState extends State<MediaImage> {
         if (!valid()) return null;
         return _LoadedImage(
           bytes: bytes,
+          itemId: candidate.itemId,
           type: candidate.type,
+          tag: candidate.tag,
           cacheKey: MediaImageCache.key(
             serverId: serverId,
             itemId: candidate.itemId,
@@ -1003,8 +1018,11 @@ class _MediaImageState extends State<MediaImage> {
         _shown = loaded;
         _failureShown = false;
         if (widget.contributesToTheme) {
-          ArtworkColorScope.maybeOf(context)
-              ?.report(widget.item.id, loaded.cacheKey, loaded.bytes);
+          ArtworkColorScope.maybeOf(context)?.report(
+            widget.item.id,
+            paletteKey(_accountScope, loaded.itemId, loaded.type, loaded.tag),
+            loaded.bytes,
+          );
         }
         return child;
       },

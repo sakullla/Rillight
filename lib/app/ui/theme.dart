@@ -328,6 +328,38 @@ class AppColorScheme {
     shadow: shadow ?? this.shadow,
     surfaceTint: surfaceTint ?? this.surfaceTint,
   );
+
+  /// Blend only the 7 fields artwork is allowed to tint. Actions, containers,
+  /// selection and text switch instantly so tinted buttons never lag a poster.
+  static AppColorScheme lerpSurfaces(
+    AppColorScheme a,
+    AppColorScheme b,
+    double t,
+  ) => a.copyWith(
+    surface: Color.lerp(a.surface, b.surface, t)!,
+    surfaceContainerLowest: Color.lerp(
+      a.surfaceContainerLowest,
+      b.surfaceContainerLowest,
+      t,
+    )!,
+    surfaceContainerLow: Color.lerp(
+      a.surfaceContainerLow,
+      b.surfaceContainerLow,
+      t,
+    )!,
+    surfaceContainer: Color.lerp(a.surfaceContainer, b.surfaceContainer, t)!,
+    surfaceContainerHigh: Color.lerp(
+      a.surfaceContainerHigh,
+      b.surfaceContainerHigh,
+      t,
+    )!,
+    surfaceContainerHighest: Color.lerp(
+      a.surfaceContainerHighest,
+      b.surfaceContainerHighest,
+      t,
+    )!,
+    surfaceBright: Color.lerp(a.surfaceBright, b.surfaceBright, t)!,
+  );
 }
 
 class AppTextTheme {

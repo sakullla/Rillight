@@ -9,6 +9,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
+import 'package:rillight/app/artwork_theme_source.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/ui/ui.dart' as app_ui;
 import 'package:rillight/media_image/media_image.dart';
@@ -24,7 +25,7 @@ void main() {
             for (final color in [
               const Color(0xffff3b30),
               const Color(0xff007aff),
-              const Color(0xff34c759),
+              const Color(0xffff00ff),
               const Color(0xffffffff),
               const Color(0xff000000),
             ])
@@ -35,13 +36,11 @@ void main() {
             await app_ui.contentPaletteFromBytes(Uint8List(0), base),
           ],
         );
-        // 海报只染表面与色调容器;主操作色保持品牌色。
-        expect(
-          schemes!.take(3).map((s) => s.primaryContainer).toSet(),
-          hasLength(3),
-        );
+        // 剧照只染 7 个表面;主色与容器保持品牌色。
+        expect(schemes!.take(3).map((s) => s.surface).toSet(), hasLength(3));
         for (final scheme in schemes) {
           expect(scheme.primary, base.primary);
+          expect(scheme.primaryContainer, base.primaryContainer);
           expect(scheme.error, base.error);
           expect(scheme.brightness, base.brightness);
           expect(_contrast(scheme.onPrimary, scheme.primary), greaterThan(4.5));
@@ -88,15 +87,20 @@ void main() {
       ),
     );
     await tester.pumpWidget(page('episode-1', 'shared'));
-    report.report('episode-1', 'shared-backdrop', bytes);
+    report.report(
+      'episode-1',
+      paletteKey(null, 'series', 'Backdrop', 'shared'),
+      bytes,
+    );
     await _settlePalette(tester);
     final resolved = scheme;
+    expect(resolved.surface, isNot(AppUiTheme.dark().colorScheme.surface));
     expect(
       resolved.primaryContainer,
-      isNot(AppUiTheme.dark().colorScheme.primaryContainer),
+      AppUiTheme.dark().colorScheme.primaryContainer,
     );
     await tester.pumpWidget(page('episode-2', 'shared'));
-    expect(scheme, resolved);
+    expect(scheme.surface, resolved.surface);
     await tester.pumpWidget(page('episode-2', 'replacement'));
     expect(scheme, AppUiTheme.dark().colorScheme);
   });
@@ -116,7 +120,12 @@ void main() {
       CupertinoTestApp(
         theme: AppUiTheme.dark(),
         home: ContentTheme(
-          item: const MediaItem(id: 'poster', name: '', type: 'Movie'),
+          item: const MediaItem(
+            id: 'poster',
+            name: '',
+            type: 'Movie',
+            backdropImageTag: 'poster-tag',
+          ),
           child: Builder(
             builder: (context) {
               builds++;
@@ -130,14 +139,19 @@ void main() {
     );
     final before = builds;
     MediaImageCache.instance.markScrollActivity();
-    report.report('poster', 'scroll-palette', red);
+    report.report(
+      'poster',
+      paletteKey(null, 'poster', 'Backdrop', 'poster-tag'),
+      red,
+    );
     await tester.pump(const Duration(milliseconds: 20));
     expect(scheme, AppUiTheme.dark().colorScheme);
     expect(builds, before);
     await _settlePalette(tester);
+    expect(scheme.surface, isNot(AppUiTheme.dark().colorScheme.surface));
     expect(
       scheme.primaryContainer,
-      isNot(AppUiTheme.dark().colorScheme.primaryContainer),
+      AppUiTheme.dark().colorScheme.primaryContainer,
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -159,7 +173,12 @@ void main() {
               : AppUiTheme.light(),
           home: CupertinoPageScaffold(
             child: ContentTheme(
-              item: const MediaItem(id: 'genre', name: '', type: 'Movie'),
+              item: const MediaItem(
+                id: 'genre',
+                name: '',
+                type: 'Movie',
+                backdropImageTag: 'genre-tag',
+              ),
               child: Builder(
                 builder: (context) {
                   report = ArtworkColorScope.maybeOf(context)!;
@@ -213,7 +232,11 @@ void main() {
         const Color(0xff34c759),
       ]) {
         final bytes = (await tester.runAsync(() => _solidPng(color)))!;
-        report.report('genre', 'genre-$brightness-$color', bytes);
+        report.report(
+          'genre',
+          paletteKey(null, 'genre', 'Backdrop', 'genre-tag'),
+          bytes,
+        );
         await _settlePalette(tester);
         final background = chipDecoration('动作冒险').color!;
         expect(background, scheme.surfaceContainerHigh);
@@ -252,6 +275,8 @@ void main() {
         );
         expect(composed.onSurface, base.onSurface);
         expect(composed.onSurfaceVariant, base.onSurfaceVariant);
+        expect(composed.primary, base.primary);
+        expect(composed.primaryContainer, base.primaryContainer);
         expect(composed.error, base.error);
         final luminances = [
           composed.onSurfaceVariant.computeLuminance(),
@@ -277,7 +302,7 @@ void main() {
         for (final color in [
           const Color(0xffff3b30),
           const Color(0xff007aff),
-          const Color(0xff34c759),
+          const Color(0xffff00ff),
           const Color(0xffffffff),
           const Color(0xff000000),
           const Color(0xff808080),
@@ -290,10 +315,7 @@ void main() {
       });
       expect(schemes!.take(3).map((s) => s.surface).toSet(), hasLength(3));
       expect(schemes.first.brightness, brightness);
-      expect(
-        schemes.first.primaryContainer.r,
-        greaterThan(schemes.first.primaryContainer.b),
-      );
+      expect(schemes.first.primaryContainer, base.primaryContainer);
       expect(schemes.first.primary, base.primary);
       expect(schemes.first.error, base.error);
       expect(schemes.first.surfaceTint, const Color(0x00000000));
@@ -338,7 +360,12 @@ void main() {
               children: [
                 Expanded(
                   child: ContentTheme(
-                    item: MediaItem(id: id, name: id, type: 'Movie'),
+                    item: MediaItem(
+                      id: id,
+                      name: id,
+                      type: 'Movie',
+                      backdropImageTag: 'tag',
+                    ),
                     child: Builder(
                       builder: (context) {
                         leftReport = ArtworkColorScope.maybeOf(context)!;
@@ -350,7 +377,12 @@ void main() {
                 ),
                 Expanded(
                   child: ContentTheme(
-                    item: const MediaItem(id: 'right', name: '', type: 'Movie'),
+                    item: const MediaItem(
+                      id: 'right',
+                      name: '',
+                      type: 'Movie',
+                      backdropImageTag: 'tag',
+                    ),
                     child: Builder(
                       builder: (context) {
                         rightReport = ArtworkColorScope.maybeOf(context)!;
@@ -365,14 +397,16 @@ void main() {
           },
         ),
       );
+      String key(String id, [String tag = 'tag']) =>
+          paletteKey(null, id, 'Backdrop', tag);
       await tester.pumpWidget(app('old', Brightness.dark));
       final stale = leftReport;
-      stale.report('old', 'account-a/old/Primary/late-tag', blue);
+      stale.report('old', key('old', 'late-tag'), blue);
       await tester.pump();
       await tester.pumpWidget(app('new', Brightness.dark));
-      stale.report('old', 'account-a/old/Primary/tag', red);
-      rightReport.report('right', 'account-a/right/Primary/tag', blue);
-      leftReport.report('new', 'account-a/new/Primary/tag', red);
+      stale.report('old', key('old'), red);
+      rightReport.report('right', key('right'), blue);
+      leftReport.report('new', key('new'), red);
       await _settlePalette(tester);
       expect(leftScheme.surface, isNot(rightScheme.surface));
       expect(leftScheme.surface, isNot(globalScheme.surface));
@@ -380,9 +414,10 @@ void main() {
       final oldLightCallback = leftReport;
       await tester.pumpWidget(app('new', Brightness.light));
       expect(leftScheme.brightness, Brightness.light);
-      expect(leftScheme.surface, AppUiTheme.light().colorScheme.surface);
-      oldLightCallback.report('new', 'account-a/new/Primary/tag', blue);
-      leftReport.report('new', 'account-a/new/Primary/new-tag', red);
+      // Mood survives a brightness switch; only the derived surfaces change.
+      expect(leftScheme.surface, isNot(AppUiTheme.light().colorScheme.surface));
+      oldLightCallback.report('new', key('new'), blue);
+      leftReport.report('new', key('new', 'new-tag'), red);
       await _settlePalette(tester);
       expect(leftScheme.brightness, Brightness.light);
       expect(
@@ -396,8 +431,8 @@ void main() {
 Future<Uint8List> _solidPng(Color color) async {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
-  canvas.drawRect(const Rect.fromLTWH(0, 0, 16, 16), Paint()..color = color);
-  final image = await recorder.endRecording().toImage(16, 16);
+  canvas.drawRect(const Rect.fromLTWH(0, 0, 32, 32), Paint()..color = color);
+  final image = await recorder.endRecording().toImage(32, 32);
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
   return data!.buffer.asUint8List();
 }

@@ -2110,18 +2110,15 @@ void main() {
 
     final phone = AppUiTheme.phoneLight().colorScheme;
     AppColorScheme themed() => AppUiTheme.of(tester.element(play)).colorScheme;
-    for (
-      var i = 0;
-      i < 20 && themed().primaryContainer == phone.primaryContainer;
-      i++
-    ) {
+    for (var i = 0; i < 20 && themed().surface == phone.surface; i++) {
       await tester.pump(const Duration(milliseconds: 50));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 10)),
       );
     }
-    // 海报取色已生效(色调容器换了),主播放钮仍是品牌色。
-    expect(themed().primaryContainer, isNot(phone.primaryContainer));
+    // 剧照只染 7 个表面;色调容器与主播放钮保持品牌色。
+    expect(themed().surface, isNot(phone.surface));
+    expect(themed().primaryContainer, phone.primaryContainer);
     expect(buttonColor(), themed().primary);
     expect(themed().primary, phone.primary);
     expect(buttonColor(), isNot(phone.inverseSurface));
