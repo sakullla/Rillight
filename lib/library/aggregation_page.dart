@@ -23,6 +23,7 @@ import '../app/mobile_chrome.dart';
 import '../app/phone_bottom_nav.dart';
 import '../app/phone_nav_style.dart';
 import '../app/presentation_environment.dart';
+import '../app/theme/brand.dart';
 import '../app/routes.dart';
 import '../app/widgets/skeleton.dart';
 import '../app/tv_top_nav.dart';
@@ -174,11 +175,9 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.65),
-        ),
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        border: Border.all(color: AppEdge.of(scheme.brightness)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(3),
@@ -223,9 +222,12 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             : scheme.onSurfaceVariant,
         backgroundColor: selected
             ? scheme.primaryContainer
-            : const Color(0x00000000),
+            : AppInk.transparent,
         side: selected
-            ? BorderSide(color: scheme.primary.withValues(alpha: 0.35))
+            ? BorderSide(
+                color: scheme.primary,
+                width: AppSelectionDecoration.borderWidth,
+              )
             : null,
         textStyle: theme.textTheme.labelLarge?.copyWith(
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -446,11 +448,9 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.65),
-        ),
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        border: Border.all(color: AppEdge.of(scheme.brightness)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(3),
@@ -497,9 +497,12 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             : scheme.onSurfaceVariant,
         backgroundColor: selected
             ? scheme.primaryContainer
-            : const Color(0x00000000),
+            : AppInk.transparent,
         side: selected
-            ? BorderSide(color: scheme.primary.withValues(alpha: 0.35))
+            ? BorderSide(
+                color: scheme.primary,
+                width: AppSelectionDecoration.borderWidth,
+              )
             : null,
         textStyle: theme.textTheme.labelLarge?.copyWith(
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -2021,7 +2024,7 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
                       key: ValueKey('phone-search-recent-$term'),
                       decoration: BoxDecoration(
                         color: scheme.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: AppSurfaceAction(

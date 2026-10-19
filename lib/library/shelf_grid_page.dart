@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
@@ -1398,7 +1399,7 @@ class _Header extends StatelessWidget {
                   key: CatalogKeys.sortBy,
                   tooltip: l10n.sortBy,
                   padding: EdgeInsets.zero,
-                  style: const AppButtonStyle(hoverColor: Color(0x00000000)),
+                  style: const AppButtonStyle(hoverColor: AppInk.transparent),
                   selected: sort,
                   onSelected: (selected) => onSort(selected),
                   items: [
@@ -1446,7 +1447,7 @@ class _Header extends StatelessWidget {
                           : l10n.filterSortDescending,
                       child: AppSurfaceAction(
                         key: const Key('catalog-grid-sort-order'),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
                         onTap: onToggleSortOrder,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -1526,25 +1527,37 @@ class _HeaderChipState extends State<_HeaderChip> {
     final rest = active
         ? scheme.primaryContainer
         : (light ? scheme.surfaceContainerLowest : scheme.surfaceContainerHigh);
+    // 选中态与筛选面板共用同一表面:容器底 + 1.5dp 强调描边。
+    final decoration = active
+        ? AppSelectionDecoration.of(scheme, radius: AppRadii.pill).copyWith(
+            color: _hovered
+                ? Color.alphaBlend(
+                    scheme.onSurface.withValues(alpha: .05),
+                    rest,
+                  )
+                : rest,
+          )
+        : BoxDecoration(
+            color: _hovered
+                ? Color.alphaBlend(
+                    scheme.onSurface.withValues(alpha: .05),
+                    rest,
+                  )
+                : rest,
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+            border: Border.all(
+              color: light
+                  ? scheme.onSurface.withValues(alpha: _hovered ? .24 : .14)
+                  : scheme.outlineVariant,
+            ),
+          );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: AnimatedContainer(
         duration: AppMotion.durationOf(context, AppMotion.fast),
         curve: AppMotion.standard,
-        decoration: BoxDecoration(
-          color: _hovered
-              ? Color.alphaBlend(scheme.onSurface.withValues(alpha: .05), rest)
-              : rest,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: active
-                ? scheme.primary
-                : (light
-                      ? scheme.onSurface.withValues(alpha: _hovered ? .24 : .14)
-                      : scheme.outlineVariant),
-          ),
-        ),
+        decoration: decoration,
         clipBehavior: Clip.antiAlias,
         child: widget.child,
       ),
@@ -1626,7 +1639,7 @@ class _FilterBar extends StatelessWidget {
             message: l10n.libraryFilter,
             child: AppSurfaceAction(
               key: gridFilterMenuKey,
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadii.pill),
               onTap: () => _openPanel(context),
               child: Padding(
                 padding: const EdgeInsets.symmetric(

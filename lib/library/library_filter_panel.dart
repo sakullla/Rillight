@@ -226,7 +226,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
         child: Container(
           decoration: BoxDecoration(
             color: scheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(AppRadii.overlay),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -352,7 +352,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: scheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
                   ),
                   child: const SizedBox(width: 36, height: 4),
                 ),
@@ -535,16 +535,21 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
             // 手机端保持原有 48 的触达区。
             minHeight: phone ? 48 : AppControlHeight.md,
           ),
-          decoration: ShapeDecoration(
-            color: selected ? scheme.primary : const Color(0x00000000),
-            shape: const StadiumBorder(),
-          ),
+          // 选中段与筛选面板其它选中态共用容器底 + 1.5dp 描边,
+          // 实心强调色只留给「应用筛选」主操作。
+          decoration: selected
+              ? AppSelectionDecoration.of(scheme, radius: AppRadii.pill)
+              : BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                ),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           alignment: Alignment.center,
           child: Text(
             label,
             style: theme.textTheme.labelLarge?.copyWith(
-              color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+              color: selected
+                  ? scheme.onPrimaryContainer
+                  : scheme.onSurfaceVariant,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             ),
           ),
