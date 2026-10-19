@@ -57,19 +57,22 @@ class _ContentThemeState extends State<ContentTheme> {
         AppUiTheme.maybeOf(context)?.brightness ?? Brightness.dark;
     final cacheKey = artworkMoodKey(key, brightness);
     final cached = ArtworkMoodCache.instance.peek(cacheKey);
-    if (cached != null) {
-      if (!identical(_mood, cached)) {
-        setState(() => _mood = cached);
-      }
-      return;
-    }
     final generation = ++_generation;
+    // Reports arrive from Image.frameBuilder while this subtree is building.
+    // A warm cache hit must therefore never call setState synchronously: that
+    // throws when the user re-enters a detail page or returns to a cached
+    // hero. Apply the mood after the frame instead, cold or warm.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || generation != _generation || _paletteKey != key) return;
-      // Displaying the artwork takes priority over optional palette extraction.
-      await MediaImageCache.instance.waitForScrollIdle();
-      if (!mounted || generation != _generation || _paletteKey != key) return;
-      final mood = await ArtworkMoodCache.instance.load(cacheKey, bytes);
+      if (cached == null) {
+        // Displaying the artwork takes priority over optional palette extraction.
+        await MediaImageCache.instance.waitForScrollIdle();
+        if (!mounted || generation != _generation || _paletteKey != key) {
+          return;
+        }
+      }
+      final mood =
+          cached ?? await ArtworkMoodCache.instance.load(cacheKey, bytes);
       if (!mounted || generation != _generation || _paletteKey != key) return;
       if (!identical(_mood, mood)) {
         setState(() => _mood = mood);

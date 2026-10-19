@@ -105,6 +105,111 @@ void main() {
     expect(scheme, AppUiTheme.dark().colorScheme);
   });
 
+  testWidgets(
+    'warm mood cache reports from frameBuilder without setState in build',
+    (tester) async {
+      // Re-entering a detail page or returning to a cached hero builds an
+      // Image with an already-decoded frame, so frameBuilder reports while the
+      // subtree is building. A warm mood hit must not call setState there.
+      ContentTheme.debugClear();
+      final bytes = (await tester.runAsync(
+        () => _solidPng(const Color(0xffff3b30)),
+      ))!;
+      const item = MediaItem(
+        id: 'movie',
+        name: '',
+        type: 'Movie',
+        backdropImageTag: 'warm',
+      );
+      final key = paletteKey(null, 'movie', 'Backdrop', 'warm');
+      late AppColorScheme scheme;
+      Widget page() => CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: ContentTheme(
+          item: item,
+          child: Builder(
+            builder: (context) {
+              scheme = AppUiTheme.of(context).colorScheme;
+              final report = ArtworkColorScope.maybeOf(context)!;
+              return Image.memory(
+                bytes,
+                width: 40,
+                height: 40,
+                frameBuilder: (context, child, frame, synchronous) {
+                  if (frame != null || synchronous) {
+                    report.report('movie', key, bytes);
+                  }
+                  return child;
+                },
+              );
+            },
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(page());
+      await _settlePalette(tester);
+      final tinted = scheme;
+      expect(tinted.surface, isNot(AppUiTheme.dark().colorScheme.surface));
+      expect(tester.takeException(), isNull);
+      expect(
+        ArtworkMoodCache.instance.peek(artworkMoodKey(key, Brightness.dark)),
+        isNotNull,
+      );
+
+      // The mood cache is warm and the decoded frame is still in the image
+      // cache, so the second entry reports synchronously during build.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(page());
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await _settlePalette(tester);
+      expect(scheme.surface, tinted.surface);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('poster bytes cannot choose the canonical backdrop mood', (
+    tester,
+  ) async {
+    // The detail page tints from the canonical backdrop only; a light-theme
+    // poster must never supply that mood even though it is the visible card.
+    ContentTheme.debugClear();
+    final red = (await tester.runAsync(
+      () => _solidPng(const Color(0xffff3b30)),
+    ))!;
+    late ArtworkColorScope report;
+    late AppColorScheme scheme;
+    await tester.pumpWidget(
+      CupertinoTestApp(
+        theme: AppUiTheme.light(),
+        home: ContentTheme(
+          item: const MediaItem(
+            id: 'movie',
+            name: '',
+            type: 'Movie',
+            backdropImageTag: 'back',
+            primaryImageTag: 'poster',
+          ),
+          child: Builder(
+            builder: (context) {
+              report = ArtworkColorScope.maybeOf(context)!;
+              scheme = AppUiTheme.of(context).colorScheme;
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    report.report('movie', paletteKey(null, 'movie', 'Primary', 'poster'), red);
+    await _settlePalette(tester);
+    expect(scheme.surface, AppUiTheme.light().colorScheme.surface);
+    report.report('movie', paletteKey(null, 'movie', 'Backdrop', 'back'), red);
+    await _settlePalette(tester);
+    expect(scheme.surface, isNot(AppUiTheme.light().colorScheme.surface));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('artwork palette waits for scrolling to become idle', (
     tester,
   ) async {

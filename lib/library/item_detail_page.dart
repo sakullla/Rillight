@@ -1482,9 +1482,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
     ];
     return ContentTheme(
-      item: AppUiTheme.of(context).brightness == Brightness.light
-          ? artwork
-          : backdrop,
+      // 详情取色始终用规范 backdrop;海报卡不参与,浅色也一样。
+      item: backdrop,
       preferBackdrop: !item.isEpisode,
       preferParentBackdrop: item.isEpisode,
       child: NotificationListener<ScrollNotification>(
@@ -2401,8 +2400,9 @@ class _DetailHeader extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final viewportHeight = MediaQuery.sizeOf(context).height;
-        final light = AppUiTheme.of(context).brightness == Brightness.light;
-        // 浅色头部不铺背景图，没有画面可看就不留半屏空白。
+        final theme = AppUiTheme.of(context);
+        final light = theme.brightness == Brightness.light;
+        // 浅色头部不铺半屏画幅，没有画面可看就不留半屏空白。
         final billboard = !item.isSeries && !light;
         final minHeight =
             heightFor(
@@ -2412,6 +2412,21 @@ class _DetailHeader extends StatelessWidget {
               episode: item.isEpisode,
             ) +
             topOverlap;
+        // The canonical theme artwork is the same image in both themes. In
+        // light it sits behind a surface wash so the reported bytes and the
+        // palette key always describe the artwork that actually painted.
+        final backdropImage = MediaImage(
+          key: const ValueKey('detail-hero'),
+          contributesToTheme: true,
+          smartCrop: true,
+          item: backdropItem ?? artworkItem ?? item,
+          preferBackdrop: !item.isEpisode,
+          preferParentBackdrop: item.isEpisode,
+          maxWidth: mediaBackdropRequestWidth(
+            layoutWidth: width,
+            devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+          ),
+        );
         return SizedBox(
           width: double.infinity,
           child: ConstrainedBox(
@@ -2421,8 +2436,27 @@ class _DetailHeader extends StatelessWidget {
               children: [
                 Positioned.fill(
                   child: light
-                      ? ColoredBox(
-                          color: AppUiTheme.of(context).scaffoldBackgroundColor,
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            backdropImage,
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    theme.scaffoldBackgroundColor.withValues(
+                                      alpha: 0.92,
+                                    ),
+                                    theme.scaffoldBackgroundColor.withValues(
+                                      alpha: 0.86,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         )
                       : BackdropScrim(
                           textBandWidthFactor: 1,
@@ -2430,20 +2464,7 @@ class _DetailHeader extends StatelessWidget {
                             AppScrim.topBandHeight,
                             topOverlap + _topBandFade,
                           ),
-                          backdrop: MediaImage(
-                            key: const ValueKey('detail-hero'),
-                            contributesToTheme: true,
-                            smartCrop: true,
-                            item: backdropItem ?? artworkItem ?? item,
-                            preferBackdrop: !item.isEpisode,
-                            preferParentBackdrop: item.isEpisode,
-                            maxWidth: mediaBackdropRequestWidth(
-                              layoutWidth: width,
-                              devicePixelRatio: MediaQuery.devicePixelRatioOf(
-                                context,
-                              ),
-                            ),
-                          ),
+                          backdrop: backdropImage,
                         ),
                 ),
                 Padding(
@@ -2593,8 +2614,7 @@ class _DetailPoster extends StatelessWidget {
           child: MediaImage(
             key: ValueKey('detail-poster-${item.id}'),
             item: item,
-            // Light detail pages display this poster instead of the backdrop.
-            contributesToTheme: light,
+            // 海报卡只作识别;氛围始终来自规范 backdrop。
             width: width,
             height: height,
             preferThumb: episode,

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/artwork_theme_source.dart';
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/media_server/models.dart';
 
 void main() {
@@ -255,7 +256,39 @@ void main() {
       expect(ref?.tag, 'parent');
     });
 
-    test('episode falls back to own backdrop then series poster', () {
+    test('episode theme artwork matches the promotional hero source', () {
+      // Heroes and detail headers never show a generated episode frame, so the
+      // mood has to follow the series poster they do show.
+      const episode = MediaItem(
+        id: 'episode',
+        name: '',
+        type: 'Episode',
+        seriesId: 'series',
+        seriesPrimaryImageTag: 'poster',
+        backdropImageTag: 'own-still',
+        primaryImageTag: 'own-poster',
+      );
+      final hero = heroArtworkSources(episode);
+      expect(hero.themeItem?.id, 'series');
+      expect(hero.themeItem?.primaryImageTag, 'poster');
+      final ref = resolveThemeArtwork(episode)!;
+      expect(ref.itemId, hero.themeItem?.id);
+      expect(ref.type, 'Primary');
+      expect(ref.tag, 'poster');
+
+      // Without promotional art the hero paints nothing; the detail header
+      // falls back to the episode's own backdrop and themes from it.
+      const noPromo = MediaItem(
+        id: 'episode',
+        name: '',
+        type: 'Episode',
+        backdropImageTag: 'own-still',
+      );
+      expect(heroArtworkSources(noPromo).isEmpty, isTrue);
+      expect(resolveThemeArtwork(noPromo)?.tag, 'own-still');
+    });
+
+    test('episode falls back to its own backdrop or the series poster', () {
       expect(
         resolveThemeArtwork(
           const MediaItem(

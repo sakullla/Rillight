@@ -9,8 +9,11 @@ import 'package:rillight/media_server/models.dart';
 /// visible or how bright the application theme is. Landscape artwork wins
 /// because the mood layer covers a wide backdrop; posters are the last resort.
 ///
-/// Episode order: parent/series backdrop, episode backdrop, series primary,
-/// episode primary. Movie/series order: own backdrop, parent backdrop, primary.
+/// Episode order: parent/series backdrop, series primary, episode backdrop,
+/// episode primary. The series poster comes before the episode's own still
+/// because [heroArtworkSources] never shows a generated episode frame; the
+/// mood must follow the promotional image both surfaces actually display.
+/// Movie/series order: own backdrop, parent backdrop, primary.
 ItemImageRef? resolveThemeArtwork(MediaItem? item, [MediaItem? series]) {
   if (item == null) return null;
   ItemImageRef? first(String? itemId, String type, String? tag) {
@@ -26,14 +29,14 @@ ItemImageRef? resolveThemeArtwork(MediaItem? item, [MediaItem? series]) {
       item.parentBackdropImageTag ?? series?.backdropImageTag,
     );
     if (parent != null) return parent;
-    final ownBackdrop = first(item.id, 'Backdrop', item.backdropImageTag);
-    if (ownBackdrop != null) return ownBackdrop;
     final seriesPoster = first(
       series?.id ?? item.seriesId,
       'Primary',
       series?.primaryImageTag ?? item.seriesPrimaryImageTag,
     );
     if (seriesPoster != null) return seriesPoster;
+    final ownBackdrop = first(item.id, 'Backdrop', item.backdropImageTag);
+    if (ownBackdrop != null) return ownBackdrop;
     return first(item.id, 'Primary', item.primaryImageTag);
   }
 
