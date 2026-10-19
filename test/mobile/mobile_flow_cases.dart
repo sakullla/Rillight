@@ -1354,6 +1354,8 @@ void main() {
         page.nextUp = const CatalogRowState(hidden: true);
         page.latestMovies = const CatalogRowState(hidden: true);
         page.latestSeries = const CatalogRowState(hidden: true);
+        // 片库列表也回来后,整页才进入空态而不是骨架。
+        page.librariesLoading = false;
       });
       await pumpTab(const PhoneHome());
       expect(find.byType(MobileEmptyState), findsOneWidget);

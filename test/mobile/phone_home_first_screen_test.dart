@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -95,6 +96,54 @@ void main() {
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
   }
+
+  testWidgets(
+    'latest rows loading keeps the skeleton instead of the empty state',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final auth = AuthController.memory();
+      final catalog = CatalogController(auth: auth);
+      addTearDown(catalog.dispose);
+      addTearDown(auth.dispose);
+      // 冷启动:续播和下一集已经回来且为空,最近入库与片库列表还在请求。
+      catalog
+        ..resume = const CatalogRowState()
+        ..nextUp = const CatalogRowState()
+        ..latestMovies = const CatalogRowState(loading: true)
+        ..latestSeries = const CatalogRowState(loading: true)
+        ..librariesLoading = false;
+
+      await tester.pumpWidget(_homeApp(catalog));
+      await tester.pump();
+
+      expect(find.byKey(MobileLoadingPlaceholder.homeKey), findsOneWidget);
+      expect(find.byType(MobileEmptyState), findsNothing);
+      expect(find.text('这个服务器还没有内容'), findsNothing);
+
+      // 最近入库返回空、片库列表仍在路上:仍然保持骨架。
+      catalog
+        ..latestMovies = const CatalogRowState()
+        ..latestSeries = const CatalogRowState()
+        ..librariesLoading = true
+        ..notifyListeners();
+      await tester.pump();
+      expect(find.byKey(MobileLoadingPlaceholder.homeKey), findsOneWidget);
+      expect(find.byType(MobileEmptyState), findsNothing);
+
+      // 全部落定且确实没有内容,才换成空态。
+      catalog
+        ..librariesLoading = false
+        ..notifyListeners();
+      await tester.pump();
+      expect(find.byType(MobileEmptyState), findsOneWidget);
+      expect(find.text('这个服务器还没有内容'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
 
 Widget _homeApp(CatalogController catalog) {

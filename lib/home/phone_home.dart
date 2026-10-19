@@ -151,7 +151,15 @@ class _PhoneHomeState extends State<PhoneHome> {
         ];
         final states = [for (final section in sections) section.state];
         final hasItems = states.any((state) => state.items.isNotEmpty);
-        final loading = states.any((state) => state.loading);
+        // 整页骨架的判断要和桌面、TV 用同一组数据:冷启动时最近入库行和
+        // 片库列表也还在路上,不能只凭续播行没回来就说「这个服务器还没有内容」。
+        final loading =
+            [
+              ...states,
+              catalog.latestMovies,
+              catalog.latestSeries,
+            ].any((state) => state.loading) ||
+            catalog.librariesLoading;
         final hasBanner =
             visible.contains(PhoneHomeSectionId.banner) &&
             PhoneHero.featuredItemsOf(catalog).isNotEmpty;
