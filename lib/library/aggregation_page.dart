@@ -1341,12 +1341,20 @@ class _AggregationSearchState extends State<_AggregationSearch> {
           ),
       ],
     );
-    return Container(
-      decoration: BoxDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 输入区与服务端筛选同属一条搜索栏:表面略高于阅读面,底边用
+        // [AppEdge] 细线收口,结果从栏下开始滚动。
+        DecoratedBox(
+          key: const Key('aggregation-search-header'),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            border: Border(
+              bottom: BorderSide(color: AppEdge.of(scheme.brightness)),
+            ),
+          ),
+          child: Padding(
             padding: EdgeInsets.fromLTRB(
               presentation.isDesktop ? AppSpacing.page + chromeLeading : 16,
               presentation.isDesktop
@@ -1405,17 +1413,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
               ],
             ),
           ),
-          if (inPlace)
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: AppDivider(
-                height: 1,
-                color: scheme.outlineVariant.withValues(alpha: 0.6),
-              ),
-            ),
-          Expanded(child: _results(context, visible)),
-        ],
-      ),
+        ),
+        Expanded(child: _results(context, visible)),
+      ],
     );
   }
 
@@ -1431,76 +1431,88 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     final showBackButton =
         (ModalRoute.of(context)?.canPop ?? false) &&
         context.findAncestorWidgetOfExactType<SearchRouteGuard>() == null;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(16, phoneTop, 8, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (showBackButton)
-                    CupertinoNavigationBarBackButton(
-                      onPressed: () => context.pop(),
-                    ),
-                  Expanded(child: _phoneSearchField(l)),
-                  if (servers.isNotEmpty) ...[
-                    const SizedBox(width: AppSpacing.xxs),
-                    AppIconButton(
-                      key: const Key('aggregation-search-filters'),
-                      tooltip: l.searchServerFilter,
-                      minimumSize: const Size(48, 48),
-                      onPressed: () =>
-                          setState(() => _filtersOpen = !_filtersOpen),
-                      icon: Icon(
-                        AppIcons.filter,
-                        fill: _filtersOpen || _servers != null
-                            ? AppIcons.filled
-                            : AppIcons.outline,
-                        color: _servers == null
-                            ? null
-                            : AppUiTheme.of(context).colorScheme.primary,
+        // 与桌面覆盖层一致:搜索栏自成一层表面,结果在其下滚动。
+        DecoratedBox(
+          key: const Key('aggregation-search-header'),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            border: Border(
+              bottom: BorderSide(color: AppEdge.of(scheme.brightness)),
+            ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, phoneTop, 8, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (showBackButton)
+                      CupertinoNavigationBarBackButton(
+                        onPressed: () => context.pop(),
                       ),
-                    ),
-                  ],
-                  if (widget.onClose != null)
-                    AppIconButton(
-                      key: SearchOverlay.closeKey,
-                      tooltip: '关闭',
-                      minimumSize: const Size(48, 48),
-                      onPressed: widget.onClose,
-                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
-                    ),
-                ],
-              ),
-              if (_filtersOpen)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, right: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final server in servers)
-                        OptionPill(
-                          key: ValueKey(
-                            'aggregation-search-server-${server.id}',
-                          ),
-                          label: server.displayName,
-                          selected:
-                              _servers == null || _servers!.contains(server.id),
-                          onPressed: () {
-                            final selected =
-                                _servers == null ||
-                                _servers!.contains(server.id);
-                            _toggleServer(servers, server.id, !selected);
-                          },
+                    Expanded(child: _phoneSearchField(l)),
+                    if (servers.isNotEmpty) ...[
+                      const SizedBox(width: AppSpacing.xxs),
+                      AppIconButton(
+                        key: const Key('aggregation-search-filters'),
+                        tooltip: l.searchServerFilter,
+                        minimumSize: const Size(48, 48),
+                        onPressed: () =>
+                            setState(() => _filtersOpen = !_filtersOpen),
+                        icon: Icon(
+                          AppIcons.filter,
+                          fill: _filtersOpen || _servers != null
+                              ? AppIcons.filled
+                              : AppIcons.outline,
+                          color: _servers == null
+                              ? null
+                              : AppUiTheme.of(context).colorScheme.primary,
                         ),
+                      ),
                     ],
-                  ),
+                    if (widget.onClose != null)
+                      AppIconButton(
+                        key: SearchOverlay.closeKey,
+                        tooltip: '关闭',
+                        minimumSize: const Size(48, 48),
+                        onPressed: widget.onClose,
+                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                      ),
+                  ],
                 ),
-            ],
+                if (_filtersOpen)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, right: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final server in servers)
+                          OptionPill(
+                            key: ValueKey(
+                              'aggregation-search-server-${server.id}',
+                            ),
+                            label: server.displayName,
+                            selected:
+                                _servers == null ||
+                                _servers!.contains(server.id),
+                            onPressed: () {
+                              final selected =
+                                  _servers == null ||
+                                  _servers!.contains(server.id);
+                              _toggleServer(servers, server.id, !selected);
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
         Expanded(child: _phoneSearchBody(context, visible)),
@@ -1592,9 +1604,15 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         ),
         children: [
           if (failed > 0 && failed < visible.length)
-            _PhoneStatusNote(message: l.aggregationPartialFailure),
+            _SearchStatusNote(
+              key: const Key('aggregation-search-status'),
+              message: l.aggregationPartialFailure,
+            ),
           if (failed == visible.length && visible.isNotEmpty)
-            _PhoneStatusNote(message: l.aggregationAllFailed),
+            _SearchStatusNote(
+              key: const Key('aggregation-search-status'),
+              message: l.aggregationAllFailed,
+            ),
           for (final row in visible)
             Padding(
               key: ValueKey('aggregation-search-${row.serverId}'),
@@ -1747,13 +1765,12 @@ class _AggregationSearchState extends State<_AggregationSearch> {
           if (failed > 0)
             Padding(
               padding: EdgeInsets.fromLTRB(gutter, 8 * s, gutter, 0),
-              child: Text(
-                failed == visible.length
+              child: _SearchStatusNote(
+                key: const Key('aggregation-search-status'),
+                message: failed == visible.length
                     ? l.aggregationAllFailed
                     : l.aggregationPartialFailure,
-                style: TextStyle(
-                  color: AppUiTheme.of(context).colorScheme.error,
-                ),
+                scale: s,
               ),
             ),
           for (final row in visible)
@@ -1879,13 +1896,29 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         ),
         if (failed > 0 && failed < visible.length)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(l.aggregationPartialFailure),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              0,
+              AppSpacing.page,
+              0,
+            ),
+            child: _SearchStatusNote(
+              key: const Key('aggregation-search-status'),
+              message: l.aggregationPartialFailure,
+            ),
           ),
         if (failed == visible.length && visible.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(l.aggregationAllFailed),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              0,
+              AppSpacing.page,
+              0,
+            ),
+            child: _SearchStatusNote(
+              key: const Key('aggregation-search-status'),
+              message: l.aggregationAllFailed,
+            ),
           ),
         for (final row in visible)
           scopeServerPosters(
@@ -2161,40 +2194,48 @@ class _PhoneNotice extends StatelessWidget {
 }
 
 /// 部分失败或全部失败的说明，贴在仍保留的结果上面。
-class _PhoneStatusNote extends StatelessWidget {
-  const _PhoneStatusNote({required this.message});
+///
+/// 桌面、手机与 TV 共用同一张错误卡:图标、错误容器底色与圆角不随端变化,
+/// TV 只按 960 画布放大图标与间距。
+class _SearchStatusNote extends StatelessWidget {
+  const _SearchStatusNote({super.key, required this.message, this.scale = 1});
 
   final String message;
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = AppUiTheme.of(context).colorScheme;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final body = theme.textTheme.bodyMedium;
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: EdgeInsets.only(bottom: AppSpacing.md * scale),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.errorContainer,
-          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderRadius: BorderRadius.circular(AppRadii.md * scale),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm,
+          padding: EdgeInsets.symmetric(
+            horizontal: AppSpacing.md * scale,
+            vertical: AppSpacing.sm * scale,
           ),
           child: Row(
             children: [
               Icon(
                 AppIcons.error,
                 fill: AppIcons.filled,
-                size: 18,
+                size: 18 * scale,
                 color: scheme.onErrorContainer,
               ),
-              const SizedBox(width: AppSpacing.sm),
+              SizedBox(width: AppSpacing.sm * scale),
               Expanded(
                 child: Text(
                   message,
-                  style: AppUiTheme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: scheme.onErrorContainer),
+                  style: body?.copyWith(
+                    color: scheme.onErrorContainer,
+                    fontSize: (body.fontSize ?? 14) * scale,
+                  ),
                 ),
               ),
             ],
