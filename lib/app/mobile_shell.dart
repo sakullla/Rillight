@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -160,7 +161,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
       _ => '',
     };
     final onBar = homeImmersive && chrome.brightness == Brightness.dark
-        ? const Color(0xFFFFFFFF)
+        ? AppInk.white
         : chrome.colorScheme.onSurface;
     return PopScope(
       canPop: _index == 0,
@@ -289,7 +290,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
               child: PhoneTopBar.shell(
                 key: MobileShell.topBarKey,
                 backgroundColor: homeImmersive
-                    ? const Color(0x00000000)
+                    ? AppInk.transparent
                     : chrome.scaffoldBackgroundColor,
                 foregroundColor: onBar,
                 height: barBody,
@@ -314,7 +315,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
                                   color: homeImmersive
-                                      ? const Color(0x29FFFFFF)
+                                      ? AppInk.white.withValues(alpha: 0.16)
                                       : scheme.outlineVariant,
                                   width: 0.8,
                                 ),
@@ -332,7 +333,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                         CupertinoIcons.dot_radiowaves_right,
                                         size: 14,
                                         color: homeImmersive
-                                            ? const Color(0xFFFFFFFF)
+                                            ? AppInk.white
                                             : scheme.primary,
                                       )
                                     else
@@ -354,7 +355,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                         style: theme.textTheme.labelMedium
                                             ?.copyWith(
                                               color: homeImmersive
-                                                  ? const Color(0xFFFFFFFF)
+                                                  ? AppInk.white
                                                   : scheme.onSurface,
                                               fontWeight: FontWeight.w600,
                                               height: 1.15,
@@ -366,7 +367,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                       CupertinoIcons.chevron_down,
                                       size: 11,
                                       color: homeImmersive
-                                          ? const Color(0xCCFFFFFF)
+                                          ? AppInk.white.withValues(alpha: 0.8)
                                           : scheme.onSurfaceVariant,
                                     ),
                                   ],
@@ -466,7 +467,7 @@ class _MineAvatar extends StatelessWidget {
           ),
           border: Border.all(
             color: immersive
-                ? const Color(0x66FFFFFF)
+                ? AppInk.white.withValues(alpha: 0.4)
                 : scheme.onSurface.withValues(alpha: .16),
           ),
         ),

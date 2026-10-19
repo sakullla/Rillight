@@ -44,6 +44,9 @@ class PhoneBottomNav extends StatelessWidget {
 
   static const int _itemCount = 3;
 
+  /// 选中 pill 的定位与外观;测试按此 key 校验强调色边界。
+  static const pillKey = Key('phone-nav-selected-pill');
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
@@ -100,16 +103,20 @@ class PhoneBottomNav extends StatelessWidget {
               return Stack(
                 children: [
                   AnimatedPositioned(
-                    duration: AppMotion.durationOf(context, AppMotion.normal),
+                    duration: AppMotion.durationOf(
+                      context,
+                      AppMobileNav.pillDuration,
+                    ),
                     curve: AppMotion.standard,
                     left: index * itemWidth + AppSpacing.xs,
                     top: AppSpacing.xs,
                     width: itemWidth - AppSpacing.xs * 2,
                     height: contentHeight - AppSpacing.xs * 2,
                     child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(AppRadii.pill),
+                      key: PhoneBottomNav.pillKey,
+                      decoration: AppSelectionDecoration.of(
+                        scheme,
+                        radius: AppMobileNav.pillRadius,
                       ),
                     ),
                   ),
