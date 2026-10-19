@@ -1266,6 +1266,39 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileMine => '我的';
 
   @override
+  String get homeFailureEmptyTitle => '这个服务器还没有内容';
+
+  @override
+  String get homeFailureEmptyWithLibrariesMessage =>
+      '媒体库里还没有可显示的影片或剧集。可以先去媒体库整理内容，或刷新后重试。';
+
+  @override
+  String get homeFailureEmptyNoLibrariesMessage =>
+      '服务器还没有提供任何媒体库。可以切换服务器，或刷新后重试。';
+
+  @override
+  String get homeFailureDeviceOfflineTitle => '设备未联网';
+
+  @override
+  String get homeFailureDeviceOfflineMessage =>
+      '当前设备没有可用的网络连接，请检查 Wi-Fi 或网线后重试。';
+
+  @override
+  String get homeFailureServerOfflineTitle => '无法连接服务器';
+
+  @override
+  String get homeFailureServerOfflineMessage => '服务器没有响应，请确认服务器已启动，或切换到其他线路。';
+
+  @override
+  String get homeFailureLoadFailedTitle => '内容加载失败';
+
+  @override
+  String get homeFailureGoToLibraries => '去媒体库';
+
+  @override
+  String get homeFailureSwitchRoute => '更换线路';
+
+  @override
   String get mobileEmpty => '暂无内容';
 
   @override

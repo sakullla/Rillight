@@ -48,6 +48,30 @@ class _PhoneHomeState extends State<PhoneHome> {
   PhoneHomeSectionController? _sections;
   var _loadedServerId = '';
 
+  /// 空库的「去媒体库」:直接打开第一个库;没有库时回退到服务器列表。
+  void _openLibraries(CatalogController catalog) {
+    if (catalog.libraries.isEmpty) {
+      context.push('/servers');
+      return;
+    }
+    context.push(AppRoutes.library(catalog.libraries.first.id));
+  }
+
+  /// 当前服务器是否配置了多条线路,决定服务器离线时显示「更换线路」。
+  bool _hasAlternateLine() {
+    final auth = AuthScope.maybeOf(context);
+    final serverId = auth?.session?.server.id;
+    if (auth == null || serverId == null) {
+      return false;
+    }
+    for (final saved in auth.savedServers) {
+      if (saved.id == serverId) {
+        return saved.lines.length > 1;
+      }
+    }
+    return false;
+  }
+
   PhoneHomeSectionController get _controller =>
       _sections ?? PhoneHomeSectionController.app();
 
@@ -131,16 +155,9 @@ class _PhoneHomeState extends State<PhoneHome> {
         final hasBanner =
             visible.contains(PhoneHomeSectionId.banner) &&
             PhoneHero.featuredItemsOf(catalog).isNotEmpty;
-        final wantsLibraries =
-            catalog.libraries.isNotEmpty &&
-            visible.any(
-              (id) =>
-                  id == PhoneHomeSectionId.libraries ||
-                  PhoneHomeSectionId.libraryIdOf(id) != null,
-            );
-        // 片库入口单独不算「已有海报」。可见行仍在安静重试时要保持整页骨架，
-        // 重试耗尽后仍是整页失败，而不是被片库入口换成空页。
-        final pageHasContent = hasItems || hasBanner || wantsLibraries;
+        // 片库入口不算「已有海报」:库存在但没有任何影片时,仍要给出
+        // 明确的空库状态和「去媒体库」入口。
+        final pageHasContent = hasItems || hasBanner;
         MediaServerException? firstError;
         for (final state in states) {
           if (state.error != null) {
@@ -154,17 +171,39 @@ class _PhoneHomeState extends State<PhoneHome> {
         if (!hasItems && !hasBanner && firstError == null && loading) {
           body = const MobileLoadingPlaceholder.home();
         } else if (!hasItems && !hasBanner && firstError != null && !loading) {
+          final hasLibraries = catalog.libraries.isNotEmpty;
+          final copy = homeFailureCopyForError(
+            l10n,
+            firstError,
+            hasLibraries: hasLibraries,
+            hasAlternateLine: _hasAlternateLine(),
+          );
           body = MobileFailureState(
-            message: catalogFailureMessage(l10n, firstError),
+            title: copy.title,
+            message: copy.message,
+            primaryLabel: copy.primaryLabel,
             onRetry: () {
               catalog.reloadHomeRows();
             },
+            secondaryLabel: copy.secondaryLabel,
+            onSecondary: () => context.push('/servers'),
           );
         } else if (!pageHasContent && !loading) {
+          final hasLibraries = catalog.libraries.isNotEmpty;
+          final copy = homeFailureCopy(
+            l10n,
+            HomeFailureKind.empty,
+            hasLibraries: hasLibraries,
+          );
           body = MobileEmptyState(
-            message: l10n.mobileEmpty,
-            actionLabel: l10n.mobileRefresh,
-            onAction: () {
+            title: copy.title,
+            message: copy.message,
+            primaryLabel: copy.primaryLabel,
+            onPrimary: hasLibraries
+                ? () => _openLibraries(catalog)
+                : () => context.push('/servers'),
+            secondaryLabel: copy.secondaryLabel,
+            onSecondary: () {
               catalog.reload(showCachedFirst: false);
             },
           );

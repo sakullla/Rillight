@@ -780,9 +780,28 @@ class TvFrame extends StatelessWidget {
 }
 
 class TvFailure extends StatelessWidget {
-  const TvFailure({super.key, required this.error, required this.retry});
+  const TvFailure({
+    super.key,
+    required this.error,
+    required this.retry,
+    this.title,
+    this.message,
+    this.secondaryLabel,
+    this.onSecondary,
+  });
   final MediaServerException error;
   final VoidCallback retry;
+
+  /// 可选的加粗标题,用于区分设备离线与服务器离线。
+  final String? title;
+
+  /// 可选的原因文案;未设置时沿用 [embyFailureMessage] 的细节。
+  final String? message;
+
+  /// 可选的次操作,例如切换服务器。
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
+
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
@@ -799,14 +818,34 @@ class TvFailure extends StatelessWidget {
           ),
           SizedBox(width: 10 * s),
           Flexible(
-            child: Text(
-              embyFailureMessage(AppLocalizations.of(context), error),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (title != null)
+                  Text(
+                    title!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                Text(
+                  message ??
+                      embyFailureMessage(AppLocalizations.of(context), error),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
             ),
           ),
           SizedBox(width: 14 * s),
+          if (secondaryLabel != null && onSecondary != null) ...[
+            TvAction(onPressed: onSecondary, child: Text(secondaryLabel!)),
+            SizedBox(width: 8 * s),
+          ],
           TvAction(
             autofocus: true,
             leading: const Icon(AppIcons.refresh, fill: AppIcons.filled),
@@ -819,22 +858,45 @@ class TvFailure extends StatelessWidget {
   }
 }
 
-/// 居中的空态/提示:图标 + 一句话 + 可选操作。
+/// 居中的空态/提示:图标 + 标题 + 一句话 + 可选主/次操作。
 class TvEmptyState extends StatelessWidget {
   const TvEmptyState({
     super.key,
     required this.message,
+    this.title,
     this.icon = AppIcons.empty,
     this.action,
+    this.primaryLabel,
+    this.onPrimary,
+    this.secondaryLabel,
+    this.onSecondary,
   });
   final String message;
+
+  /// 可选的加粗标题,用于区分空库的不同原因。
+  final String? title;
   final IconData icon;
+
+  /// 自定义主操作。设置后不再使用 [primaryLabel]。
   final Widget? action;
+  final String? primaryLabel;
+  final VoidCallback? onPrimary;
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
+    final primary =
+        action ??
+        (primaryLabel != null && onPrimary != null
+            ? TvAction(
+                autofocus: true,
+                onPressed: onPrimary,
+                child: Text(primaryLabel!),
+              )
+            : null);
     return Center(
       child: Padding(
         padding: EdgeInsets.all(24 * s),
@@ -848,6 +910,16 @@ class TvEmptyState extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
             SizedBox(height: 12 * s),
+            if (title != null) ...[
+              Text(
+                title!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              SizedBox(height: 6 * s),
+            ],
             Text(
               message,
               textAlign: TextAlign.center,
@@ -855,7 +927,11 @@ class TvEmptyState extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            if (action != null) ...[SizedBox(height: 16 * s), action!],
+            if (primary != null) ...[SizedBox(height: 16 * s), primary],
+            if (secondaryLabel != null && onSecondary != null) ...[
+              SizedBox(height: 8 * s),
+              TvAction(onPressed: onSecondary, child: Text(secondaryLabel!)),
+            ],
           ],
         ),
       ),

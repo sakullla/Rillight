@@ -7,10 +7,13 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
+import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
+import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_hero.dart';
@@ -140,6 +143,30 @@ class _HomePageState extends State<HomePage> {
             )
           : const Icon(CupertinoIcons.arrow_clockwise),
     );
+  }
+
+  /// 空库的「去媒体库」:直接打开第一个库;没有库时回退到服务器列表。
+  void _openLibraries(CatalogController catalog) {
+    if (catalog.libraries.isEmpty) {
+      context.push('/servers');
+      return;
+    }
+    context.push(AppRoutes.library(catalog.libraries.first.id));
+  }
+
+  /// 当前服务器是否配置了多条线路,决定服务器离线时显示「更换线路」。
+  bool _hasAlternateLine(BuildContext context) {
+    final auth = AuthScope.maybeOf(context);
+    final serverId = auth?.session?.server.id;
+    if (auth == null || serverId == null) {
+      return false;
+    }
+    for (final saved in auth.savedServers) {
+      if (saved.id == serverId) {
+        return saved.lines.length > 1;
+      }
+    }
+    return false;
   }
 
   @override
@@ -299,6 +326,60 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
         ];
+        // 整页空态/失败态:没有任何可展示内容时,用同一套分类与文案替代
+        // 逐行错误,避免桌面只剩几行重复的「加载失败」。
+        final contentStates = <CatalogRowState>[
+          resumeState,
+          nextUpState,
+          catalog.latestMovies,
+          catalog.latestSeries,
+        ];
+        final hasContent = contentStates.any((state) => state.items.isNotEmpty);
+        final anyLoading =
+            contentStates.any((state) => state.loading) ||
+            catalog.librariesLoading;
+        MediaServerException? firstError;
+        for (final state in contentStates) {
+          if (state.error != null) {
+            firstError = state.error;
+            break;
+          }
+        }
+        Widget? statusView;
+        if (sectionChildren.isEmpty || (!hasContent && !anyLoading)) {
+          final hasLibraries = catalog.libraries.isNotEmpty;
+          final copy = firstError == null
+              ? homeFailureCopy(
+                  l10n,
+                  HomeFailureKind.empty,
+                  hasLibraries: hasLibraries,
+                )
+              : homeFailureCopyForError(
+                  l10n,
+                  firstError,
+                  hasLibraries: hasLibraries,
+                  hasAlternateLine: _hasAlternateLine(context),
+                );
+          statusView = firstError == null
+              ? AppEmptyView(
+                  title: copy.title,
+                  message: copy.message,
+                  primaryLabel: copy.primaryLabel,
+                  onPrimary: hasLibraries
+                      ? () => _openLibraries(catalog)
+                      : () => context.push('/servers'),
+                  secondaryLabel: copy.secondaryLabel,
+                  onSecondary: _refresh,
+                )
+              : AppErrorView(
+                  title: copy.title,
+                  message: copy.message,
+                  primaryLabel: copy.primaryLabel,
+                  onPrimary: catalog.reloadHomeRows,
+                  secondaryLabel: copy.secondaryLabel,
+                  onSecondary: () => context.push('/servers'),
+                );
+        }
         return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             if (notification.depth == 0 &&
@@ -318,20 +399,17 @@ class _HomePageState extends State<HomePage> {
                 bottom: AppSpacing.xxl,
                 top: bannerLeads ? 0 : overlap + AppSpacing.xl,
               ),
-              itemCount: sectionChildren.isEmpty ? 1 : sectionChildren.length,
+              itemCount: statusView != null
+                  ? 1
+                  : sectionChildren.isEmpty
+                  ? 1
+                  : sectionChildren.length,
               itemBuilder: (context, index) {
+                if (statusView != null) {
+                  return statusView;
+                }
                 if (sectionChildren.isEmpty) {
-                  return SizedBox(
-                    width: double.infinity,
-                    child: AppEmptyView(
-                      message: l10n.browseEmpty,
-                      action: _refreshAction(
-                        l10n,
-                        refreshHost,
-                        _RefreshSlot.libraries,
-                      ),
-                    ),
-                  );
+                  return const SizedBox.shrink();
                 }
                 return sectionChildren[index];
               },

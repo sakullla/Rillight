@@ -6,13 +6,29 @@ class AppErrorView extends StatelessWidget {
   const AppErrorView({
     super.key,
     required this.message,
+    this.title,
     this.onRetry,
     this.compact = false,
+    this.primaryLabel,
+    this.onPrimary,
+    this.secondaryLabel,
+    this.onSecondary,
   });
 
   final String message;
+
+  /// 可选的加粗标题,用于区分离线与服务器故障。
+  final String? title;
   final VoidCallback? onRetry;
   final bool compact;
+
+  /// 主操作文案与回调;未设置时沿用 [onRetry] 和“重试”。
+  final String? primaryLabel;
+  final VoidCallback? onPrimary;
+
+  /// 次操作(文字按钮),例如切换服务器。
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +62,10 @@ class AppErrorView extends StatelessWidget {
       );
     }
 
+    final primary = onPrimary ?? onRetry;
+    final hasPrimary = primary != null;
+    final textTheme = AppUiTheme.of(context).textTheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
@@ -73,18 +93,38 @@ class AppErrorView extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
+              if (title != null) ...[
+                Text(
+                  title!,
+                  textAlign: TextAlign.center,
+                  style: textTheme.titleMedium?.copyWith(
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+              ],
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: AppUiTheme.of(context).textTheme.bodyLarge
-                    ?.copyWith(color: colorScheme.onSurface, height: 1.45),
+                style: textTheme.bodyLarge?.copyWith(
+                  color: colorScheme.onSurface,
+                  height: 1.45,
+                ),
               ),
-              if (onRetry != null) ...[
+              if (hasPrimary) ...[
                 const SizedBox(height: AppSpacing.md),
                 AppButton(
-                  onPressed: onRetry,
+                  onPressed: primary,
                   variant: AppButtonVariant.filled,
-                  child: Text(l10n.retry),
+                  child: Text(primaryLabel ?? l10n.retry),
+                ),
+              ],
+              if (secondaryLabel != null && onSecondary != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                AppButton(
+                  onPressed: onSecondary,
+                  variant: AppButtonVariant.plain,
+                  child: Text(secondaryLabel!),
                 ),
               ],
             ],

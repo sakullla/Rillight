@@ -10,8 +10,10 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
+import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/featured_items.dart';
@@ -55,6 +57,30 @@ class _TvHomePageState extends State<TvHomePage> {
   var _loadedServerId = '';
 
   TvSectionController get _sections => TvSectionController.app();
+
+  /// 空库的「去媒体库」:直接打开第一个库;没有库时回退到服务器列表。
+  void _openLibraries(CatalogController catalog) {
+    if (catalog.libraries.isEmpty) {
+      context.push('/servers');
+      return;
+    }
+    context.push(AppRoutes.library(catalog.libraries.first.id));
+  }
+
+  /// 当前服务器是否配置了多条线路,决定服务器离线时显示「更换线路」。
+  bool _hasAlternateLine() {
+    final auth = AuthScope.maybeOf(context);
+    final serverId = auth?.session?.server.id;
+    if (auth == null || serverId == null) {
+      return false;
+    }
+    for (final saved in auth.savedServers) {
+      if (saved.id == serverId) {
+        return saved.lines.length > 1;
+      }
+    }
+    return false;
+  }
 
   @override
   void didChangeDependencies() {
@@ -201,6 +227,67 @@ class _TvHomePageState extends State<TvHomePage> {
               _TvLibraryLatest(library: librariesById[libraryId]!),
           ],
         ];
+        // 整页空态/失败态:没有任何媒体内容时用与桌面、手机相同的分类和
+        // 文案,而不是只留一行通用错误。
+        final contentStates = <CatalogRowState>[
+          resumeState,
+          nextUpState,
+          c.latestMovies,
+          c.latestSeries,
+        ];
+        final hasItems = contentStates.any((state) => state.items.isNotEmpty);
+        final anyLoading =
+            contentStates.any((state) => state.loading) || c.librariesLoading;
+        MediaServerException? firstError;
+        for (final state in contentStates) {
+          if (state.error != null) {
+            firstError = state.error;
+            break;
+          }
+        }
+        if (!hasItems && !anyLoading) {
+          final hasLibraries = c.libraries.isNotEmpty;
+          final copy = firstError == null
+              ? homeFailureCopy(
+                  l,
+                  HomeFailureKind.empty,
+                  hasLibraries: hasLibraries,
+                )
+              : homeFailureCopyForError(
+                  l,
+                  firstError,
+                  hasLibraries: hasLibraries,
+                  hasAlternateLine: _hasAlternateLine(),
+                );
+          sectionChildren
+            ..clear()
+            ..add(
+              SizedBox(
+                height: 260 * s,
+                child: firstError == null
+                    ? TvEmptyState(
+                        title: copy.title,
+                        message: copy.message,
+                        primaryLabel: copy.primaryLabel,
+                        onPrimary: hasLibraries
+                            ? () => _openLibraries(c)
+                            : () => context.push('/servers'),
+                        secondaryLabel: copy.secondaryLabel,
+                        onSecondary: () {
+                          c.reload(showCachedFirst: false);
+                        },
+                      )
+                    : TvFailure(
+                        error: firstError,
+                        title: copy.title,
+                        message: copy.message,
+                        retry: c.reloadHomeRows,
+                        secondaryLabel: copy.secondaryLabel,
+                        onSecondary: () => context.push('/servers'),
+                      ),
+              ),
+            );
+        }
         final heroFirst = sectionChildren.firstOrNull is _TvFeatured;
         _reportHero(heroFirst);
         return ListView(

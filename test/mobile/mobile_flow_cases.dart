@@ -1129,7 +1129,7 @@ void main() {
       navigator.pop();
       await settle(tester);
       await login(tester, server);
-      expect(find.text('暂无内容'), findsOneWidget);
+      expect(find.text('这个服务器还没有内容'), findsOneWidget);
       expect(find.byType(MobileEmptyState), findsOneWidget);
       expect(find.byType(MobileFailureState), findsNothing);
       expect(find.text('重试'), findsNothing);
@@ -1357,7 +1357,7 @@ void main() {
       });
       await pumpTab(const PhoneHome());
       expect(find.byType(MobileEmptyState), findsOneWidget);
-      expect(find.text('暂无内容'), findsOneWidget);
+      expect(find.text('这个服务器还没有内容'), findsOneWidget);
       expect(find.text('加载失败'), findsNothing);
       expect(find.text('重试'), findsNothing);
       expect(
@@ -1372,7 +1372,7 @@ void main() {
       });
       await tester.pump();
       expect(find.byType(MobileFailureState), findsOneWidget);
-      expect(find.text('加载失败'), findsOneWidget);
+      expect(find.text('内容加载失败'), findsOneWidget);
       expect(find.text('暂无内容'), findsNothing);
       final retry = find.byKey(MobileFailureState.retryKey);
       expect(tester.getSize(retry).shortestSide, greaterThanOrEqualTo(48));

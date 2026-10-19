@@ -2476,6 +2476,66 @@ abstract class AppLocalizations {
   /// **'我的'**
   String get mobileMine;
 
+  /// No description provided for @homeFailureEmptyTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个服务器还没有内容'**
+  String get homeFailureEmptyTitle;
+
+  /// No description provided for @homeFailureEmptyWithLibrariesMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'媒体库里还没有可显示的影片或剧集。可以先去媒体库整理内容，或刷新后重试。'**
+  String get homeFailureEmptyWithLibrariesMessage;
+
+  /// No description provided for @homeFailureEmptyNoLibrariesMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器还没有提供任何媒体库。可以切换服务器，或刷新后重试。'**
+  String get homeFailureEmptyNoLibrariesMessage;
+
+  /// No description provided for @homeFailureDeviceOfflineTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'设备未联网'**
+  String get homeFailureDeviceOfflineTitle;
+
+  /// No description provided for @homeFailureDeviceOfflineMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前设备没有可用的网络连接，请检查 Wi-Fi 或网线后重试。'**
+  String get homeFailureDeviceOfflineMessage;
+
+  /// No description provided for @homeFailureServerOfflineTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法连接服务器'**
+  String get homeFailureServerOfflineTitle;
+
+  /// No description provided for @homeFailureServerOfflineMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器没有响应，请确认服务器已启动，或切换到其他线路。'**
+  String get homeFailureServerOfflineMessage;
+
+  /// No description provided for @homeFailureLoadFailedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'内容加载失败'**
+  String get homeFailureLoadFailedTitle;
+
+  /// No description provided for @homeFailureGoToLibraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'去媒体库'**
+  String get homeFailureGoToLibraries;
+
+  /// No description provided for @homeFailureSwitchRoute.
+  ///
+  /// In zh, this message translates to:
+  /// **'更换线路'**
+  String get homeFailureSwitchRoute;
+
   /// No description provided for @mobileEmpty.
   ///
   /// In zh, this message translates to:

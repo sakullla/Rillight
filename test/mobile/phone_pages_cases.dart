@@ -1227,7 +1227,7 @@ void main() {
         await tester.pump();
 
         expect(find.byType(MobileEmptyState), findsOneWidget);
-        expect(find.text('暂无内容'), findsOneWidget);
+        expect(find.text('这个服务器还没有内容'), findsOneWidget);
         expect(find.text('刷新'), findsOneWidget);
         expect(find.byType(MobileFailureState), findsNothing);
         expect(
@@ -1237,7 +1237,8 @@ void main() {
         // 下拉刷新容器保留。
         expect(find.byType(AppRefresh), findsOneWidget);
 
-        await tester.tap(find.byKey(MobileEmptyState.actionKey));
+        // 主操作现在去媒体库/切换服务器,刷新退到次操作;这里验证刷新仍留在空态。
+        await tester.tap(find.text('刷新'));
         await tester.pump();
         expect(find.byType(MobileEmptyState), findsOneWidget);
         expect(tester.takeException(), isNull);

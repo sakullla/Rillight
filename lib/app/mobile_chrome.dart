@@ -484,26 +484,52 @@ class _RailLoading extends StatelessWidget {
   }
 }
 
-/// 没有内容：一句话，外加刷新这一种下一步。
+/// 没有内容：标题、原因，外加主/次下一步。
 class MobileEmptyState extends StatelessWidget {
   const MobileEmptyState({
     super.key,
     required this.message,
+    this.title,
     this.actionLabel,
     this.onAction,
+    this.primaryLabel,
+    this.onPrimary,
+    this.secondaryLabel,
+    this.onSecondary,
   });
 
   static const Key stateKey = Key('mobile-empty-state');
   static const Key actionKey = Key('mobile-empty-action');
 
   final String message;
+
+  /// 可选的加粗标题,用于区分空库的不同原因。
+  final String? title;
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// 主操作(填充按钮),优先于 [actionLabel]。
+  final String? primaryLabel;
+  final VoidCallback? onPrimary;
+
+  /// 次操作(文字按钮)。
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final action = actionLabel != null && onAction != null
+    final textTheme = AppUiTheme.of(context).textTheme;
+    final hasPrimary = primaryLabel != null && onPrimary != null;
+    final action = hasPrimary
+        ? AppButton(
+            key: actionKey,
+            style: AppButtonStyle(minimumSize: _minHit),
+            onPressed: onPrimary,
+            variant: AppButtonVariant.filled,
+            child: Text(primaryLabel!),
+          )
+        : actionLabel != null && onAction != null
         ? AppButton(
             key: actionKey,
             style: AppButtonStyle(minimumSize: _minHit),
@@ -538,15 +564,36 @@ class MobileEmptyState extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
+              if (title != null) ...[
+                Text(
+                  title!,
+                  textAlign: TextAlign.center,
+                  style: textTheme.titleMedium?.copyWith(
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+              ],
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: AppUiTheme.of(context).textTheme.bodyLarge
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: textTheme.bodyLarge?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
               if (action != null) ...[
                 const SizedBox(height: AppSpacing.md),
                 action,
+              ],
+              if (secondaryLabel != null && onSecondary != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                AppButton(
+                  key: const Key('mobile-empty-secondary'),
+                  style: AppButtonStyle(minimumSize: _minHit),
+                  onPressed: onSecondary,
+                  variant: AppButtonVariant.plain,
+                  child: Text(secondaryLabel!),
+                ),
               ],
             ],
           ),
@@ -556,24 +603,38 @@ class MobileEmptyState extends StatelessWidget {
   }
 }
 
-/// 请求失败：另一句话，并给出重试。
+/// 请求失败：标题、原因、重试，以及可选的切换入口。
 class MobileFailureState extends StatelessWidget {
   const MobileFailureState({
     super.key,
     required this.message,
     required this.onRetry,
+    this.title,
+    this.primaryLabel,
+    this.onPrimary,
+    this.secondaryLabel,
+    this.onSecondary,
   });
 
   static const Key stateKey = Key('mobile-failure-state');
   static const Key retryKey = Key('mobile-failure-retry');
+  static const Key secondaryKey = Key('mobile-failure-secondary');
 
   final String message;
   final VoidCallback onRetry;
+
+  /// 可选的加粗标题,用于区分设备离线与服务器离线。
+  final String? title;
+  final String? primaryLabel;
+  final VoidCallback? onPrimary;
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = AppUiTheme.of(context).colorScheme;
+    final textTheme = AppUiTheme.of(context).textTheme;
     return Semantics(
       key: stateKey,
       container: true,
@@ -600,19 +661,39 @@ class MobileFailureState extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
+              if (title != null) ...[
+                Text(
+                  title!,
+                  textAlign: TextAlign.center,
+                  style: textTheme.titleMedium?.copyWith(
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+              ],
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: AppUiTheme.of(context).textTheme.bodyLarge,
+                style: textTheme.bodyLarge,
               ),
               const SizedBox(height: AppSpacing.md),
               AppButton(
                 key: retryKey,
                 style: AppButtonStyle(minimumSize: _minHit),
-                onPressed: onRetry,
+                onPressed: onPrimary ?? onRetry,
                 variant: AppButtonVariant.filled,
-                child: Text(l10n.retry),
+                child: Text(primaryLabel ?? l10n.retry),
               ),
+              if (secondaryLabel != null && onSecondary != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                AppButton(
+                  key: secondaryKey,
+                  style: AppButtonStyle(minimumSize: _minHit),
+                  onPressed: onSecondary,
+                  variant: AppButtonVariant.plain,
+                  child: Text(secondaryLabel!),
+                ),
+              ],
             ],
           ),
         ),
