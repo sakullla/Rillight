@@ -1,4 +1,5 @@
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/search/search_page.dart';
@@ -44,11 +45,7 @@ class SearchOverlayBarrier extends StatelessWidget {
           opacity: visible ? 1 : 0,
           duration: AppMotion.durationOf(context, AppMotion.fast),
           curve: AppMotion.standard,
-          child: SizedBox.expand(
-            child: ColoredBox(
-              color: const Color(0xff000000).withValues(alpha: dim),
-            ),
-          ),
+          child: SizedBox.expand(child: ColoredBox(color: AppInk.scrim(dim))),
         ),
       ),
     );
@@ -90,9 +87,9 @@ class SearchOverlay extends StatelessWidget {
         bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClose},
         child: Focus(
           autofocus: true,
-          child: Container(
-            decoration: BoxDecoration(color: theme.colorScheme.surface),
+          child: ColoredBox(
             key: overlayKey,
+            color: theme.colorScheme.surface,
             child: Padding(
               padding: EdgeInsets.only(
                 left: leading + AppSpacing.page,

@@ -96,67 +96,91 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final scheme = AppUiTheme.of(context).colorScheme;
     final c = _controller!;
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.xs,
-            AppSpacing.md,
+        // 输入区与服务端筛选同属一条搜索栏,底边细线把结果滚动面分开。
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            border: Border(
+              bottom: BorderSide(color: AppEdge.of(scheme.brightness)),
+            ),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: AppTextField(
-                  key: const Key('mobile-search-field'),
-                  controller: _text,
-                  focusNode: _focus,
-                  textInputAction: TextInputAction.search,
-                  scrollPadding: const EdgeInsets.all(20),
-                  onSubmitted: (_) => _submit(),
-                  onChanged: _onChanged,
-                  placeholder: l.searchHint,
-                  prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
-                  suffix: ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: _text,
-                    builder: (context, value, _) => Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (value.text.isNotEmpty)
-                          AppIconButton(
-                            key: const Key('mobile-search-clear'),
-                            tooltip: '删除',
-                            onPressed: () {
-                              _text.clear();
-                              _onChanged('');
-                              _focus.requestFocus();
-                            },
-                            icon: const Icon(
-                              AppIcons.close,
-                              fill: AppIcons.filled,
-                            ),
-                          ),
-                        AppIconButton(
-                          tooltip: l.search,
-                          onPressed: _submit,
-                          icon: const Icon(
-                            AppIcons.forward,
-                            fill: AppIcons.filled,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.xs,
+                  AppSpacing.md,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: AppTextField(
+                        key: const Key('mobile-search-field'),
+                        controller: _text,
+                        focusNode: _focus,
+                        textInputAction: TextInputAction.search,
+                        scrollPadding: const EdgeInsets.all(20),
+                        onSubmitted: (_) => _submit(),
+                        onChanged: _onChanged,
+                        placeholder: l.searchHint,
+                        prefix: const Icon(
+                          AppIcons.search,
+                          fill: AppIcons.filled,
+                        ),
+                        suffix: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _text,
+                          builder: (context, value, _) => Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (value.text.isNotEmpty)
+                                AppIconButton(
+                                  key: const Key('mobile-search-clear'),
+                                  tooltip: '删除',
+                                  onPressed: () {
+                                    _text.clear();
+                                    _onChanged('');
+                                    _focus.requestFocus();
+                                  },
+                                  icon: const Icon(
+                                    AppIcons.close,
+                                    fill: AppIcons.filled,
+                                  ),
+                                ),
+                              AppIconButton(
+                                tooltip: l.search,
+                                onPressed: _submit,
+                                icon: const Icon(
+                                  AppIcons.forward,
+                                  fill: AppIcons.filled,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                    CatalogFilterButton(watch: c.watch, onChanged: c.setWatch),
+                  ],
                 ),
               ),
-              CatalogFilterButton(watch: c.watch, onChanged: c.setWatch),
+              if (c.watch != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                  child: CatalogWatchChip(
+                    watch: c.watch!,
+                    onClear: () => c.setWatch(null),
+                  ),
+                ),
             ],
           ),
         ),
-        if (c.watch != null)
-          CatalogWatchChip(watch: c.watch!, onClear: () => c.setWatch(null)),
         Expanded(
           child: ListenableBuilder(
             listenable: c,
@@ -334,26 +358,62 @@ class _PageFailure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     return Semantics(
       container: true,
       liveRegion: true,
       child: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(message),
-            const SizedBox(height: 8),
-            AppButton(
-              key: retryKey,
-              style: AppButtonStyle(
-                minimumSize: const Size(AppSpacing.huge, AppSpacing.huge),
-              ),
-              onPressed: onRetry,
-              variant: AppButtonVariant.filled,
-              child: Text(l.retry),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(color: AppEdge.of(scheme.brightness)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  AppIcons.error,
+                  fill: AppIcons.filled,
+                  size: 20,
+                  color: scheme.error,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        message,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      AppButton(
+                        key: retryKey,
+                        style: AppButtonStyle(
+                          minimumSize: const Size(
+                            AppSpacing.huge,
+                            AppSpacing.huge,
+                          ),
+                        ),
+                        onPressed: onRetry,
+                        variant: AppButtonVariant.outlined,
+                        child: Text(l.retry),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

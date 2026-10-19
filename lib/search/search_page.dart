@@ -155,6 +155,7 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final scheme = AppUiTheme.of(context).colorScheme;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final embedded = widget.trailing != null;
     final field = ConstrainedBox(
@@ -220,42 +221,63 @@ class _SearchPageState extends State<SearchPage> {
         ],
       ),
     );
+    // 输入区与服务端筛选同属一条搜索栏:表面比阅读面略高一层,底边用
+    // [AppEdge] 细线收口,结果从栏下开始滚动。
+    final header = DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(
+          bottom: BorderSide(color: AppEdge.of(scheme.brightness)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              embedded ? 0 : AppSpacing.md,
+              embedded
+                  ? AppSpacing.xs
+                  : AppSpacing.xl +
+                        (context.findAncestorWidgetOfExactType<AppShell>() !=
+                                null
+                            ? AppShell.topBarHeight
+                            : 0),
+              embedded ? 0 : AppSpacing.md,
+              AppSpacing.md,
+            ),
+            child: embedded
+                ? Row(
+                    children: [
+                      const SizedBox(width: 48),
+                      Expanded(child: Center(child: field)),
+                      widget.trailing!,
+                    ],
+                  )
+                : Center(child: field),
+          ),
+          if (_search.watch != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: CatalogWatchChip(
+                watch: _search.watch!,
+                onClear: () => _search.setWatch(null),
+              ),
+            ),
+        ],
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            embedded ? 0 : AppSpacing.md,
-            embedded
-                ? AppSpacing.xs
-                : AppSpacing.xl +
-                      (context.findAncestorWidgetOfExactType<AppShell>() != null
-                          ? AppShell.topBarHeight
-                          : 0),
-            embedded ? 0 : AppSpacing.md,
-            AppSpacing.md,
-          ),
-          child: embedded
-              ? Row(
-                  children: [
-                    const SizedBox(width: 48),
-                    Expanded(child: Center(child: field)),
-                    widget.trailing!,
-                  ],
-                )
-              : Center(child: field),
-        ),
-        if (_search.watch != null)
-          CatalogWatchChip(
-            watch: _search.watch!,
-            onClear: () => _search.setWatch(null),
-          ),
+        header,
         Expanded(child: _buildBody(l10n, screenWidth)),
       ],
     );
   }
 
   Widget _buildBody(AppLocalizations l10n, double screenWidth) {
+    final scheme = AppUiTheme.of(context).colorScheme;
     if (_search.refreshingFirstPage && _items.isEmpty) {
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -345,8 +367,10 @@ class _SearchPageState extends State<SearchPage> {
                       itemCount: _items.length + (_loadingMore ? 1 : 0),
                       itemBuilder: (context, index) {
                         if (index >= _items.length) {
-                          return const Center(
-                            child: CupertinoActivityIndicator(),
+                          return Center(
+                            child: CupertinoActivityIndicator(
+                              color: scheme.primary,
+                            ),
                           );
                         }
                         final item = _items[index];
