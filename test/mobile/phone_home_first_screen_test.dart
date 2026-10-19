@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
@@ -10,6 +12,7 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
 
 import '../helpers/cupertino_test_app.dart';
@@ -139,6 +142,67 @@ void main() {
         ..notifyListeners();
       await tester.pump();
       expect(find.byType(MobileEmptyState), findsOneWidget);
+      expect(find.text('这个服务器还没有内容'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'latest row failures classify the whole page while resume rows are empty',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final auth = AuthController.memory();
+      final catalog = CatalogController(auth: auth);
+      addTearDown(catalog.dispose);
+      addTearDown(auth.dispose);
+      // 续播和下一集都空:最近入库行的失败仍应给出整页失败,而不是「空库」。
+      catalog
+        ..resume = const CatalogRowState()
+        ..nextUp = const CatalogRowState()
+        ..latestMovies = CatalogRowState(
+          error: MediaServerException(
+            MediaServerFailureKind.unreachable,
+            cause: const OSError('network down', 101),
+          ),
+        )
+        ..latestSeries = const CatalogRowState(hidden: true)
+        ..librariesLoading = false;
+
+      await tester.pumpWidget(_homeApp(catalog));
+      await tester.pump();
+
+      expect(find.byType(MobileFailureState), findsOneWidget);
+      expect(find.byType(MobileEmptyState), findsNothing);
+      expect(find.text('设备未联网'), findsOneWidget);
+      expect(find.text('这个服务器还没有内容'), findsNothing);
+      expect(find.text('重试'), findsOneWidget);
+
+      // 服务器拒绝连接:同一位置换成服务器离线文案。
+      catalog
+        ..latestMovies = CatalogRowState(
+          error: MediaServerException(
+            MediaServerFailureKind.unreachable,
+            cause: const OSError('connection refused', 61),
+          ),
+        )
+        ..notifyListeners();
+      await tester.pump();
+      expect(find.byType(MobileFailureState), findsOneWidget);
+      expect(find.text('无法连接服务器'), findsOneWidget);
+      expect(find.byType(MobileEmptyState), findsNothing);
+
+      // 最近入库落定、确实没有内容且没有片库时,才回到空态。
+      catalog
+        ..latestMovies = const CatalogRowState()
+        ..librariesLoading = false
+        ..notifyListeners();
+      await tester.pump();
+      expect(find.byType(MobileEmptyState), findsOneWidget);
+      expect(find.byType(MobileFailureState), findsNothing);
       expect(find.text('这个服务器还没有内容'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

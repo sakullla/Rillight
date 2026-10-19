@@ -150,15 +150,18 @@ class _PhoneHomeState extends State<PhoneHome> {
             if (byId[id] != null) byId[id]!,
         ];
         final states = [for (final section in sections) section.state];
-        final hasItems = states.any((state) => state.items.isNotEmpty);
-        // 整页骨架的判断要和桌面、TV 用同一组数据:冷启动时最近入库行和
-        // 片库列表也还在路上,不能只凭续播行没回来就说「这个服务器还没有内容」。
+        // 整页判定要和桌面、TV 用同一组数据:续播和下一集之外,最近入库的
+        // 两行同样证明服务器有内容,也可能是整页失败的来源。
+        final contentStates = [
+          ...states,
+          catalog.latestMovies,
+          catalog.latestSeries,
+        ];
+        final hasItems = contentStates.any((state) => state.items.isNotEmpty);
+        // 冷启动时最近入库行和片库列表也还在路上,不能只凭续播行没回来
+        // 就说「这个服务器还没有内容」。
         final loading =
-            [
-              ...states,
-              catalog.latestMovies,
-              catalog.latestSeries,
-            ].any((state) => state.loading) ||
+            contentStates.any((state) => state.loading) ||
             catalog.librariesLoading;
         final hasBanner =
             visible.contains(PhoneHomeSectionId.banner) &&
@@ -167,7 +170,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         // 明确的空库状态和「去媒体库」入口。
         final pageHasContent = hasItems || hasBanner;
         MediaServerException? firstError;
-        for (final state in states) {
+        for (final state in contentStates) {
           if (state.error != null) {
             firstError = state.error;
             break;
