@@ -51,7 +51,6 @@ class NextEpisodeCard extends StatelessWidget {
             ? constraints.maxWidth.clamp(0.0, 440.0).toDouble()
             : 440.0;
         final showThumb = width >= 310;
-        const ink = Color(0xEB151822);
         final radius = BorderRadius.circular(AppRadii.lg);
         return SizedBox(
           width: width,
@@ -59,14 +58,17 @@ class NextEpisodeCard extends StatelessWidget {
             key: PlayerKeys.nextEpisode,
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
-              color: ink,
+              color: scheme.surfaceContainerHigh.withValues(alpha: .94),
               borderRadius: radius,
-              border: Border.all(color: const Color(0x29FFFFFF), width: 1),
-              boxShadow: const [
+              border: Border.all(
+                color: AppEdge.of(theme.brightness, strong: true),
+                width: 1,
+              ),
+              boxShadow: [
                 BoxShadow(
-                  color: Color(0x66000000),
+                  color: scheme.scrim.withValues(alpha: .4),
                   blurRadius: 20,
-                  offset: Offset(0, 8),
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -82,7 +84,9 @@ class NextEpisodeCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(AppRadii.md),
                             border: Border.all(
-                              color: const Color(0x24FFFFFF),
+                              color: CupertinoColors.white.withValues(
+                                alpha: .14,
+                              ),
                               width: 0.8,
                             ),
                           ),
@@ -128,7 +132,9 @@ class NextEpisodeCard extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: theme.textTheme.labelSmall?.copyWith(
-                                      color: const Color(0xCCFFFFFF),
+                                      color: scheme.onSurface.withValues(
+                                        alpha: .8,
+                                      ),
                                       fontSize: 11.5,
                                       height: 1.2,
                                       fontFeatures: const [
@@ -145,7 +151,7 @@ class NextEpisodeCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleSmall?.copyWith(
-                                color: CupertinoColors.white,
+                                color: scheme.onSurface,
                                 fontSize: 14,
                                 height: 1.25,
                                 fontWeight: FontWeight.w600,
@@ -185,12 +191,14 @@ class NextEpisodeCard extends StatelessWidget {
                             ? l10n.nextEpisodeKeepWatching
                             : l10n.nextEpisodeStay,
                         onPressed: controller.cancelNextEpisode,
-                        style: const AppButtonStyle(
-                          foregroundColor: Color(0xCCFFFFFF),
-                          minimumSize: Size(40, 40),
-                          fixedSize: Size(40, 40),
+                        style: AppButtonStyle(
+                          foregroundColor: CupertinoColors.white.withValues(
+                            alpha: .8,
+                          ),
+                          minimumSize: const Size(40, 40),
+                          fixedSize: const Size(40, 40),
                           padding: EdgeInsets.zero,
-                          shape: CircleBorder(),
+                          shape: const CircleBorder(),
                         ),
                         icon: const Icon(
                           AppIcons.close,
@@ -211,7 +219,9 @@ class NextEpisodeCard extends StatelessWidget {
                           ),
                     height: 3,
                     color: scheme.primary,
-                    backgroundColor: const Color(0x26FFFFFF),
+                    backgroundColor: CupertinoColors.white.withValues(
+                      alpha: .15,
+                    ),
                   ),
               ],
             ),

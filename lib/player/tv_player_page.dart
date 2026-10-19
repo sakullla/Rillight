@@ -1228,7 +1228,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       ? '${AppLocalizations.of(context).playerRemainingClock(_time(c.duration - position < Duration.zero ? Duration.zero : c.duration - position))}  /  ${_time(c.duration)}'
                       : _time(c.duration),
                   style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
-                    color: const Color(0xb3ffffff),
+                    color: CupertinoColors.white.withValues(alpha: .70),
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
@@ -1330,7 +1330,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 c.isPlaying ? AppIcons.play : AppIcons.pause,
                                 fill: AppIcons.filled,
                                 size: 16 * s,
-                                color: const Color(0xb3ffffff),
+                                color: CupertinoColors.white.withValues(
+                                  alpha: .70,
+                                ),
                               ),
                               SizedBox(width: 6 * s),
                               Flexible(
@@ -1354,7 +1356,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                           key: const Key('tv-player-network-speed'),
                           bytesPerSecond: c.cacheSpeedBytesPerSec,
                           textStyle: theme.textTheme.labelMedium,
-                          color: const Color(0xb3ffffff),
+                          color: CupertinoColors.white.withValues(alpha: .70),
                         ),
                       ),
                     ),
@@ -1758,17 +1760,19 @@ class _TvPlaybackActionState extends State<_TvPlaybackAction> {
               color: widget.subtle
                   ? (focused
                         ? CupertinoColors.white.withValues(alpha: .12)
-                        : const Color(0x00000000))
+                        : CupertinoColors.transparent)
                   : focused
                   ? CupertinoColors.white
                   : CupertinoColors.black.withValues(alpha: .34),
               border: Border.all(
                 color: widget.subtle && focused
                     ? CupertinoColors.white
-                    : const Color(0x00000000),
+                    : CupertinoColors.transparent,
                 width: 2 * s,
               ),
-              borderRadius: BorderRadius.circular(widget.subtle ? 12 * s : 999),
+              borderRadius: BorderRadius.circular(
+                widget.subtle ? AppRadii.md * s : AppRadii.pill,
+              ),
             ),
             child: IconTheme.merge(
               data: IconThemeData(color: foreground, size: 20 * s),

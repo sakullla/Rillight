@@ -10,6 +10,13 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
+// 播放器固定深色：已播品牌粉、缓冲品牌青、底轨中性表面。
+Color get _played => AppPalette.darkTones.accent;
+// 品牌青 55% 叠在 surfaceHigh 上，按 8 位色深取整后的实际像素值。
+const Color _buffered = Color(0xFF50859C);
+Color get _track => AppPalette.darkTones.surfaceHigh;
+Color get _outline => AppPalette.darkTones.base;
+
 void main() {
   test('byte coverage keeps real gaps and clips invalid offsets', () {
     final coverage = BufferedByteCoverage(
@@ -320,19 +327,16 @@ void main() {
                             ? 1 - fraction
                             : fraction))
                 .round();
-        expect(
-          pixels.at(x(0.1), 40),
-          CupertinoColors.white,
-        ); // Played beats cache.
-        expect(pixels.at(x(0.4), 40), const Color(0xff697783));
-        expect(pixels.at(x(0.6), 40), const Color(0xff363c44)); // Real gap.
-        expect(pixels.at(x(0.8), 40), const Color(0xff697783));
-        expect(pixels.at(x(0.95), 40), const Color(0xff363c44));
-        expect(pixels.at(x(0.69), 40), const Color(0xff363c44));
-        expect(pixels.at(x(0.71), 40), const Color(0xff697783));
-        expect(pixels.at(x(0.89), 40), const Color(0xff697783));
-        expect(pixels.at(x(0.91), 40), const Color(0xff363c44));
-        expect(pixels.at(x(0.4), 37), const Color(0xff111820));
+        expect(pixels.at(x(0.1), 40), _played); // Played beats cache.
+        expect(pixels.at(x(0.4), 40), _buffered);
+        expect(pixels.at(x(0.6), 40), _track); // Real gap.
+        expect(pixels.at(x(0.8), 40), _buffered);
+        expect(pixels.at(x(0.95), 40), _track);
+        expect(pixels.at(x(0.69), 40), _track);
+        expect(pixels.at(x(0.71), 40), _buffered);
+        expect(pixels.at(x(0.89), 40), _buffered);
+        expect(pixels.at(x(0.91), 40), _track);
+        expect(pixels.at(x(0.4), 37), _outline);
         // The thumb extends beyond the track, and cache cannot cover its center.
         expect(pixels.at(x(0.25), 40), CupertinoColors.white);
         expect(pixels.at(x(0.25), 35), CupertinoColors.white);
@@ -348,9 +352,9 @@ void main() {
         snapshot = _pixelSnapshot(unknownReason: 'unmapped');
         await showTrack();
         final unknown = (await tester.runAsync(() => _capture(boundaryKey)))!;
-        expect(unknown.at(x(0.4), 40), const Color(0xff363c44));
-        expect(unknown.at(x(0.8), 40), const Color(0xff363c44));
-        expect(unknown.at(x(0.1), 40), CupertinoColors.white);
+        expect(unknown.at(x(0.4), 40), _track);
+        expect(unknown.at(x(0.8), 40), _track);
+        expect(unknown.at(x(0.1), 40), _played);
       });
     }
   }
@@ -377,10 +381,10 @@ void main() {
       ),
     );
     final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
-    expect(pixels.at(30, 3), CupertinoColors.white);
-    expect(pixels.at(120, 3), const Color(0xff697783));
-    expect(pixels.at(180, 3), const Color(0xff363c44));
-    expect(pixels.at(240, 3), const Color(0xff697783));
+    expect(pixels.at(30, 3), _played);
+    expect(pixels.at(120, 3), _buffered);
+    expect(pixels.at(180, 3), _track);
+    expect(pixels.at(240, 3), _buffered);
     expect(
       tester
           .widget<Semantics>(
@@ -435,10 +439,10 @@ void main() {
           ),
         );
         final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
-        expect(pixels.at(30, 3), CupertinoColors.white);
-        expect(pixels.at(90, 3), const Color(0xff363c44));
-        expect(pixels.at(120, 3), const Color(0xff697783));
-        expect(pixels.at(240, 3), const Color(0xff363c44));
+        expect(pixels.at(30, 3), _played);
+        expect(pixels.at(90, 3), _track);
+        expect(pixels.at(120, 3), _buffered);
+        expect(pixels.at(240, 3), _track);
       },
     );
   }
@@ -493,16 +497,10 @@ void main() {
       final thumbX = (15 + seconds / 2).round();
       expect(pixels.at(thumbX, 16), CupertinoColors.white);
       expect(pixels.at(thumbX, 20), CupertinoColors.white);
-      expect(
-        pixels.at(thumbX + 10, 20),
-        seconds == 91 ? const Color(0xff697783) : const Color(0xff363c44),
-      );
-      expect(pixels.at(80, 20), const Color(0xff697783));
-      expect(
-        pixels.at(150, 20),
-        seconds == 91 ? const Color(0xff697783) : const Color(0xff363c44),
-      );
-      if (seconds == 91) expect(pixels.at(30, 20), CupertinoColors.white);
+      expect(pixels.at(thumbX + 10, 20), seconds == 91 ? _buffered : _track);
+      expect(pixels.at(80, 20), _buffered);
+      expect(pixels.at(150, 20), seconds == 91 ? _buffered : _track);
+      if (seconds == 91) expect(pixels.at(30, 20), _played);
     }
   });
 }

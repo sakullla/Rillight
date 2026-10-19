@@ -153,7 +153,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                       },
                       child: Container(
                         decoration: BoxDecoration(
-                          color: const Color(0x00000000),
+                          color: CupertinoColors.transparent,
                         ),
                         child: ListenableBuilder(
                           listenable: widget.controller,
@@ -266,45 +266,52 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           selected: selected,
           child: Semantics(
             selected: selected,
-            child: AppButton(
-              key: info.$3,
-              onPressed: () => setState(() => _section = key),
-              style: AppButtonStyle(
-                minimumSize: Size(rail ? double.infinity : 0, 44),
-                foregroundColor: selected
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-                backgroundColor: selected
-                    ? scheme.primaryContainer
-                    : const Color(0x00000000),
-                shape: const StadiumBorder(),
-                side: BorderSide.none,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                textStyle: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: rail ? MainAxisSize.max : MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: Icon(info.$2, fill: AppIcons.filled, size: 20),
+            child: DecoratedBox(
+              decoration: selected
+                  ? AppSelectionDecoration.of(scheme)
+                  : const BoxDecoration(),
+              child: AppButton(
+                key: info.$3,
+                onPressed: () => setState(() => _section = key),
+                style: AppButtonStyle(
+                  minimumSize: Size(rail ? double.infinity : 0, 44),
+                  foregroundColor: selected
+                      ? scheme.onPrimaryContainer
+                      : scheme.onSurfaceVariant,
+                  backgroundColor: CupertinoColors.transparent,
+                  shape: const StadiumBorder(),
+                  side: BorderSide.none,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  textStyle: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
-                  const SizedBox(width: 8),
-                  if (rail)
-                    Expanded(
-                      child: Text(
+                ),
+                child: Row(
+                  mainAxisSize: rail ? MainAxisSize.max : MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Icon(info.$2, fill: AppIcons.filled, size: 20),
+                    ),
+                    const SizedBox(width: 8),
+                    if (rail)
+                      Expanded(
+                        child: Text(
+                          info.$1,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.start,
+                        ),
+                      )
+                    else
+                      Text(
                         info.$1,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.start,
                       ),
-                    )
-                  else
-                    Text(info.$1, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

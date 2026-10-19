@@ -548,7 +548,7 @@ class PlayerPageState extends State<PlayerPage> {
             onFullScreen: current.window.setFullScreen,
             child: CupertinoPageScaffold(
               backgroundColor: _nativePresentation?.value == true
-                  ? const Color(0x00000000)
+                  ? CupertinoColors.transparent
                   : CupertinoColors.black,
               child: Listener(
                 behavior: HitTestBehavior.translucent,
@@ -990,9 +990,10 @@ class _PlayerChromeBar extends StatelessWidget {
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w700,
                                     height: 1.2,
-                                    shadows: const [
+                                    shadows: [
                                       Shadow(
-                                        color: Color(0x66000000),
+                                        color: theme.colorScheme.scrim
+                                            .withValues(alpha: .4),
                                         blurRadius: 6,
                                       ),
                                     ],
@@ -1149,7 +1150,9 @@ class _PlaybackEndedOverlay extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.xxl),
               child: Container(
                 key: PlayerKeys.playbackEnded,
-                decoration: BoxDecoration(color: const Color(0x00000000)),
+                decoration: const BoxDecoration(
+                  color: CupertinoColors.transparent,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1295,23 +1298,23 @@ class _SkipSegmentButton extends StatelessWidget {
         key: const Key('player-skip-segment'),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: const Color(0xEB151822),
-          borderRadius: BorderRadius.circular(999),
+          color: scheme.surfaceContainerHighest.withValues(alpha: .94),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
           border: Border.all(
             color: scheme.primary.withValues(alpha: 0.55),
             width: 1.2,
           ),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
-              color: Color(0x66000000),
+              color: scheme.scrim.withValues(alpha: .4),
               blurRadius: 18,
-              offset: Offset(0, 6),
+              offset: const Offset(0, 6),
             ),
           ],
         ),
         child: AppSurfaceAction(
           onTap: () => unawaited(controller.skipCurrentSegment()),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 7, 16, 7),
             child: Row(
@@ -1784,14 +1787,14 @@ class _DanmakuMatchChip extends StatelessWidget {
         kind: LiquidGlassKind.pill,
         child: Container(
           key: DanmakuKeys.matchChip,
-          decoration: BoxDecoration(color: const Color(0x00000000)),
+          decoration: const BoxDecoration(color: CupertinoColors.transparent),
           child: AppSurfaceAction(
             onTap: () {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 onSearch();
               });
             },
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadii.pill),
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: AppSpacing.md,
@@ -1853,7 +1856,9 @@ class _DanmakuSourceBanner extends StatelessWidget {
             ),
             child: Container(
               key: DanmakuKeys.sourceBanner,
-              decoration: BoxDecoration(color: const Color(0x00000000)),
+              decoration: const BoxDecoration(
+                color: CupertinoColors.transparent,
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

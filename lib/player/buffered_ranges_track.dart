@@ -200,7 +200,7 @@ class _PlayerSliderState extends State<PlayerSlider> {
                       focused: _focused,
                       enabled: _enabled,
                       unity: widget.unityFraction,
-                      color: widget.activeColor ?? CupertinoColors.white,
+                      color: widget.activeColor ?? AppPalette.darkTones.accent,
                       thumbColor: widget.thumbColor ?? CupertinoColors.white,
                     ),
                     child: const SizedBox.expand(),
@@ -376,8 +376,8 @@ class BufferedRangesProgressIndicator extends StatelessWidget {
   );
 }
 
-// Opaque colors keep the three states distinct over bright and dark video.
-// The dark outline also keeps the white played track visible on bright frames.
+// 播放器固定深色主题：已播品牌粉、缓冲品牌青，底轨用中性墨色。
+// 不透明段保证在亮/暗画面上三种状态仍可区分。
 void _paintTrack(
   Canvas canvas,
   Rect rect, {
@@ -387,10 +387,17 @@ void _paintTrack(
   required TextDirection textDirection,
 }) {
   final shape = RRect.fromRectAndRadius(rect, Radius.circular(rect.height / 2));
-  canvas.drawRRect(shape.inflate(1), Paint()..color = const Color(0xff111820));
+  final tones = AppPalette.darkTones;
+  // 底轨保持不透明，亮画面上也能看清；缓冲段用品牌青半透明叠在底轨上。
+  final trackBase = tones.surfaceHigh;
+  final buffered = Color.alphaBlend(
+    tones.secondary.withValues(alpha: .55),
+    trackBase,
+  );
+  canvas.drawRRect(shape.inflate(1), Paint()..color = tones.base);
   canvas.save();
   canvas.clipRRect(shape);
-  canvas.drawRect(rect, Paint()..color = const Color(0xff363c44));
+  canvas.drawRect(rect, Paint()..color = trackBase);
 
   void segment(double start, double end, Color color) {
     if (end <= start) return;
@@ -414,7 +421,7 @@ void _paintTrack(
       segment(
         (range.start.inMicroseconds / total).clamp(0.0, 1.0),
         (range.end.inMicroseconds / total).clamp(0.0, 1.0),
-        const Color(0xff697783),
+        buffered,
       );
     }
   }
@@ -424,12 +431,12 @@ void _paintTrack(
       segment(
         (range.start / coverage.totalBytes).clamp(0.0, 1.0),
         (range.end / coverage.totalBytes).clamp(0.0, 1.0),
-        const Color(0xff697783),
+        buffered,
       );
     }
   }
   // Played coverage takes precedence; cache never paints over the thumb.
-  segment(0, value.clamp(0.0, 1.0), CupertinoColors.white);
+  segment(0, value.clamp(0.0, 1.0), tones.accent);
   canvas.restore();
 }
 

@@ -2072,7 +2072,7 @@ Future<void> runPlayerWindow({String? argumentFallback}) async {
 Future<void> _runPreparedPlayer(PlayerProcessProtocol protocol) async {
   // Rasterize offscreen with the normal renderer (including Impeller). No
   // player/controller or credentials exist until a user requests playback.
-  runApp(const ColoredBox(color: Color(0xFF000000)));
+  runApp(const ColoredBox(color: CupertinoColors.black));
   await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
   await protocol.write('ready');
   while (true) {

@@ -30,7 +30,9 @@ class PlaybackEndedPanel extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return ColoredBox(
-      color: const Color(0xdd000000),
+      color: scheme.scrim.withValues(
+        alpha: AppScrim.of(context, AppScrim.playerPanel),
+      ),
       child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -39,7 +41,11 @@ class PlaybackEndedPanel extends StatelessWidget {
               constraints: BoxConstraints(maxWidth: tv ? 760 : 480),
               child: Container(
                 key: PlayerKeys.playbackEnded,
-                decoration: BoxDecoration(color: scheme.surfaceContainerLow),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(AppRadii.overlay),
+                  border: Border.all(color: AppEdge.of(theme.brightness)),
+                ),
                 child: Padding(
                   padding: EdgeInsets.all(tv ? 32 : 20),
                   child: Column(

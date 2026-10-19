@@ -187,13 +187,13 @@ Future<int?> _androidSdkInt() async {
 
 final AppButtonStyle _phoneChromeButton = AppButtonStyle(
   foregroundColor: CupertinoColors.white,
-  backgroundColor: const Color(0x33FFFFFF),
+  backgroundColor: CupertinoColors.white.withValues(alpha: .20),
   minimumSize: const Size(48, 48),
   padding: EdgeInsets.zero,
   shape: const CircleBorder(),
 );
 
-const Color _phoneSecondaryFill = Color(0x29FFFFFF);
+final Color _phoneSecondaryFill = CupertinoColors.white.withValues(alpha: .16);
 
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
   double? _seek;
@@ -786,7 +786,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       tooltip: tooltip,
       onPressed: _controller.loading ? null : () => unawaited(action()),
       icon: icon,
-      style: const AppButtonStyle(
+      style: AppButtonStyle(
         foregroundColor: CupertinoColors.white,
         backgroundColor: _phoneSecondaryFill,
         shape: CircleBorder(),
@@ -1724,7 +1724,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       useRootNavigator: false,
       barrierDismissible: true,
       barrierLabel: '关闭',
-      barrierColor: const Color(0x8a000000),
+      barrierColor: playerTheme.colorScheme.scrim.withValues(
+        alpha: AppScrim.barrier,
+      ),
       transitionDuration: AppMotion.durationOf(context),
       pageBuilder: (context, animation, secondaryAnimation) => themes.wrap(
         AppUiTheme(

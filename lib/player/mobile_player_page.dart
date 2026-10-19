@@ -1084,12 +1084,12 @@ class _PhoneSkipSegmentButton extends StatelessWidget {
         : l.skipIntro;
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: const [
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x66000000),
+            color: scheme.scrim.withValues(alpha: .4),
             blurRadius: 18,
-            offset: Offset(0, 6),
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -1098,7 +1098,9 @@ class _PhoneSkipSegmentButton extends StatelessWidget {
         onPressed: () => unawaited(controller.skipCurrentSegment()),
         style: AppButtonStyle(
           minimumSize: const Size(48, 46),
-          backgroundColor: const Color(0xEB151822),
+          backgroundColor: scheme.surfaceContainerHighest.withValues(
+            alpha: .94,
+          ),
           foregroundColor: CupertinoColors.white,
           side: BorderSide(
             color: scheme.primary.withValues(alpha: 0.55),
@@ -1155,7 +1157,7 @@ class _PhoneDanmakuFailure extends StatelessWidget {
       key: const Key('mobile-danmaku-failure'),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(

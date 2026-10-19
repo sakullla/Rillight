@@ -181,7 +181,7 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
           width: width,
           child: Container(
             key: DanmakuKeys.panel,
-            decoration: BoxDecoration(color: const Color(0x00000000)),
+            decoration: const BoxDecoration(color: CupertinoColors.transparent),
             child: body,
           ),
         ),
