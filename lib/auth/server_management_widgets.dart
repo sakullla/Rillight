@@ -167,7 +167,6 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
     final colors = theme.colorScheme;
     final dark = colors.brightness == Brightness.dark;
     final server = widget.server;
-    final (accent, _) = ServerUi.gradientFor(context, server.id);
 
     // One status line: the most important fact about this server.
     final (ServerTone, String, bool) status = widget.busy
@@ -219,7 +218,7 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
           boxShadow: hovered && !widget.busy
               ? [
                   BoxShadow(
-                    color: accent.withValues(alpha: dark ? .16 : .12),
+                    color: colors.scrim.withValues(alpha: dark ? .32 : .10),
                     blurRadius: 24,
                     offset: const Offset(0, 8),
                   ),

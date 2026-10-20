@@ -864,17 +864,7 @@ IconData phoneLibraryIcon(String? collectionType) => switch (collectionType) {
   _ => AppIcons.library,
 };
 
-/// 没有封面的片库取一组深色渐变。按库 id 在色板里轮换，同类型的多个库
-/// （「电影」「纪录片」「动画」）并排时也不撞色。
-List<Color> _libraryGradient(MediaItem library) {
-  var hash = 0;
-  for (final unit in library.id.codeUnits) {
-    hash = (hash * 31 + unit) & 0x7fffffff;
-  }
-  return AppBrand.libraryGradients[hash % AppBrand.libraryGradients.length];
-}
-
-/// 16:9 片库磁贴：有封面铺满封面，没有就按类型画渐变和大图标；
+/// 16:9 片库磁贴：有封面铺满封面，没有就铺深色表面实底和类型大图标；
 /// 库名压在左下角，两种主题都是深底白字。
 class PhoneLibraryTile extends StatelessWidget {
   const PhoneLibraryTile({
@@ -914,12 +904,10 @@ class PhoneLibraryTile extends StatelessWidget {
           else
             DecoratedBox(
               key: placeholderKey,
+              // 无封面底取深色表面阶梯的实色:库名两种主题都是深底白字,
+              // 同类型的多个库靠图标与库名区分,不再轮换渐变色。
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: _libraryGradient(library),
-                ),
+                color: AppPalette.darkTones.surfaceHigh,
               ),
               child: Align(
                 alignment: const Alignment(.82, -.1),

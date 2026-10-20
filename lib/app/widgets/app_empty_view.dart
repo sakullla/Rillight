@@ -54,14 +54,7 @@ class AppEmptyView extends StatelessWidget {
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      colorScheme.surfaceContainerHighest,
-                      colorScheme.surfaceContainerHigh,
-                    ],
-                  ),
+                  color: colorScheme.surfaceContainerHigh,
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: colorScheme.outlineVariant.withValues(alpha: 0.6),

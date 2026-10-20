@@ -4,7 +4,6 @@ import '../app/l10n/app_localizations.dart';
 import '../app/ui/app_icons.dart';
 import '../app/ui/ui.dart';
 import '../media_server/capabilities.dart';
-import 'auth_scope.dart';
 import 'login_widgets.dart';
 import 'server_list_store.dart';
 
@@ -34,57 +33,6 @@ abstract final class ServerUi {
     'cloud' => AppIcons.globe,
     _ => null,
   };
-
-  /// 品牌家族头像渐变,与手机库封面共用同一组粉/梅/紫/青/石板色。
-  ///
-  /// 相邻槽位按色相错开,冲突时顺移一格;同一 id 始终落在同一槽。
-  static const List<List<Color>> _palette = AppBrand.libraryGradients;
-
-  static (Color, Color) _slot(int index) {
-    final colors = _palette[index];
-    return (colors.first, colors.last);
-  }
-
-  static int _hashOf(String seed) {
-    var hash = 0x811C9DC5;
-    for (final unit in seed.codeUnits) {
-      hash = ((hash ^ unit) * 0x01000193) & 0x7FFFFFFF;
-    }
-    return hash;
-  }
-
-  /// Stable gradient for one server, seeded by the persistent server id so
-  /// renaming keeps the colour users have learned.
-  ///
-  /// With [among] (every saved server id) colours are unique for up to eight
-  /// servers: slots are claimed in a fixed id order and a taken slot moves to
-  /// the next one. Without it the hash slot is used directly.
-  static (Color, Color) gradientOf(String seed, {Iterable<String>? among}) {
-    final count = _palette.length;
-    if (among != null) {
-      final ids = {...among, seed}.toList()..sort();
-      if (ids.length <= count) {
-        final used = <int>{};
-        for (final id in ids) {
-          var slot = _hashOf(id) % count;
-          while (used.contains(slot)) {
-            slot = (slot + 1) % count;
-          }
-          used.add(slot);
-          if (id == seed) return _slot(slot);
-        }
-      }
-    }
-    return _slot(_hashOf(seed) % count);
-  }
-
-  /// [gradientOf] against the saved servers visible from [context].
-  static (Color, Color) gradientFor(BuildContext context, String seed) =>
-      gradientOf(
-        seed,
-        among: AuthScope.maybeOf(context)?.savedServers
-            .map((server) => server.id),
-      );
 
   static String monogramOf(String name) {
     final trimmed = name.trim();
@@ -124,9 +72,9 @@ Color serverToneColor(AppColorScheme colors, ServerTone tone) => switch (tone) {
 
 /// Identity mark shared by the list, editor hero, line picker and TV rows.
 ///
-/// Named servers get a stable gradient avatar with their initial (or the
-/// chosen icon) and a small provider badge, so two Emby servers no longer
-/// look identical. Without a name it falls back to the provider tile.
+/// Named servers get a solid neutral avatar with their initial (or the
+/// chosen icon) and a small provider badge, so two Emby servers are told
+/// apart by initial and name rather than by colour. Without a name it falls back to the provider tile.
 class ServerIdentityBadge extends StatelessWidget {
   const ServerIdentityBadge({
     super.key,
@@ -193,77 +141,43 @@ class ServerIdentityBadge extends StatelessWidget {
         ),
       );
     }
-    final (start, end) = ServerUi.gradientFor(context, seed ?? name!);
     final badge = size * .4;
+    // 实色中性底:服务器靠首字(或所选图标)与名称区分,不再按 id 分配渐变色。
     final face = Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: radius,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: locked
-              ? [
-                  Color.lerp(start, colors.surfaceContainerHighest, .72)!,
-                  Color.lerp(end, colors.surfaceContainerHighest, .72)!,
-                ]
-              : [start, end],
-        ),
-        boxShadow: locked
-            ? null
-            : [
-                BoxShadow(
-                  color: end.withValues(alpha: .32),
-                  blurRadius: size * .22,
-                  offset: Offset(0, size * .08),
-                ),
-              ],
+        color: locked
+            ? colors.surfaceContainerHigh
+            : colors.surfaceContainerHighest,
+        border: Border.all(color: ServerUi.groupStroke(colors), width: .6),
       ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Soft top highlight gives the tile a little depth.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.center,
-                colors: [
-                  AppInk.white.withValues(alpha: .18),
-                  AppInk.white.withValues(alpha: 0),
-                ],
+      child: Center(
+        child: locked
+            ? Icon(
+                AppIcons.lock,
+                size: size * .42,
+                color: colors.onSurfaceVariant,
+                fill: AppIcons.filled,
+              )
+            : custom != null
+            ? Icon(
+                custom,
+                size: size * .48,
+                color: colors.onSurface,
+                fill: AppIcons.filled,
+              )
+            : Text(
+                ServerUi.monogramOf(name ?? ''),
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: size * .44,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                  letterSpacing: -.5,
+                ),
               ),
-            ),
-          ),
-          Center(
-            child: locked
-                ? Icon(
-                    AppIcons.lock,
-                    size: size * .42,
-                    color: colors.onSurface.withValues(alpha: .78),
-                    fill: AppIcons.filled,
-                  )
-                : custom != null
-                ? Icon(
-                    custom,
-                    size: size * .48,
-                    color: AppInk.white,
-                    fill: AppIcons.filled,
-                  )
-                : Text(
-                    ServerUi.monogramOf(name ?? ''),
-                    style: TextStyle(
-                      color: AppInk.white,
-                      fontSize: size * .44,
-                      fontWeight: FontWeight.w700,
-                      height: 1,
-                      letterSpacing: -.5,
-                    ),
-                  ),
-          ),
-        ],
       ),
     );
     return Semantics(
@@ -870,24 +784,12 @@ class ServerHeroHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final colors = theme.colorScheme;
-    final (start, _) = ServerUi.gradientFor(context, server.id);
-    final dark = colors.brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(ServerUi.cardRadius + 4),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(
-              start.withValues(alpha: dark ? .22 : .12),
-              ServerUi.groupColor(colors),
-            ),
-            ServerUi.groupColor(colors),
-          ],
-        ),
+        color: ServerUi.groupColor(colors),
         border: Border.all(color: ServerUi.groupStroke(colors), width: .6),
       ),
       child: Row(

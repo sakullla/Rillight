@@ -27,14 +27,7 @@ class PosterPlaceholder extends StatelessWidget {
         height: height,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                colorScheme.surfaceContainerHighest,
-                colorScheme.surfaceContainer,
-              ],
-            ),
+            color: colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(AppRadii.sm),
             border: Border.all(
               color: colorScheme.outlineVariant.withValues(

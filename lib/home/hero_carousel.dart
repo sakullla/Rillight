@@ -475,7 +475,8 @@ class HeroDots extends StatelessWidget {
   final ValueChanged<int>? onSelect;
   final bool onScrim;
 
-  /// 选中长条的颜色。为空时遮罩上用白,页面上用 [AppColorScheme.secondary]。
+  /// 选中长条的颜色。为空时遮罩上用白,页面上用 [AppColorScheme.primary],
+  /// 与选中、进度同源。
   final Color? activeColor;
 
   final ValueListenable<int?>? cycle;
@@ -488,7 +489,7 @@ class HeroDots extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final selected = activeColor ?? (onScrim ? AppInk.white : scheme.secondary);
+    final selected = activeColor ?? (onScrim ? AppInk.white : scheme.primary);
     final resting = onScrim
         ? AppInk.white.withValues(alpha: .38)
         : scheme.onSurface.withValues(alpha: .22);

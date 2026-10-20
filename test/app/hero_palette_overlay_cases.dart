@@ -58,7 +58,7 @@ void main() {
     // visible slide while the active key is still missing.
     expect(
       _gradient(tester).colors.first,
-      AppBrand.pink.withValues(alpha: .10),
+      AppBrand.accent.withValues(alpha: .10),
     );
 
     await tester.pumpWidget(
@@ -79,7 +79,7 @@ void main() {
     expect(first.a, greaterThan(0));
   });
 
-  testWidgets('first stop follows the poster hue, not the cyan light', (
+  testWidgets('every stop follows the poster hue with no second brand stop', (
     tester,
   ) async {
     final blue = (await tester.runAsync(
@@ -97,11 +97,22 @@ void main() {
     );
     await _settleMood(tester);
     final gradient = _gradient(tester);
-    expect(gradient.stops, orderedEquals(const [0, .55, .78, 1]));
+    expect(gradient.stops, orderedEquals(AppBrandGradient.ambientStops));
+    expect(gradient.colors, hasLength(AppBrandGradient.ambientStops.length));
     final moodHue = HSLColor.fromColor(gradient.colors.first).hue;
-    final cyanHue = HSLColor.fromColor(AppBrand.cyan).hue;
     expect(_hueDistance(moodHue, 220), lessThan(15));
-    expect(_hueDistance(moodHue, cyanHue), greaterThan(15));
+    // 单色相:后续 stop 只是同一色相的透明度递减,最后溶到全透明。
+    for (final color in gradient.colors) {
+      expect(_hueDistance(HSLColor.fromColor(color).hue, moodHue), lessThan(1));
+    }
+    for (var i = 1; i < gradient.colors.length; i++) {
+      expect(
+        gradient.colors[i].a,
+        lessThan(gradient.colors[i - 1].a),
+        reason: 'stop $i fades toward transparent',
+      );
+    }
+    expect(gradient.colors.last.a, 0);
     // 300–400ms crossfade; reduced motion collapses it to zero.
     final container = tester.widget<AnimatedContainer>(
       find.byKey(HeroPaletteOverlay.overlayKey),
@@ -122,8 +133,15 @@ void main() {
       ),
     );
     final gradient = _gradient(tester);
-    expect(gradient.colors.first, AppBrand.pink.withValues(alpha: .10));
-    expect(gradient.colors.last, AppInk.transparent);
+    expect(gradient.colors.first, AppBrand.accent.withValues(alpha: .10));
+    expect(gradient.colors.last.a, 0);
+    for (final color in gradient.colors) {
+      expect(
+        color.withValues(alpha: 1),
+        AppBrand.accent,
+        reason: 'the fallback keeps the single accent hue',
+      );
+    }
     final overlay = tester.widget<AnimatedContainer>(
       find.byKey(HeroPaletteOverlay.overlayKey),
     );
@@ -227,6 +245,18 @@ void main() {
   });
 
   for (final brightness in Brightness.values) {
+    test('$brightness fallback is a low-alpha single accent hue', () {
+      final gradient = HeroPaletteOverlay.gradientFor(brightness, null);
+      final accent = brightness == Brightness.dark
+          ? AppBrand.accent
+          : AppBrand.accentDeep;
+      expect(gradient.colors.first, accent.withValues(alpha: .10));
+      for (final color in gradient.colors) {
+        expect(color.withValues(alpha: 1), accent);
+      }
+      expect(gradient.colors.last.a, 0);
+    });
+
     test('light and dark generate matching depth', () {
       final mood = ArtworkMood.fromSeed(const Color(0xffff3b30));
       final gradient = HeroPaletteOverlay.gradientFor(brightness, mood);

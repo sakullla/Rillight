@@ -66,14 +66,18 @@ double _hueDistance(Color a, Color b) {
   return distance > 180 ? 360 - distance : distance;
 }
 
-bool _leansSakura(Color color) => color.r > color.b && color.b > color.g;
+/// 冷石墨/冷白:蓝通道略高、整体几乎无彩。
+bool _coolNeutral(Color color) {
+  final channels = [color.r, color.g, color.b]..sort();
+  return color.b >= color.g &&
+      color.g >= color.r &&
+      channels.last - channels.first <= 0.07;
+}
 
-bool _isSakuraAccent(Color color) =>
-    _leansSakura(color) && color.r - color.g >= 0.25;
+bool _leansBlue(Color color) => color.b > color.g && color.g > color.r;
 
-bool _leansBluePurple(Color color) => color.b > color.r && color.r > color.g;
-
-bool _leansCyan(Color color) => color.b > color.g && color.g > color.r;
+bool _isQuietBlueAccent(Color color) =>
+    _leansBlue(color) && color.b - color.r >= 0.25;
 
 bool _isWarmGold(Color color) =>
     color.r > color.g && color.g > color.b && color.g - color.b >= 0.12;
@@ -83,11 +87,6 @@ bool _isRed(Color color) =>
     color.g >= color.b &&
     color.r - color.b >= 0.35 &&
     color.g - color.b < 0.12;
-
-bool _tinted(Color color) {
-  final channels = [color.r, color.g, color.b]..sort();
-  return channels.last - channels.first >= 0.015;
-}
 
 void main() {
   setUp(isolateImageCache);
@@ -122,27 +121,27 @@ void main() {
     }
   });
 
-  test('all tone sets share the brand pink, cyan and lavender', () {
+  test('all tone sets share the quiet blue accent on cool neutrals', () {
     final phoneLight = AppPalette.phoneLightTones;
     final phoneDark = AppPalette.phoneDarkTones;
     expect(phoneLight.brightness, Brightness.light);
     expect(phoneDark.brightness, Brightness.dark);
     expect(phoneLight.base.computeLuminance(), greaterThan(0.75));
     expect(phoneDark.base.computeLuminance(), lessThan(0.02));
-    expect(_tinted(phoneLight.base), isTrue);
-    expect(_tinted(phoneDark.base), isTrue);
-    expect(_leansSakura(phoneLight.base), isTrue);
-    expect(_leansBluePurple(phoneDark.base), isTrue);
-    expect(_leansSakura(phoneLight.surface), isTrue);
-    expect(_leansBluePurple(phoneDark.surface), isTrue);
+    expect(_coolNeutral(phoneLight.base), isTrue);
+    expect(_coolNeutral(phoneDark.base), isTrue);
+    expect(_coolNeutral(phoneLight.surface), isTrue);
+    expect(_coolNeutral(phoneDark.surface), isTrue);
 
     for (final tones in [phoneLight, phoneDark]) {
-      expect(_isSakuraAccent(tones.accent), isTrue);
+      expect(_isQuietBlueAccent(tones.accent), isTrue);
       expect(_isWarmGold(tones.accent), isFalse);
-      expect(_leansSakura(tones.accentContainer), isTrue);
-      expect(_leansCyan(tones.secondary), isTrue);
+      expect(_leansBlue(tones.accentContainer), isTrue);
+      // 辅助色与强调色同色系,不再是第二个品牌色相。
+      expect(_leansBlue(tones.secondary), isTrue);
+      expect(_hueDistance(tones.secondary, tones.accent), lessThan(20));
       expect(_isRed(tones.error), isTrue);
-      expect(_isSakuraAccent(tones.error), isFalse);
+      expect(_isQuietBlueAccent(tones.error), isFalse);
       expect(_hueDistance(tones.error, tones.accent), greaterThanOrEqualTo(10));
       expect(tones.scrim, const Color(0xFF000000));
       expect(
@@ -163,8 +162,8 @@ void main() {
         reason: 'phone light accent on ${entry.key}',
       );
     }
-    expect(_leansSakura(phoneLight.surfaceHigh), isTrue);
-    expect(_leansBluePurple(phoneDark.surfaceHigh), isTrue);
+    expect(_coolNeutral(phoneLight.surfaceHigh), isTrue);
+    expect(_coolNeutral(phoneDark.surfaceHigh), isTrue);
     expect(phoneLight.error, const Color(0xFFB42318));
     expect(phoneDark.error, const Color(0xFFF49A90));
     expect(AppUiTheme.dark().colorScheme.primary, AppPalette.darkTones.accent);

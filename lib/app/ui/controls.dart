@@ -288,9 +288,10 @@ class _AppButtonState extends State<AppButton> {
       }
       side = BorderSide(color: colors.primary, width: 2);
     } else if (widget.selected) {
-      if (customFill == null) fill = colors.secondaryContainer;
+      // 选中与焦点、进度同源:只取 primary 系,不引入第二个品牌色。
+      if (customFill == null) fill = colors.primaryContainer;
       if (widget.style?.side == null) {
-        side = BorderSide(color: colors.secondary, width: 2);
+        side = BorderSide(color: colors.primary, width: 2);
       }
     } else if (_hovered) {
       // 悬停只换底色,不额外加边框,平面按钮更干净。
@@ -299,40 +300,14 @@ class _AppButtonState extends State<AppButton> {
           _stateFill(colors, resting, customFill != null, _PressKind.hover);
     }
 
-    // 品牌主按钮:未自定义底色的实底按钮铺品牌渐变(主色向次强调色偏移,
-    // 与图标的粉紫渐变同源),并带同色光晕。
-    // TV 焦点是反相实底,禁用态是中性底,两者都不走渐变。
-    final brand =
-        widget.variant == AppButtonVariant.filled &&
-        enabled &&
-        customFill == null &&
-        !tvFocus;
-    final brandGradient = AppBrandGradient.primaryFor(theme.brightness);
+    // 主按钮是 accent 实底:不铺渐变,也不带色光。
     return _ButtonFace(
       fill: fill,
-      // 静止态用完整品牌渐变;悬停/按下时首个 stop 跟随状态底色,
-      // 第二个 stop 仍是品牌渐变终点,不退回主色与次色的浑浊混色。
-      gradient: brand
-          ? (fill == resting
-                ? brandGradient
-                : LinearGradient(
-                    begin: brandGradient.begin,
-                    end: brandGradient.end,
-                    colors: [
-                      fill,
-                      Color.lerp(fill, brandGradient.colors.last, .55)!,
-                    ],
-                  ))
-          : null,
       foreground: _foreground(colors, enabled, tvFocus),
       side: side,
       radius: _buttonRadius(widget.variant),
       scale: scale,
-      shadow:
-          widget.style?.boxShadow ??
-          (brand && !_pressed
-              ? AppShadow.glow(colors.primary, theme.brightness)
-              : null),
+      shadow: widget.style?.boxShadow,
     );
   }
 
@@ -376,7 +351,7 @@ class _AppButtonState extends State<AppButton> {
     if (widget.selected &&
         widget.color == null &&
         widget.style?.backgroundColor == null) {
-      return colors.onSecondaryContainer;
+      return colors.onPrimaryContainer;
     }
     return widget.variant == AppButtonVariant.filled
         ? colors.onPrimary
@@ -456,8 +431,7 @@ class _AppButtonState extends State<AppButton> {
                   ? null
                   : BoxConstraints.tight(_fixedHitSize(fixedSize, minimumSize)),
               decoration: ShapeDecoration(
-                color: face.gradient == null ? face.fill : null,
-                gradient: face.gradient,
+                color: face.fill,
                 shape: shape,
                 shadows: face.shadow,
               ),
@@ -515,11 +489,9 @@ class _ButtonFace {
     required this.side,
     required this.radius,
     required this.scale,
-    this.gradient,
     this.shadow,
   });
   final Color fill, foreground;
-  final Gradient? gradient;
   final BorderSide side;
   final double radius, scale;
   final List<BoxShadow>? shadow;

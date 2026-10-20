@@ -28,7 +28,9 @@ class LiquidGlassBackdrop extends InheritedWidget {
       enabled != oldWidget.enabled;
 }
 
-/// 液态玻璃浮层:模糊 + 轻微饱和 + 顶部高光 + 细描边。
+/// 液态玻璃浮层:模糊 + 轻微饱和 + 表面底色。
+///
+/// 它是压在内容上的功能材质,不画顶部高光和亮边。
 ///
 /// 只包导航、对话框、播放控件等浮层。海报墙不要用,滚动时 BackdropFilter
 /// 会把解码和合成打满。减少动态效果时退回实色,避免透明不可读。
@@ -131,10 +133,6 @@ class LiquidGlass extends StatelessWidget {
     final fill = scheme.surface.withValues(
       alpha: skipBlur ? (tint ?? AppGlass.reducedTint) : (tint ?? _tint),
     );
-    // 描边与高光随亮度取反:深色主题提白,浅色主题压深,两种亮度下都可见。
-    final edge = scheme.brightness == Brightness.dark
-        ? AppInk.white
-        : AppInk.black;
     Widget body = child;
     if (padding != null) {
       body = Padding(padding: padding!, child: body);
@@ -161,29 +159,7 @@ class LiquidGlass extends StatelessWidget {
             Positioned.fill(
               child: IgnorePointer(
                 child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: fill,
-                    borderRadius: radius,
-                    border: kind == LiquidGlassKind.bar
-                        ? Border(
-                            bottom: BorderSide(
-                              color: edge.withValues(alpha: AppGlass.edgeLight),
-                            ),
-                          )
-                        : Border.all(
-                            color: edge.withValues(alpha: AppGlass.edgeLight),
-                          ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: const [0, 0.2, 1],
-                      colors: [
-                        edge.withValues(alpha: AppGlass.specular),
-                        edge.withValues(alpha: 0.04),
-                        AppInk.transparent,
-                      ],
-                    ),
-                  ),
+                  decoration: BoxDecoration(color: fill, borderRadius: radius),
                 ),
               ),
             ),

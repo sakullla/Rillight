@@ -126,7 +126,7 @@ class _PlexMarkPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// 品牌方块:主色到第三色的渐变底 + 播放三角,桌面、手机共用。
+/// 品牌方块:强调色实底 + 播放三角,桌面、手机共用。不带渐变与色光。
 class LoginBrandMark extends StatelessWidget {
   const LoginBrandMark({super.key, this.size = 44});
 
@@ -134,24 +134,18 @@ class LoginBrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
+    final colors = AppUiTheme.of(context).colorScheme;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * .28),
-        gradient: AppBrandGradient.primaryFor(theme.brightness),
-        border: Border.all(
-          color: AppInk.white.withValues(alpha: AppGlass.edgeLight),
-        ),
-        boxShadow: AppShadow.glow(theme.colorScheme.primary, theme.brightness),
+        color: colors.primary,
       ),
       child: Icon(
         AppIcons.play,
         fill: AppIcons.filled,
-        color: theme.brightness == Brightness.dark
-            ? AppBrand.onPink
-            : AppInk.white,
+        color: colors.onPrimary,
         size: size * .58,
       ),
     );

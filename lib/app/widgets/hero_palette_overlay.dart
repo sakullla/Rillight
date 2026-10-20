@@ -13,8 +13,9 @@ import 'package:rillight/media_server/models.dart';
 /// 它必须叠在画面之上、可读性遮罩之下:全幅图用 [BoxFit.cover] 铺满,
 /// 画在图片后面的氛围不可见。整层 [IgnorePointer],不拦截点击与滑动。
 ///
-/// 渐变只有一层 [AppBrandGradient.ambientFor] 的 4 个 stop:剧照 mood 色
-/// → 透明 → 固定品牌天青 → 透明。底部回到透明,页面用
+/// 渐变只有一层 [AppBrandGradient.ambientFor],且只有一个色相:剧照 mood 色
+/// (没有可用 mood 时为低透明度的品牌强调色)向同色相的透明溶出,不再叠加
+/// 固定的第二品牌色。底部回到透明,页面用
 /// [AppUiThemeData.scaffoldBackgroundColor] 继续向下,不会出现
 /// “头图染色、页面不染”的硬切边。
 ///
@@ -65,11 +66,21 @@ class HeroPaletteOverlay extends StatefulWidget {
     return theme_source.paletteKey(scope, ref.itemId, ref.type, ref.tag);
   }
 
-  /// 渲染用的 4-stop 氛围渐变。首页覆盖层与详情头部都调用它,
+  /// 回落氛围的透明度:没有可用剧照色时只留一层很淡的品牌强调色。
+  static const double fallbackAlpha = .10;
+
+  /// 回落氛围的色相:当前亮度下的品牌强调色。
+  static Color fallbackColor(Brightness brightness) =>
+      brightness == Brightness.dark ? AppBrand.accent : AppBrand.accentDeep;
+
+  /// 渲染用的单色相氛围渐变。首页覆盖层与详情头部都调用它,
   /// 保证同一剧照的第一 stop 颜色一致。
   static LinearGradient gradientFor(Brightness brightness, ArtworkMood? mood) {
     if (mood == null || mood.neutral || mood.confidence <= 0) {
-      return AppBrandGradient.ambientFor(brightness, AppBrand.pink, alpha: .10);
+      return AppBrandGradient.ambientFor(
+        fallbackColor(brightness),
+        alpha: fallbackAlpha,
+      );
     }
     final hsl = HSLColor.fromColor(mood.seed);
     final stop = HSLColor.fromAHSL(
@@ -80,7 +91,6 @@ class HeroPaletteOverlay extends StatefulWidget {
     ).toColor();
     final peak = brightness == Brightness.dark ? .18 : .16;
     return AppBrandGradient.ambientFor(
-      brightness,
       stop,
       alpha: (peak * mood.confidence).clamp(0.0, peak),
     );

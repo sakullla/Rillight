@@ -4,41 +4,41 @@ import 'brand.dart';
 
 /// 一套主题的全部取色。
 ///
-/// 六套公开 Tones 指向同一套品牌基色；桌面/手机/TV 的差异由字号、
-/// 密度与焦点表达，不再各自换 hue。浅色表面阶梯统一在粉色系，
-/// 蓝色只进 secondaryContainer。
+/// 六套公开 Tones 指向同一套品牌基色（静夜蓝）；桌面/手机/TV 的差异由
+/// 字号、密度与焦点表达，不再各自换 hue。表面阶梯是低饱和中性色：
+/// 深色为冷石墨，浅色为白底；品牌色相只出现在 accent 与它的容器上。
 abstract final class AppPalette {
   static const Tones _brandDark = Tones(
     base: AppBrand.ink,
-    surfaceLowest: Color(0xFF141019),
-    surfaceLow: Color(0xFF1A1421),
-    surface: Color(0xFF211A2A),
-    surfaceHigh: Color(0xFF2A2234),
-    surfaceHighest: Color(0xFF382A3E),
-    surfaceBright: Color(0xFF46384D),
-    onSurface: Color(0xFFF7F2F6),
-    onSurfaceVariant: Color(0xFFCDBFCB),
-    outline: Color(0xFF9A8C9A),
-    outlineVariant: Color(0xFF342B3B),
-    accent: AppBrand.pink,
-    onAccent: AppBrand.onPink,
-    accentContainer: Color(0xFF4F2440),
-    onAccentContainer: Color(0xFFFFD9E8),
-    secondary: AppBrand.cyan,
-    onSecondary: AppBrand.onCyan,
-    secondaryContainer: Color(0xFF123A47),
-    onSecondaryContainer: Color(0xFFC9F2FF),
-    tertiary: AppBrand.lavender,
-    onTertiary: AppBrand.onLavender,
-    tertiaryContainer: Color(0xFF3C3464),
-    onTertiaryContainer: Color(0xFFE8E4FF),
+    surfaceLowest: Color(0xFF111418),
+    surfaceLow: Color(0xFF161A1F),
+    surface: Color(0xFF1B2026),
+    surfaceHigh: Color(0xFF232930),
+    surfaceHighest: Color(0xFF2C333B),
+    surfaceBright: Color(0xFF363E47),
+    onSurface: Color(0xFFF1F4F8),
+    onSurfaceVariant: Color(0xFFB7C0CC),
+    outline: Color(0xFF8A94A1),
+    outlineVariant: Color(0xFF2A3138),
+    accent: AppBrand.accent,
+    onAccent: AppBrand.onAccent,
+    accentContainer: Color(0xFF1D3357),
+    onAccentContainer: Color(0xFFD8E5FF),
+    secondary: Color(0xFFA9BEDD),
+    onSecondary: Color(0xFF12233A),
+    secondaryContainer: Color(0xFF26364B),
+    onSecondaryContainer: Color(0xFFDCE7F7),
+    tertiary: Color(0xFFC2C9D3),
+    onTertiary: Color(0xFF1A1F25),
+    tertiaryContainer: Color(0xFF2E353E),
+    onTertiaryContainer: Color(0xFFE3E8EE),
     error: Color(0xFFF49A90),
     onError: Color(0xFF2A0A08),
     errorContainer: Color(0xFF5C2320),
     onErrorContainer: Color(0xFFFFD2CD),
-    inverseSurface: Color(0xFFF7F2F6),
-    onInverseSurface: Color(0xFF160E18),
-    inversePrimary: Color(0xFFA33D6C),
+    inverseSurface: Color(0xFFF1F4F8),
+    onInverseSurface: Color(0xFF14171B),
+    inversePrimary: Color(0xFF2F5FB8),
     scrim: AppInk.black,
   );
 
@@ -46,33 +46,33 @@ abstract final class AppPalette {
     base: AppBrand.paper,
     surfaceLowest: AppInk.white,
     surfaceLow: AppInk.white,
-    surface: Color(0xFFF5EAF0),
-    surfaceHigh: Color(0xFFEFE3EA),
-    surfaceHighest: Color(0xFFF5DFE9),
-    surfaceBright: Color(0xFFEAD3DE),
-    onSurface: Color(0xFF141216),
-    onSurfaceVariant: Color(0xFF53464F),
-    outline: Color(0xFF6E6570),
-    outlineVariant: Color(0xFFEADCE3),
-    accent: AppBrand.pinkDeep,
+    surface: Color(0xFFF0F2F5),
+    surfaceHigh: Color(0xFFE9ECF0),
+    surfaceHighest: Color(0xFFE3E7EC),
+    surfaceBright: Color(0xFFDCE1E7),
+    onSurface: Color(0xFF121417),
+    onSurfaceVariant: Color(0xFF474F59),
+    outline: Color(0xFF69717B),
+    outlineVariant: Color(0xFFDDE1E6),
+    accent: AppBrand.accentDeep,
     onAccent: AppInk.white,
-    accentContainer: Color(0xFFFADDE9),
-    onAccentContainer: Color(0xFF5C1E3A),
-    secondary: AppBrand.cyanDeep,
+    accentContainer: Color(0xFFDCE7FF),
+    onAccentContainer: Color(0xFF0E2A5C),
+    secondary: Color(0xFF3A5370),
     onSecondary: AppInk.white,
-    secondaryContainer: Color(0xFFD6F0F7),
-    onSecondaryContainer: Color(0xFF083344),
-    tertiary: AppBrand.lavenderDeep,
+    secondaryContainer: Color(0xFFDDE5EF),
+    onSecondaryContainer: Color(0xFF1A2A3D),
+    tertiary: Color(0xFF4D5561),
     onTertiary: AppInk.white,
-    tertiaryContainer: Color(0xFFECE8FF),
-    onTertiaryContainer: Color(0xFF24185C),
+    tertiaryContainer: Color(0xFFE4E7EB),
+    onTertiaryContainer: Color(0xFF22272E),
     error: Color(0xFFB42318),
     onError: AppInk.white,
     errorContainer: Color(0xFFF8D7D4),
     onErrorContainer: Color(0xFF5C1612),
-    inverseSurface: Color(0xFF161218),
-    onInverseSurface: Color(0xFFF7F2F5),
-    inversePrimary: Color(0xFFF2A8C8),
+    inverseSurface: Color(0xFF16191D),
+    onInverseSurface: Color(0xFFF2F4F7),
+    inversePrimary: Color(0xFFA9C4FF),
     scrim: AppInk.black,
   );
 
@@ -137,19 +137,19 @@ class Tones {
   final Color outline;
   final Color outlineVariant;
 
-  /// 樱花粉主强调：主操作、进度、选中。
+  /// 品牌强调：主操作、进度、选中与焦点。
   final Color accent;
   final Color onAccent;
   final Color accentContainer;
   final Color onAccentContainer;
 
-  /// 天青辅助：链接、缓冲、次级高亮。
+  /// 同色系低饱和辅助：少数辅助语义标签。
   final Color secondary;
   final Color onSecondary;
   final Color secondaryContainer;
   final Color onSecondaryContainer;
 
-  /// 月光紫第三色：少量标签。
+  /// 中性第三色：少量标签。
   final Color tertiary;
   final Color onTertiary;
   final Color tertiaryContainer;

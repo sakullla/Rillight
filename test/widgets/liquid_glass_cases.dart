@@ -63,4 +63,40 @@ void main() {
     expect(find.text('播放器'), findsOneWidget);
     expect(find.byType(BackdropFilter), findsNothing);
   });
+
+  testWidgets('LiquidGlass keeps blur and tint without specular or edge', (
+    tester,
+  ) async {
+    for (final theme in [AppUiTheme.dark(), AppUiTheme.light()]) {
+      for (final kind in LiquidGlassKind.values) {
+        await tester.pumpWidget(
+          CupertinoTestApp(
+            theme: theme,
+            home: CupertinoPageScaffold(
+              child: Center(
+                child: LiquidGlass(kind: kind, child: const Text('玻璃')),
+              ),
+            ),
+          ),
+        );
+        expect(find.byType(BackdropFilter), findsOneWidget);
+        final decorations = [
+          for (final box in tester.widgetList<DecoratedBox>(
+            find.descendant(
+              of: find.byType(LiquidGlass),
+              matching: find.byType(DecoratedBox),
+            ),
+          ))
+            box.decoration as BoxDecoration,
+        ];
+        expect(decorations, hasLength(1), reason: '$kind');
+        final face = decorations.single;
+        expect(face.gradient, isNull, reason: '$kind specular');
+        expect(face.border, isNull, reason: '$kind edge light');
+        expect(face.color, isNotNull);
+        expect(face.color!.a, greaterThan(0));
+        expect(face.color!.a, lessThan(1));
+      }
+    }
+  });
 }

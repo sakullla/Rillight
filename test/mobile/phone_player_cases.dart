@@ -481,8 +481,9 @@ void main() {
         image.dispose();
         return pixel;
       });
-      // 缓冲段为品牌青 55% 叠在深色底轨上，量化到 8 位色深后的实际像素。
-      expect(bytes, [0x50, 0x85, 0x9c, 0xff]);
+      // 缓冲段为中性前景 38% 叠在深色底轨上，量化到 8 位色深后的实际像素；
+      // 进度条上不再出现第二个品牌色。
+      expect(bytes, [0x71, 0x76, 0x7c, 0xff]);
       backend.emitEvent(VideoEventKind.cacheSpeed, 0);
       await settle(tester);
       expect(find.text('0 KB/s'), findsOneWidget);

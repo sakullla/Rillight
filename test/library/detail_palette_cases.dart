@@ -140,14 +140,18 @@ void main() {
       ),
       lessThanOrEqualTo(15),
     );
-    // 固定品牌天青不参与色相一致性的判定。
-    expect(
-      _hueDistance(
-        HSLColor.fromColor(first).hue,
-        HSLColor.fromColor(AppBrand.cyan).hue,
-      ),
-      greaterThan(15),
-    );
+    // 氛围层只有剧照这一个色相,其余 stop 都是同色相向透明溶出。
+    for (final color in gradient.colors) {
+      if (color.a == 0) continue;
+      expect(
+        _hueDistance(
+          HSLColor.fromColor(color).hue,
+          HSLColor.fromColor(first).hue,
+        ),
+        lessThan(1),
+      );
+    }
+    expect(gradient.colors.last.a, 0);
   });
 
   testWidgets('detail keeps a neutral brand surface without artwork', (

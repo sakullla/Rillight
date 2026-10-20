@@ -326,6 +326,68 @@ void main() {
     },
   );
 
+  testWidgets(
+    'filled is a solid accent without glow; selected follows primary',
+    (tester) async {
+      for (final theme in [
+        AppUiTheme.dark(),
+        AppUiTheme.light(),
+        AppUiTheme.phoneDark(),
+        AppUiTheme.phoneLight(),
+      ]) {
+        final colors = theme.colorScheme;
+        await _pump(
+          tester,
+          AppButton(
+            onPressed: () {},
+            variant: AppButtonVariant.filled,
+            child: const Text('播放'),
+          ),
+          theme: theme,
+        );
+        expect(_decoration(tester).gradient, isNull);
+        expect(_decoration(tester).shadows, isNull);
+        expect(_fill(tester), colors.primary);
+        expect(_foreground(tester), colors.onPrimary);
+
+        // 悬停、按下也只换实底,不出现渐变或色光。
+        final pointer = await tester.startGesture(
+          tester.getCenter(find.byType(AppButton)),
+        );
+        await tester.pump();
+        expect(_decoration(tester).gradient, isNull);
+        expect(_decoration(tester).shadows, isNull);
+        await pointer.up();
+        await tester.pump();
+
+        for (final variant in [
+          AppButtonVariant.plain,
+          AppButtonVariant.outlined,
+          AppButtonVariant.tinted,
+          AppButtonVariant.filled,
+        ]) {
+          await _pump(
+            tester,
+            AppButton(
+              onPressed: () {},
+              variant: variant,
+              selected: true,
+              child: const Text('第 1 季'),
+            ),
+            theme: theme,
+          );
+          expect(_fill(tester), colors.primaryContainer, reason: '$variant');
+          expect(
+            _side(tester),
+            BorderSide(color: colors.primary, width: 2),
+            reason: '$variant',
+          );
+          expect(_foreground(tester), colors.onPrimaryContainer);
+        }
+      }
+    },
+  );
+
   testWidgets('explicit fill stays put until focus only adds the focus ring', (
     tester,
   ) async {
@@ -439,11 +501,11 @@ AppButton _withFocus(AppButton button, FocusNode node) {
   );
 }
 
-/// 实底主按钮铺品牌渐变,以渐变起点作为它的底色。
+/// 按钮一律实底,没有品牌渐变。
 Color _fill(WidgetTester tester) {
   final decoration = _decoration(tester);
-  return decoration.color ??
-      (decoration.gradient! as LinearGradient).colors.first;
+  expect(decoration.gradient, isNull);
+  return decoration.color!;
 }
 
 BorderSide _side(WidgetTester tester) =>

@@ -18,19 +18,19 @@ abstract final class AppSpacing {
   static const double page = xl;
 }
 
-/// 圆角 token。
+/// 圆角 token。收敛后卡片与浮层不再用大圆角，胶囊仍是半圆端。
 abstract final class AppRadii {
   static const double xs = 4;
   static const double sm = 8;
   static const double md = 12;
-  static const double lg = 18;
-  static const double xl = 24;
+  static const double lg = 14;
+  static const double xl = 20;
 
   /// 对话框、面板、底部弹层等浮层表面。
-  static const double overlay = 28;
+  static const double overlay = 20;
 
-  /// 海报/媒体卡默认圆角。比通用 md 更圆润,是内容卡片的面孔。
-  static const double card = 18;
+  /// 海报/媒体卡默认圆角,与通用 md 同档。
+  static const double card = 12;
 
   /// 胶囊:主按钮、筛选项、标签。足够大的值让任意高度都是半圆端。
   static const double pill = 999;
@@ -313,6 +313,8 @@ abstract final class AppMobileNav {
 }
 
 /// Liquid Glass 浮层材质:只用于顶栏/面板/控件,不铺在海报内容上。
+///
+/// 材质只有模糊与底色,不带高光渐变和亮边。
 abstract final class AppGlass {
   static const double barBlur = 28;
   static const double panelBlur = 34;
@@ -325,41 +327,31 @@ abstract final class AppGlass {
   static const double pillTint = 0.34;
 
   static const double reducedTint = 0.92;
+
+  /// 浮层控件的细描边透明度。LiquidGlass 自身不再画高光与亮边。
   static const double edgeLight = 0.22;
-  static const double specular = 0.18;
 }
 
-/// 投影 token:每档由"贴地的接触影 + 远处的环境影"两层组成,
-/// 比单层大模糊更有实物的落地感。
+/// 投影 token:每档只有一层中性黑影,不带彩色光晕。
 ///
-/// 深色页面本身接近纯黑,环境影透明度低、半径大;
-/// 浅色纸面吃影,环境影更淡更散,接触影负责勾出卡片底边。
+/// 深色页面本身接近纯黑,影子透明度高、半径适中;
+/// 浅色纸面吃影,影子更淡。
 abstract final class AppShadow {
   /// 卡片悬停/浮起:海报卡、媒体库卡、悬停浮层。
   static List<BoxShadow> cardHover(Brightness brightness) =>
       brightness == Brightness.dark
       ? const [
           BoxShadow(
-            color: Color(0x40000000),
-            blurRadius: 6,
-            offset: Offset(0, 2),
-          ),
-          BoxShadow(
-            color: Color(0x73000000),
-            blurRadius: 36,
-            offset: Offset(0, 18),
+            color: Color(0x66000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
           ),
         ]
       : const [
           BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 4,
-            offset: Offset(0, 1),
-          ),
-          BoxShadow(
-            color: Color(0x29000000),
-            blurRadius: 32,
-            offset: Offset(0, 14),
+            color: Color(0x24000000),
+            blurRadius: 20,
+            offset: Offset(0, 8),
           ),
         ];
 
@@ -368,26 +360,16 @@ abstract final class AppShadow {
       brightness == Brightness.dark
       ? const [
           BoxShadow(
-            color: Color(0x4D000000),
-            blurRadius: 4,
-            offset: Offset(0, 1),
-          ),
-          BoxShadow(
-            color: Color(0x80000000),
-            blurRadius: 24,
-            offset: Offset(0, 10),
+            color: Color(0x66000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
           ),
         ]
       : const [
           BoxShadow(
-            color: Color(0x1A000000),
-            blurRadius: 3,
-            offset: Offset(0, 1),
-          ),
-          BoxShadow(
-            color: Color(0x2E000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
+            color: Color(0x26000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
           ),
         ];
 
@@ -396,37 +378,16 @@ abstract final class AppShadow {
       brightness == Brightness.dark
       ? const [
           BoxShadow(
-            color: Color(0x59000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Color(0xA6000000),
-            blurRadius: 56,
-            offset: Offset(0, 24),
+            color: Color(0x8C000000),
+            blurRadius: 40,
+            offset: Offset(0, 16),
           ),
         ]
       : const [
           BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 6,
-            offset: Offset(0, 2),
-          ),
-          BoxShadow(
-            color: Color(0x38000000),
-            blurRadius: 48,
-            offset: Offset(0, 20),
+            color: Color(0x2E000000),
+            blurRadius: 32,
+            offset: Offset(0, 12),
           ),
         ];
-
-  /// 品牌主按钮的色光:同色系的柔光晕,让渐变按钮像是在发光而不是贴纸。
-  static List<BoxShadow> glow(Color color, Brightness brightness) => [
-    BoxShadow(
-      color: color.withValues(
-        alpha: brightness == Brightness.dark ? 0.30 : 0.28,
-      ),
-      blurRadius: 20,
-      offset: const Offset(0, 6),
-    ),
-  ];
 }

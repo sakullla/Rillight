@@ -1,35 +1,25 @@
 import 'package:flutter/widgets.dart';
 
-/// 灯川品牌基色。所有调色板与共享控件从这里取品牌色，
+/// 灯川品牌基色（静夜蓝）。所有调色板与共享控件从这里取品牌色，
 /// 不在页面里直接写品牌十六进制。
+///
+/// 品牌只有一个强调色：主操作、选中、焦点与进度都取它。辅助色与第三色
+/// 是同色系低饱和与中性色，只写在 `AppPalette` 的 Tones 里，不提升为品牌常量。
 abstract final class AppBrand {
-  /// 深色主题的樱花粉主强调。
-  static const Color pink = Color(0xFFFF7FA8);
+  /// 深色主题的静夜蓝强调。
+  static const Color accent = Color(0xFF82ADFF);
 
-  /// 浅色主题的深樱粉主强调；在 surfaceBright 上仍保持 4.5:1。
-  static const Color pinkDeep = Color(0xFFB21F54);
+  /// 浅色主题的深静夜蓝强调；白字压在上面仍保持 4.5:1。
+  static const Color accentDeep = Color(0xFF1E56C8);
 
-  /// 深色主题的天青辅助。
-  static const Color cyan = Color(0xFF6FD6F2);
+  /// 深色强调色上的前景。
+  static const Color onAccent = Color(0xFF0A1A33);
 
-  /// 浅色主题的深天青辅助。
-  static const Color cyanDeep = Color(0xFF0A6178);
+  /// 深色主题页面最底层的冷石墨。
+  static const Color ink = Color(0xFF0B0D10);
 
-  /// 深色主题的月光紫第三色。
-  static const Color lavender = Color(0xFFC8B8FF);
-
-  /// 浅色主题的深紫第三色。
-  static const Color lavenderDeep = Color(0xFF5B4BC4);
-
-  static const Color onPink = Color(0xFF3A1124);
-  static const Color onCyan = Color(0xFF062A33);
-  static const Color onLavender = Color(0xFF221448);
-
-  /// 页面最底层的近黑紫。
-  static const Color ink = Color(0xFF0D0A12);
-
-  /// 浅色主题的奶白粉纸。
-  static const Color paper = Color(0xFFFAF2F7);
+  /// 浅色主题的冷白纸。
+  static const Color paper = Color(0xFFF6F7F9);
 
   /// 评分星：深色用亮金，浅色压深以通过 4.5:1。
   static const Color ratingStarDark = Color(0xFFFFC107);
@@ -37,18 +27,6 @@ abstract final class AppBrand {
 
   static Color ratingStar(Brightness brightness) =>
       brightness == Brightness.dark ? ratingStarDark : ratingStarLight;
-
-  /// 没有封面时，手机媒体库磁贴轮换的品牌家族渐变。
-  static const List<List<Color>> libraryGradients = [
-    [Color(0xFF5A2346), Color(0xFF1C0D17)],
-    [Color(0xFF3F2F6B), Color(0xFF141022)],
-    [Color(0xFF14504A), Color(0xFF0A1C1A)],
-    [Color(0xFF5C2A3A), Color(0xFF1C0F16)],
-    [Color(0xFF2F3F6B), Color(0xFF101522)],
-    [Color(0xFF3A2A5A), Color(0xFF14101E)],
-    [Color(0xFF1E3D5A), Color(0xFF0C1520)],
-    [Color(0xFF3A3F4A), Color(0xFF14161A)],
-  ];
 }
 
 /// 第三方媒体服务器的官方标识色。只用于 Emby/Jellyfin/Plex 标记本身，
@@ -85,44 +63,25 @@ abstract final class AppSemantic {
       brightness == Brightness.dark ? warningDark : warningLight;
 }
 
-/// 品牌渐变。主播放按钮用粉到月光紫；氛围层用粉/青单层四段渐变。
+/// 品牌渐变。只剩首页头图与详情头部的单色相氛围层；
+/// 主按钮等控件一律实色，不再有品牌渐变。
 abstract final class AppBrandGradient {
-  static const LinearGradient primaryDark = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [AppBrand.pink, AppBrand.lavender],
-  );
-
-  static const LinearGradient primaryLight = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [AppBrand.pinkDeep, AppBrand.lavenderDeep],
-  );
-
-  static LinearGradient primaryFor(Brightness brightness) =>
-      brightness == Brightness.dark ? primaryDark : primaryLight;
+  /// 氛围层渐变的 stop。[ambientFor] 的颜色数与它一一对应。
+  static const List<double> ambientStops = [0, 0.45, 0.8];
 
   /// 首页头图与详情头部的单层氛围渐变。
   ///
-  /// 第一个 stop 是剧照 mood 色，第三个 stop 是固定品牌天青；
-  /// 色相一致性只比较第一个 stop，青色是品牌光，不随剧照变。
-  static LinearGradient ambientFor(
-    Brightness brightness,
-    Color mood, {
-    double alpha = 0.18,
-  }) {
-    final cyan = brightness == Brightness.dark
-        ? AppBrand.cyan
-        : AppBrand.cyanDeep;
+  /// 只有 [mood] 一个色相：从 [alpha] 向同色相的透明溶出，
+  /// 不再叠加固定的第二品牌色 stop。
+  static LinearGradient ambientFor(Color mood, {double alpha = 0.18}) {
     return LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      stops: const [0, 0.55, 0.78, 1],
+      stops: ambientStops,
       colors: [
         mood.withValues(alpha: alpha),
-        AppInk.transparent,
-        cyan.withValues(alpha: alpha / 2),
-        AppInk.transparent,
+        mood.withValues(alpha: alpha * 0.4),
+        mood.withValues(alpha: 0),
       ],
     );
   }

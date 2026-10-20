@@ -10,10 +10,10 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
-// 播放器固定深色：已播品牌粉、缓冲品牌青、底轨中性表面。
+// 播放器固定深色：已播取品牌强调色，缓冲与底轨都是中性色。
 Color get _played => AppPalette.darkTones.accent;
-// 品牌青 55% 叠在 surfaceHigh 上，按 8 位色深取整后的实际像素值。
-const Color _buffered = Color(0xFF50859C);
+// 中性 onSurface 38% 叠在 surfaceHigh 上，按 8 位色深取整后的实际像素值。
+const Color _buffered = Color(0xFF71767C);
 Color get _track => AppPalette.darkTones.surfaceHigh;
 Color get _outline => AppPalette.darkTones.base;
 

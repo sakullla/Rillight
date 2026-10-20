@@ -537,20 +537,50 @@ void main() {
     revived.dispose();
   });
 
-  test('saved servers get distinct, rename-stable avatar colours', () {
-    final ids = [for (var i = 0; i < 8; i++) 'server-$i-${i * 7919}'];
-    final colours = {
-      for (final id in ids) ServerUi.gradientOf(id, among: ids).$1,
-    };
-    // 品牌家族共八组渐变,八台以内不重色。
-    expect(colours, hasLength(ids.length));
-    // The colour depends on the id and the saved set, not on list order.
-    expect(
-      ServerUi.gradientOf(ids[3], among: ids.reversed),
-      ServerUi.gradientOf(ids[3], among: ids),
-    );
-    // Without the saved set the colour is still deterministic.
-    expect(ServerUi.gradientOf('abc'), ServerUi.gradientOf('abc'));
+  testWidgets('server avatars use a solid neutral face and the initial', (
+    tester,
+  ) async {
+    final servers = [
+      _saved('server-a', 'Alpha', ['https://a.example']),
+      _saved('server-b', 'Beta', ['https://b.example']),
+    ];
+    for (final theme in [AppUiTheme.dark(), AppUiTheme.light()]) {
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          theme: theme,
+          home: Row(
+            children: [
+              for (final server in servers)
+                ServerAvatar(key: Key('avatar-${server.id}'), server: server),
+            ],
+          ),
+        ),
+      );
+      final colors = theme.colorScheme;
+      final fills = <Color?>[];
+      for (final server in servers) {
+        final face = tester.widget<Container>(
+          find
+              .descendant(
+                of: find.byKey(Key('avatar-${server.id}')),
+                matching: find.byType(Container),
+              )
+              .first,
+        );
+        final decoration = face.decoration! as BoxDecoration;
+        expect(decoration.gradient, isNull);
+        expect(decoration.boxShadow, isNull);
+        fills.add(decoration.color);
+      }
+      // 不再按 id 分配颜色:两台服务器同底色,只靠首字与名称区分。
+      expect(fills.toSet(), {colors.surfaceContainerHighest});
+      expect(find.text('A'), findsOneWidget);
+      expect(find.text('B'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.text('A')).style?.color,
+        colors.onSurface,
+      );
+    }
   });
 
   test('deleting an unknown server id is a no-op', () async {

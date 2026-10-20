@@ -376,8 +376,11 @@ class BufferedRangesProgressIndicator extends StatelessWidget {
   );
 }
 
-// 播放器固定深色主题：已播品牌粉、缓冲品牌青，底轨用中性墨色。
+// 播放器固定深色主题：已播取品牌强调色，缓冲与底轨都是中性色，
+// 进度条上只出现一个品牌色。
 // 不透明段保证在亮/暗画面上三种状态仍可区分。
+const double _bufferedAlpha = .38;
+
 void _paintTrack(
   Canvas canvas,
   Rect rect, {
@@ -388,10 +391,10 @@ void _paintTrack(
 }) {
   final shape = RRect.fromRectAndRadius(rect, Radius.circular(rect.height / 2));
   final tones = AppPalette.darkTones;
-  // 底轨保持不透明，亮画面上也能看清；缓冲段用品牌青半透明叠在底轨上。
+  // 底轨保持不透明，亮画面上也能看清；缓冲段用中性前景色半透明叠在底轨上。
   final trackBase = tones.surfaceHigh;
   final buffered = Color.alphaBlend(
-    tones.secondary.withValues(alpha: .55),
+    tones.onSurface.withValues(alpha: _bufferedAlpha),
     trackBase,
   );
   canvas.drawRRect(shape.inflate(1), Paint()..color = tones.base);
