@@ -303,7 +303,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                           constraints: const BoxConstraints(maxWidth: 220),
                           child: AppSurfaceAction(
                             key: MobileShell.serverPillKey,
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: BorderRadius.circular(AppRadii.pill),
                             onTap: () =>
                                 showPhoneServerManagerSheet(context, auth),
                             child: DecoratedBox(
@@ -311,7 +311,9 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                 color: homeImmersive
                                     ? scheme.scrim.withValues(alpha: 0.36)
                                     : scheme.surfaceContainerHigh,
-                                borderRadius: BorderRadius.circular(999),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.pill,
+                                ),
                                 border: Border.all(
                                   color: homeImmersive
                                       ? AppInk.white.withValues(alpha: 0.16)
@@ -457,13 +459,10 @@ class _MineAvatar extends StatelessWidget {
     return SizedBox.square(
       dimension: 30,
       child: DecoratedBox(
+        key: const ValueKey('phone-mine-avatar'),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [scheme.primary, scheme.secondary],
-          ),
+          color: scheme.primary,
           border: Border.all(
             color: immersive
                 ? AppInk.white.withValues(alpha: 0.4)

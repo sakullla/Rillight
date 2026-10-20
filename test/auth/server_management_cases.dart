@@ -730,6 +730,15 @@ void main() {
       await auth.restore();
       await pumpServerSelection(tester, auth);
       await serverUiTap(tester, const Key('server-add'));
+      // 粘贴入口卡是中性表面实底,不再是 primary 透明度渐变。
+      final pasteCard = find.byKey(const ValueKey('server-paste-card'));
+      final pasteScheme = ui.AppUiTheme.of(tester.element(pasteCard))
+          .colorScheme;
+      final pasteBox =
+          tester.widget<Container>(pasteCard).decoration! as BoxDecoration;
+      expect(pasteBox.gradient, isNull);
+      expect(pasteBox.color, pasteScheme.surfaceContainer);
+      expect(pasteBox.borderRadius, BorderRadius.circular(ui.AppRadii.lg));
       await serverUiTap(tester, const Key('server-add-paste'));
       await tester.enterText(
         find.byKey(const Key('server-paste-text')),

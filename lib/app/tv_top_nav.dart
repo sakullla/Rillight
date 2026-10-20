@@ -218,15 +218,12 @@ class _Brand extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     final mark = Container(
+      key: const ValueKey('tv-nav-brand-mark'),
       width: 22 * s,
       height: 22 * s,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6 * s),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
-        ),
+        color: theme.colorScheme.primary,
       ),
       child: Icon(
         AppIcons.play,

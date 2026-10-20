@@ -163,23 +163,13 @@ class ServerAddPanelState extends State<ServerAddPanel> {
               builder: (context) {
                 final theme = AppUiTheme.of(context);
                 final colors = theme.colorScheme;
-                final dark = colors.brightness == Brightness.dark;
                 return Container(
+                  key: const ValueKey('server-paste-card'),
                   padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        colors.primary.withValues(alpha: dark ? .18 : .10),
-                        colors.primary.withValues(alpha: dark ? .06 : .03),
-                      ],
-                    ),
-                    border: Border.all(
-                      color: colors.primary.withValues(alpha: dark ? .25 : .18),
-                      width: .8,
-                    ),
+                    borderRadius: BorderRadius.circular(ServerUi.cardRadius),
+                    color: colors.surfaceContainer,
+                    border: Border.all(color: colors.outlineVariant, width: .8),
                   ),
                   child: Row(
                     children: [

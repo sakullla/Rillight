@@ -222,16 +222,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
           final gutter = tvSafeGutter(size.width);
           final vertical = tvSafeVertical(size.height);
           return DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(-.8, -.9),
-                radius: 1.4,
-                colors: [
-                  scheme.primary.withValues(alpha: .14),
-                  theme.scaffoldBackgroundColor,
-                ],
-              ),
-            ),
+            key: const ValueKey('tv-connect-background'),
+            decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
             child: SafeArea(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(gutter, vertical, gutter, 0),
@@ -513,15 +505,12 @@ class _Brand extends StatelessWidget {
     return Row(
       children: [
         Container(
+          key: const ValueKey('tv-connect-brand-mark'),
           width: 30 * s,
           height: 30 * s,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadii.sm * s),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
-            ),
+            color: theme.colorScheme.primary,
           ),
           child: Icon(
             AppIcons.play,

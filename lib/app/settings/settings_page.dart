@@ -1586,12 +1586,11 @@ class _AppearancePreviewTileState extends State<_AppearancePreviewTile> {
           ),
           const SizedBox(height: 7),
           Container(
+            key: const ValueKey('appearance-preview-hero'),
             height: 34,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              gradient: LinearGradient(
-                colors: [tones.accentContainer, tones.secondaryContainer],
-              ),
+              borderRadius: BorderRadius.circular(AppRadii.xs),
+              color: tones.accentContainer,
             ),
             padding: const EdgeInsets.all(6),
             alignment: Alignment.bottomLeft,

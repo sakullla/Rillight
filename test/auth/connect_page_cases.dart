@@ -159,6 +159,45 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets(
+    'wide connect hero panel is a solid surface without brand gradients',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final auth = controller();
+      await tester.pumpWidget(RillightApp(auth: auth));
+      await _settle(tester);
+
+      final panel = find.byKey(const ValueKey('connect-hero-panel'));
+      expect(panel, findsOneWidget);
+      final scheme = AppUiTheme.of(tester.element(panel)).colorScheme;
+      final box =
+          tester.widget<DecoratedBox>(panel).decoration as BoxDecoration;
+      expect(box.gradient, isNull);
+      expect(box.color, scheme.surfaceContainerLow);
+      // 整页没有残留的 primary/secondary 装饰渐变。
+      final opaque = {
+        scheme.primary.withValues(alpha: 1),
+        scheme.secondary.withValues(alpha: 1),
+      };
+      for (final decorated in tester.widgetList<DecoratedBox>(
+        find.byType(DecoratedBox),
+      )) {
+        final decoration = decorated.decoration;
+        if (decoration is! BoxDecoration) continue;
+        final colors = decoration.gradient?.colors ?? const <Color>[];
+        expect(
+          colors.where((color) => opaque.contains(color.withValues(alpha: 1))),
+          isEmpty,
+        );
+      }
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('two lines can be selected and a failed line stays on connect', (
     tester,
   ) async {

@@ -964,6 +964,19 @@ void main() {
       ),
       findsOneWidget,
     );
+    // 首字头像是中性表面实底,不再按姓名取 primary/secondary/tertiary 渐变。
+    final initial = tester.widget<DecoratedBox>(
+      find.descendant(
+        of: missing,
+        matching: find.byKey(const ValueKey('cast-initial-avatar')),
+      ),
+    );
+    final decoration = initial.decoration as BoxDecoration;
+    expect(decoration.gradient, isNull);
+    expect(
+      decoration.color,
+      AppUiTheme.dark().colorScheme.surfaceContainerHigh,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -1008,6 +1021,14 @@ void main() {
         ),
       );
       expect(fallbackPlay, isNotEmpty);
+      for (final art in tester.widgetList<DecoratedBox>(
+        find.descendant(
+          of: find.byType(ChapterFallbackArt),
+          matching: find.byType(DecoratedBox),
+        ),
+      )) {
+        expect((art.decoration as BoxDecoration).gradient, isNull);
+      }
       for (final icon in fallbackPlay) {
         expect(icon.icon, AppIcons.play);
         expect(icon.fill, AppIcons.filled);

@@ -1054,23 +1054,10 @@ class _HeroPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final dark = theme.brightness == Brightness.dark;
     return DecoratedBox(
+      key: const ValueKey('connect-hero-panel'),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(
-              scheme.primary.withValues(alpha: dark ? .20 : .12),
-              scheme.surfaceContainerLow,
-            ),
-            Color.alphaBlend(
-              scheme.secondary.withValues(alpha: dark ? .10 : .06),
-              scheme.surfaceContainerLowest,
-            ),
-          ],
-        ),
+        color: scheme.surfaceContainerLow,
         border: Border(
           right: BorderSide(color: scheme.outlineVariant.withValues(alpha: .4)),
         ),

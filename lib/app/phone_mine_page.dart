@@ -142,17 +142,11 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         children: [
           // 身份卡：头像、用户名、服务器与线路。整张卡点开服务器管理。
           Container(
+            key: const ValueKey('mobile-mine-identity-card'),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color.lerp(scheme.surfaceContainerHigh, scheme.primary, .22)!,
-                  scheme.surfaceContainer,
-                ],
-              ),
-              border: Border.all(color: scheme.primary.withValues(alpha: 0.24)),
+              borderRadius: BorderRadius.circular(AppRadii.xl),
+              color: scheme.surfaceContainer,
+              border: Border.all(color: scheme.outlineVariant),
             ),
             clipBehavior: Clip.antiAlias,
             child: AppSurfaceAction(
@@ -162,16 +156,13 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 child: Row(
                   children: [
                     Container(
+                      key: const ValueKey('mobile-mine-avatar'),
                       width: 64,
                       height: 64,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [scheme.primary, scheme.secondary],
-                        ),
+                        color: scheme.primary,
                       ),
                       child: initial == null
                           ? Icon(

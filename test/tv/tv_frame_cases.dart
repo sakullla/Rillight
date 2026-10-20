@@ -1,4 +1,5 @@
 import '../helpers/cupertino_test_app.dart';
+import '../helpers/settle.dart';
 import '../helpers/widget_harness.dart';
 
 import 'dart:math' as math;
@@ -6,7 +7,12 @@ import 'dart:math' as math;
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:flutter/services.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/tv_top_nav.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/tv_connect_page.dart';
 
 void main() {
   testWidgets(
@@ -210,6 +216,59 @@ void main() {
     },
   );
 
+  testWidgets(
+    'TV login background and brand marks are solid, without brand gradients',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 720);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final auth = AuthController.memory();
+      addTearDown(auth.dispose);
+      for (final theme in [AppUiTheme.tvDark(), AppUiTheme.tvLight()]) {
+        Widget host(Widget child) => CupertinoTestApp(
+          theme: theme,
+          locale: const Locale('zh', 'CN'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          home: AuthScope(controller: auth, child: child),
+        );
+
+        await tester.pumpWidget(host(const TvConnectPage()));
+        await settle(tester);
+        final page = AppUiTheme.of(
+          tester.element(find.byKey(const ValueKey('tv-connect-background'))),
+        );
+        final background = _boxOf(tester, 'tv-connect-background');
+        expect(background.gradient, isNull);
+        expect(background.color, page.scaffoldBackgroundColor);
+        final loginMark = _containerBoxOf(tester, 'tv-connect-brand-mark');
+        expect(loginMark.gradient, isNull);
+        expect(loginMark.color, page.colorScheme.primary);
+        expect(_brandGradients(tester), isEmpty);
+
+        await tester.pumpWidget(
+          host(
+            CupertinoPageScaffold(
+              child: TvTopNavBar(index: 0, onSelect: (_) {}, onEnter: (_) {}),
+            ),
+          ),
+        );
+        await tester.pump();
+        final nav = AppUiTheme.of(
+          tester.element(find.byKey(const ValueKey('tv-nav-brand-mark'))),
+        );
+        final navMark = _containerBoxOf(tester, 'tv-nav-brand-mark');
+        expect(navMark.gradient, isNull);
+        expect(navMark.color, nav.colorScheme.primary);
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
   testWidgets('TV sizes scale with the logical canvas, not physical pixels', (
     tester,
   ) async {
@@ -255,6 +314,34 @@ void main() {
     );
     expect(scale, closeTo(4 / 3, .001));
   });
+}
+
+BoxDecoration _boxOf(WidgetTester tester, String key) =>
+    tester.widget<DecoratedBox>(find.byKey(ValueKey(key))).decoration
+        as BoxDecoration;
+
+BoxDecoration _containerBoxOf(WidgetTester tester, String key) =>
+    tester.widget<Container>(find.byKey(ValueKey(key))).decoration
+        as BoxDecoration;
+
+/// 页面上仍在使用 primary/secondary 品牌色的装饰渐变。
+List<Gradient> _brandGradients(WidgetTester tester) {
+  final scheme = AppUiTheme.of(tester.element(find.byType(TvConnectPage)))
+      .colorScheme;
+  return [
+    for (final box in tester.widgetList<DecoratedBox>(
+      find.byType(DecoratedBox),
+    ))
+      if (box.decoration case BoxDecoration(:final gradient?))
+        if (gradient.colors.any(
+          (color) =>
+              color.withValues(alpha: 1) ==
+                  scheme.primary.withValues(alpha: 1) ||
+              color.withValues(alpha: 1) ==
+                  scheme.secondary.withValues(alpha: 1),
+        ))
+          gradient,
+  ];
 }
 
 BoxDecoration _decoration(WidgetTester tester, String key) =>

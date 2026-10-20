@@ -275,6 +275,20 @@ void main() {
       find.byKey(const ValueKey('settings-section-弹幕配置')),
     );
     expect(about.dy, greaterThan(danmaku.dy));
+    // 外观预览缩略窗的 hero 色块是 accentContainer 实色,不再与 secondary 渐变。
+    final heroes = find.byKey(const ValueKey('appearance-preview-hero'));
+    expect(heroes, findsWidgets);
+    for (final hero in tester.widgetList<Container>(heroes)) {
+      final box = hero.decoration! as BoxDecoration;
+      expect(box.gradient, isNull);
+      expect(
+        box.color,
+        anyOf(
+          AppUiTheme.lightTones.accentContainer,
+          AppUiTheme.darkTones.accentContainer,
+        ),
+      );
+    }
 
     await expandSection(tester, '播放');
     expect(find.byKey(SettingsPage.appearanceKey), findsNothing);

@@ -446,6 +446,23 @@ void main() {
       tester.widget<Icon>(find.byIcon(AppIcons.play)).fill,
       AppIcons.filled,
     );
+    // 章节占位是中性表面实底,不再是 primaryContainer 渐变。
+    final art = tester.widget<DecoratedBox>(
+      find
+          .descendant(
+            of: find.byType(ChapterFallbackArt),
+            matching: find.byType(DecoratedBox),
+          )
+          .first,
+    );
+    final decoration = art.decoration as BoxDecoration;
+    expect(decoration.gradient, isNull);
+    expect(
+      decoration.color,
+      AppUiTheme.of(tester.element(find.byType(ChapterFallbackArt)))
+          .colorScheme
+          .surfaceContainerHigh,
+    );
 
     await tester.pumpWidget(
       host(

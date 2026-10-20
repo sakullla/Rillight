@@ -491,6 +491,15 @@ void main() {
 
         router.pop();
         await _homeSettle(tester);
+        // 顶栏账户头像是 primary 实色圆,不再是 primary→secondary 渐变。
+        final avatar = find.byKey(const ValueKey('phone-mine-avatar'));
+        final avatarBox =
+            tester.widget<DecoratedBox>(avatar).decoration as BoxDecoration;
+        expect(avatarBox.gradient, isNull);
+        expect(
+          avatarBox.color,
+          AppUiTheme.of(tester.element(avatar)).colorScheme.primary,
+        );
         await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
         await _homeSettle(tester);
         expect(find.byType(PhoneMinePage), findsOneWidget);
@@ -2561,6 +2570,27 @@ void main() {
         await _pump(tester, auth: auth, catalog: catalog);
         expect(find.text('alice'), findsOneWidget);
         expect(find.byKey(PhoneMinePage.userKey), findsOneWidget);
+        // 身份卡是 surfaceContainer 实底加 outlineVariant 细边,头像 primary 实色。
+        final card = find.byKey(const ValueKey('mobile-mine-identity-card'));
+        final mineScheme = AppUiTheme.of(tester.element(card)).colorScheme;
+        final cardBox =
+            tester.widget<Container>(card).decoration! as BoxDecoration;
+        expect(cardBox.gradient, isNull);
+        expect(cardBox.color, mineScheme.surfaceContainer);
+        expect(
+          (cardBox.border! as Border).top.color,
+          mineScheme.outlineVariant,
+        );
+        expect(cardBox.borderRadius, BorderRadius.circular(AppRadii.xl));
+        final mineAvatar =
+            tester
+                    .widget<Container>(
+                      find.byKey(const ValueKey('mobile-mine-avatar')),
+                    )
+                    .decoration!
+                as BoxDecoration;
+        expect(mineAvatar.gradient, isNull);
+        expect(mineAvatar.color, mineScheme.primary);
         expect(
           find.descendant(
             of: find.byType(PhoneTopBar),

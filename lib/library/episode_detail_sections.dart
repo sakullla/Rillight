@@ -1058,24 +1058,11 @@ class _PersonPosterState extends State<_PersonPoster> {
     final name = widget.person.name.trim();
     final theme = AppUiTheme.of(context);
     if (widget.metrics.circle) {
-      // 没有头像:按姓名取一组稳定的柔和渐变,首字放大,不再是一片灰。
+      // 没有头像:中性表面实底,首字放大;演职员靠首字与姓名区分,不再按姓名取色。
       final scheme = theme.colorScheme;
-      final palette = [
-        scheme.primaryContainer,
-        scheme.secondaryContainer,
-        scheme.tertiaryContainer,
-      ];
-      final seed = name.runes.fold<int>(0, (sum, rune) => sum + rune);
-      final base = palette[seed % palette.length];
-      final accent = palette[(seed + 1) % palette.length];
       return DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [base, Color.lerp(base, accent, 0.6)!],
-          ),
-        ),
+        key: const ValueKey('cast-initial-avatar'),
+        decoration: BoxDecoration(color: scheme.surfaceContainerHigh),
         child: Center(
           child: Text(
             name.isEmpty ? '?' : name.characters.first,
@@ -2204,8 +2191,8 @@ class EpisodeMetadataSection extends StatelessWidget {
   }
 }
 
-/// 章节没有服务器剪影时：主色渐变底 + 章节序号，一排章节读起来是一段顺序，
-/// 而不是一排灰块。手机与桌面章节卡共用。
+/// 章节没有服务器剪影时：中性表面实底 + 章节序号，一排章节靠序号读出顺序。
+/// 手机与桌面章节卡共用。
 class ChapterFallbackArt extends StatelessWidget {
   const ChapterFallbackArt({super.key, required this.index});
 
@@ -2216,13 +2203,7 @@ class ChapterFallbackArt extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [scheme.primaryContainer, scheme.surfaceContainerHigh],
-        ),
-      ),
+      decoration: BoxDecoration(color: scheme.surfaceContainerHigh),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -2232,7 +2213,7 @@ class ChapterFallbackArt extends StatelessWidget {
             child: Text(
               (index + 1).toString().padLeft(2, '0'),
               style: theme.textTheme.headlineLarge?.copyWith(
-                color: scheme.onPrimaryContainer.withValues(alpha: .28),
+                color: scheme.onSurfaceVariant.withValues(alpha: .28),
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
@@ -2242,7 +2223,7 @@ class ChapterFallbackArt extends StatelessWidget {
               AppIcons.play,
               fill: AppIcons.filled,
               size: 30,
-              color: scheme.onPrimaryContainer.withValues(alpha: .8),
+              color: scheme.onSurfaceVariant.withValues(alpha: .8),
             ),
           ),
         ],
