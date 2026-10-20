@@ -641,12 +641,14 @@ extension PageCaptures on CaptureSession {
                             : AppUiTheme.phoneLight())
                       : (dark ? AppUiTheme.dark() : AppUiTheme.light()))
                   .colorScheme;
-          // 海报取色只染表面与色调容器,主操作保持品牌色。
+          // 海报取色只染 7 个表面字段;主容器、选中态与主操作保持品牌色。
           expect(
-            scheme.primaryContainer,
-            isNot(base.primaryContainer),
-            reason: 'The $tone genre capture must show resolved artwork colors',
+            scheme.surfaceContainerHighest,
+            isNot(base.surfaceContainerHighest),
+            reason:
+                'The $tone genre capture must show resolved artwork surface colors',
           );
+          expect(scheme.primaryContainer, base.primaryContainer);
           expect(scheme.primary, base.primary);
           await save('detail-genres-$tone');
           server.items.removeWhere((item) => item.id == id);
@@ -1341,6 +1343,139 @@ extension PageCaptures on CaptureSession {
         'login-appearance',
       );
     }
+  }
+}
+
+/// 首页三种整页状态:空库、设备离线、服务器离线。
+///
+/// 目录控制器在失败后先按 2s/6s/20s 静默重试,耗尽才落为整页错误态;
+/// 这里用跨越重试节拍的整帧推进,避免逐 20ms 空转。
+extension HomeFailureCaptures on CaptureSession {
+  static const _failureStates = <CaptureCatalogFailure, String>{
+    CaptureCatalogFailure.empty: 'home-empty-library',
+    CaptureCatalogFailure.deviceOffline: 'home-device-offline',
+    CaptureCatalogFailure.serverOffline: 'home-server-offline',
+  };
+
+  static const _titles = <CaptureCatalogFailure, String>{
+    CaptureCatalogFailure.empty: '这个服务器还没有内容',
+    CaptureCatalogFailure.deviceOffline: '设备未联网',
+    CaptureCatalogFailure.serverOffline: '无法连接服务器',
+  };
+
+  static const _primaryLabels = <CaptureCatalogFailure, String>{
+    CaptureCatalogFailure.empty: '去媒体库',
+    CaptureCatalogFailure.deviceOffline: '重试',
+    CaptureCatalogFailure.serverOffline: '重试',
+  };
+
+  static const _secondaryLabels = <CaptureCatalogFailure, String>{
+    CaptureCatalogFailure.empty: '刷新',
+    CaptureCatalogFailure.deviceOffline: '切换服务器',
+    CaptureCatalogFailure.serverOffline: '更换线路',
+  };
+
+  /// 每台状态使用一台从未载入过目录的合成服务器。
+  ///
+  /// 目录缓存按服务器身份隔离,并且会磁盘持久化;复用当前服务器会先显示
+  /// 上一状态缓存的真实条目,截不到整页空态/失败态。新身份等效于刚添加
+  /// 的服务器首次打开首页。
+  Future<void> _connectFreshServer(
+    RillightApp app,
+    AuthController auth,
+    CaptureAdapter adapter,
+    FakeEmbyServer template,
+    String suffix,
+  ) async {
+    final fresh = FakeEmbyServer(
+      serverId: 'capture-failure-$suffix',
+      serverName: '合成服务器 · $suffix',
+      baseUrl: Uri.parse('http://capture-failure-$suffix.test:8096'),
+      views: template.views,
+      items: template.items,
+    );
+    adapter.add(fresh);
+    // CaptureAdapter 用构造时列表同步各线路签发的令牌;后加的服务器也要登记。
+    adapter.servers.add(fresh);
+    final backup = FakeEmbyServer(
+      serverId: 'capture-failure-$suffix',
+      serverName: '合成服务器 · $suffix',
+      baseUrl: Uri.parse('http://capture-failure-$suffix-backup.test:8096'),
+      views: template.views,
+      items: template.items,
+    );
+    adapter.add(backup);
+    adapter.servers.add(backup);
+    await tester.runAsync(() async {
+      await auth.connect(
+        address: fresh.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      // 两条线路才会在服务器离线时给出「更换线路」而不是「切换服务器」。
+      await auth.addLine(auth.session!.server.id, backup.baseUrl.toString());
+    });
+    // 换服务器的同时重建内容壳层:沿用旧控制器会先显示上一台的条目。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await advance(150);
+    await tester.pumpWidget(RepaintBoundary(key: boundary, child: app));
+    await advance(900);
+    // PageStorage 会记住上次停留的标签页/面板;失败态必须落在首页本身。
+    if (platform == 'phone') {
+      final homeTab = find.descendant(
+        of: find.byType(CupertinoTabBar),
+        matching: find.text('首页'),
+      );
+      if (homeTab.evaluate().isNotEmpty) {
+        await tester.tap(homeTab);
+        await advance(700);
+      }
+    } else if (platform == 'tv') {
+      if (find.byKey(const ValueKey('tv-nav-0')).evaluate().isNotEmpty) {
+        await tap(const ValueKey('tv-nav-0'));
+        await advance(700);
+      }
+    }
+  }
+
+  Future<void> homeFailureStates(
+    RillightApp app,
+    AuthController auth,
+    CaptureAdapter adapter,
+    FakeEmbyServer template,
+  ) async {
+    if (!_failureStates.values.any(shouldCapture)) return;
+    var index = 0;
+    for (final entry in _failureStates.entries) {
+      if (!shouldCapture(entry.value)) continue;
+      final failure = entry.key;
+      adapter.catalogFailure = failure;
+      await _connectFreshServer(app, auth, adapter, template, '${++index}');
+      final title = _titles[failure]!;
+      for (var attempt = 0; attempt < 6; attempt++) {
+        if (find.text(title).evaluate().isNotEmpty) break;
+        // 2s / 6s / 20s 三次静默重试后才会显示错误态。
+        await tester.pump(const Duration(seconds: 21));
+        await advance(300);
+      }
+      expect(
+        find.text(title),
+        findsWidgets,
+        reason: '${entry.value} 必须显示独立标题而不是通用空态',
+      );
+      expect(
+        find.text(_primaryLabels[failure]!),
+        findsWidgets,
+        reason: '${entry.value} 缺少主操作',
+      );
+      expect(
+        find.text(_secondaryLabels[failure]!),
+        findsWidgets,
+        reason: '${entry.value} 缺少次操作',
+      );
+      await save(entry.value);
+    }
+    adapter.catalogFailure = null;
   }
 }
 

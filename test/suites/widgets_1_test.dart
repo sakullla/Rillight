@@ -11,35 +11,31 @@ void main() {
     caseEntrypoints['auth/login_widgets_cases.dart']!,
   );
   group(
-    'auth/phone_server_manager_test.dart',
-    caseEntrypoints['auth/phone_server_manager_cases.dart']!,
-  );
-  group(
-    'auth/provider_connect_routing_test.dart',
-    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
-  );
-  group(
-    'home/hero_playback_actions_test.dart',
-    caseEntrypoints['home/hero_playback_actions_cases.dart']!,
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
   );
   group(
     'library/person_works_test.dart',
     caseEntrypoints['library/person_works_cases.dart']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 3]',
-    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
-  );
-  group(
     'mobile/phone_detail_rows_test.dart',
     caseEntrypoints['mobile/phone_detail_rows_cases.dart']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
+    'player/desktop_player_window_host_test.dart',
+    caseEntrypoints['player/desktop_player_window_host_cases.dart']!,
   );
   group(
-    'widgets/scrim_icon_button_test.dart',
-    caseEntrypoints['widgets/scrim_icon_button_cases.dart']!,
+    'tv/tv_lan_pair_test.dart [part 1]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
+  );
+  group(
+    'widgets/app_button_test.dart',
+    caseEntrypoints['widgets/app_button_cases.dart']!,
+  );
+  group(
+    'widgets/backdrop_scrim_test.dart',
+    caseEntrypoints['widgets/backdrop_scrim_cases.dart']!,
   );
 }

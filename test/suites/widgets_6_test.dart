@@ -7,43 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/content_theme_test.dart',
-    caseEntrypoints['app/content_theme_cases.dart']!,
+    'app/browsing_polish_test.dart',
+    caseEntrypoints['app/browsing_polish_cases.dart']!,
   );
   group(
-    'app/startup_history_recovery_test.dart',
-    caseEntrypoints['app/startup_history_recovery_cases.dart']!,
+    'auth/connect_page_test.dart',
+    caseEntrypoints['auth/connect_page_cases.dart']!,
   );
   group(
     'auth/server_management_test.dart',
     caseEntrypoints['auth/server_management_cases.dart']!,
   );
   group(
-    'catalog/desktop_provider_filter_test.dart',
-    caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
+    'catalog/shelf_grid_scroll_rebuild_test.dart',
+    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
   );
   group(
-    'catalog/item_detail_test.dart [part 1]',
-    caseEntrypoints['catalog/item_detail_cases.dart#0']!,
+    'library/external_link_test.dart',
+    caseEntrypoints['library/external_link_cases.dart']!,
   );
   group(
-    'home/library_tiles_test.dart',
-    caseEntrypoints['home/library_tiles_cases.dart']!,
-  );
-  group(
-    'mobile/mobile_flow_test.dart [part 2]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#1']!,
+    'media_image/blurred_artwork_test.dart',
+    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
   );
   group(
     'mobile/phone_player_test.dart [part 1]',
     caseEntrypoints['mobile/phone_player_cases.dart#0']!,
   );
   group(
+    'player/android_seek_cancellation_test.dart',
+    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
+  );
+  group(
     'player/player_controls_test.dart',
     caseEntrypoints['player/player_controls_cases.dart']!,
   );
   group(
-    'widgets/desktop_back_button_test.dart',
-    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
+    'widgets/skeleton_test.dart',
+    caseEntrypoints['widgets/skeleton_cases.dart']!,
   );
 }

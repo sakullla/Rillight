@@ -459,6 +459,15 @@
     ]
   },
   {
+    "id": "home-device-offline",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
     "id": "home-display",
     "feature": "home",
     "platforms": [
@@ -470,6 +479,15 @@
     "feature": "home",
     "platforms": [
       "desktop"
+    ]
+  },
+  {
+    "id": "home-empty-library",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
@@ -508,6 +526,15 @@
   },
   {
     "id": "home-return",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "home-server-offline",
     "feature": "home",
     "platforms": [
       "desktop",

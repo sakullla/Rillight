@@ -93,6 +93,41 @@
 - **演职员**:宽桌面改为圆形头像(直径为海报宽的 72%,夹在 104–148),姓名与角色居中;人像按偏上的位置裁切让脸留在圆内;无图时按姓名取一组柔和渐变并放大首字。窄于 600 的桌面窗口、手机与 TV 不变。
 - 截图新增桌面 `home-libraries-menu`。
 
+## 番剧深夜档品牌（2026-10-19）
+
+定位是「深夜补番的私人放映室」：整体安静，品牌色只在需要被看见的地方出现。
+
+- **色板原则**：所有界面从 `AppBrand` 取色。深色以近黑紫 `AppBrand.ink` 为底，
+  樱花粉 `pink` 是主强调、天青 `cyan` 是辅助，月光紫 `lavender` 只用于品牌渐变；
+  浅色用奶白粉纸 `paper`，主强调压深为 `pinkDeep` 保证 4.5:1。错误、成功、警告
+  各有明暗两档语义色（`AppSemantic`），不再散落独立十六进制。
+- **渐变边界**：`HeroPaletteOverlay` 是图片之上、可读性遮罩之下的单层四段渐变：
+  剧照 mood 色（透明度不超过 0.18）→ 透明 → 固定品牌天青 → 透明，底部回到透明，
+  由页面底色继续向下，不产生「头图染色、页面不染」的硬边。`ContentTheme` 只染
+  7 个表面字段，`primaryContainer`、选中态和错误色保持品牌定义，不随剧照变化。
+- **动态来源与 paletteKey**：首页头图与详情共用 `resolveThemeArtwork` 选取剧照，
+  再用账号作用域、条目 id、类型与图片 tag 组成 `paletteKey`；缓存按
+  `paletteKey + 明暗` 记录 mood。详情固定用 backdrop 取色；手机相邻页的
+  `HeroPaletteOverlay` 只接受当前 `activePaletteKey` 的上报，预取页不会串色。
+  同一剧照在首页与详情的第一 stop 色相偏差控制在 15 度以内。
+- **TV 与播放器边界**：TV 首页和 TV 详情不创建 `HeroPaletteOverlay` 或
+  `ContentTheme`，保持中性石墨舞台；播放器（桌面、手机、TV）始终固定深色，
+  不接剧照动态色，也不随应用浅色主题反转。TV 播放器不新增弹幕入口。
+- **颜色白名单**：`test/app/color_hygiene_test.dart` 扫描 `lib` 内所有
+  `Color(0x...)` 字面量，白名单只保留品牌/调色板/token 定义、第三方服务标记
+  （`lib/library/provider_marks.dart`）与弹幕预设
+  （`lib/player/danmaku/danmaku_display_form.dart`）。页面与共享控件必须改用
+  `AppInk`、`AppScrim`、`AppBrand`、`AppSemantic`；越界时测试输出
+  `path:line: 源码行`。
+- **评分星**：所有评分星读取 `AppBrand.ratingStar(brightness)`：深色用亮金
+  `ratingStarDark`，浅色用压深金 `ratingStarLight`，不再使用 `scheme.primary`
+  或页面自带的第二套金色。
+
+首页三种整页状态（`home-empty-library`、`home-device-offline`、
+`home-server-offline`）分别使用空库、设备离线、服务器离线的标题、原因与主次操作；
+空库给「去媒体库／刷新」，设备离线给「重试／切换服务器」，服务器离线且有备用线路时
+给「重试／更换线路」。
+
 ## 联网查阅的来源
 
 - [Emby Items API](https://dev.emby.media/reference/RestAPI/ItemsService/getItems.html)：观看状态、收藏、继续观看、年份、流派和排序参数。`Genres` 多值使用竖线，`Years` 和 `Filters` 使用逗号。

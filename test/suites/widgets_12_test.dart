@@ -7,43 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'aggregation/playback_runtime_test.dart [part 3]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#2']!,
+  );
+  group(
     'app/appearance_test.dart',
     caseEntrypoints['app/appearance_cases.dart']!,
   );
   group(
-    'app/browsing_polish_test.dart',
-    caseEntrypoints['app/browsing_polish_cases.dart']!,
+    'auth/provider_connect_management_test.dart',
+    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
   );
   group(
-    'auth/connect_page_test.dart',
-    caseEntrypoints['auth/connect_page_cases.dart']!,
+    'home/hero_artwork_test.dart',
+    caseEntrypoints['home/hero_artwork_cases.dart']!,
   );
   group(
-    'catalog/library_filter_test.dart',
-    caseEntrypoints['catalog/library_filter_cases.dart']!,
+    'library/source_detail_route_test.dart [part 3]',
+    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
   );
   group(
-    'catalog/shelf_grid_scroll_rebuild_test.dart',
-    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
-  );
-  group(
-    'mobile/phone_detail_redesign_test.dart',
-    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
+    'mobile/mobile_flow_test.dart [part 2]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#1']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 2]',
     caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'player/android_seek_cancellation_test.dart',
-    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
+    'mobile/tv_shelf_focus_test.dart',
+    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_renderer_test.dart',
     caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
   );
   group(
-    'widgets/skeleton_test.dart',
-    caseEntrypoints['widgets/skeleton_cases.dart']!,
+    'widgets/liquid_glass_test.dart',
+    caseEntrypoints['widgets/liquid_glass_cases.dart']!,
   );
 }

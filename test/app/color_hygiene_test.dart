@@ -15,12 +15,12 @@ const Set<String> rawColorAllowlist = {
   'lib/player/danmaku/danmaku_display_form.dart',
 };
 
-/// `Color` 后允许跨空白与换行再跟 `0x` 十六进制(6 位 RGB 或 8 位 ARGB)。
+/// `Color` 后允许跨空白与换行再跟 `0x`/`0X` 十六进制(6 位 RGB 或 8 位 ARGB)。
 ///
 /// 按整份文件内容匹配而不是逐行匹配:dart format 会把超长调用拆成
 /// `const Color(` + 换行 + `0xff000000,` + 换行 + `)`,逐行扫描会整段漏掉。
 final RegExp _rawColorPattern = RegExp(
-  r'Color\s*\(\s*0x(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6})\b',
+  r'Color\s*\(\s*0[xX](?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6})\b',
 );
 
 /// 字符偏移对应的 1 基行号。
@@ -126,6 +126,11 @@ void main() {
     expect(
       rawColorViolations('lib/b.dart', 'const c = Color ( 0x80FF7FA8 );'),
       hasLength(1),
+    );
+    expect(
+      rawColorViolations('lib/c.dart', 'const c = Color(0XFF7FA8);'),
+      hasLength(1),
+      reason: 'Dart 允许大写 0X 前缀,扫描不能漏掉',
     );
   });
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -366,6 +367,28 @@ FakeEmbyServer captureServer() {
   return server;
 }
 
+/// 首页整页失败/空态捕获的合成传输故障。
+enum CaptureCatalogFailure {
+  /// 行数据为空,但服务器仍提供媒体库。
+  empty,
+
+  /// 设备没有可用网络:ENETUNREACH / OSError 101。
+  deviceOffline,
+
+  /// 服务器没有响应:接收超时。
+  serverOffline,
+}
+
+/// 只拦首页目录请求,不碰图片、认证和详情,避免故障泄漏到其它截图状态。
+bool _isCatalogRequest(Uri uri) {
+  final path = uri.path;
+  return path.endsWith('/Views') ||
+      path.endsWith('/Items') ||
+      path.endsWith('/Items/Resume') ||
+      path.endsWith('/Items/Latest') ||
+      path.endsWith('/Shows/NextUp');
+}
+
 /// In-memory transport: no real server, credentials, image host or native core.
 class CaptureAdapter extends FakeEmbyAdapter {
   CaptureAdapter(this.servers) : super(servers);
@@ -375,6 +398,9 @@ class CaptureAdapter extends FakeEmbyAdapter {
   bool failAggregationMirror = false;
   bool emptyAggregationMirror = false;
   bool failLineCheck = false;
+
+  /// 非空时,首页目录请求返回对应故障,用于捕获三种整页状态。
+  CaptureCatalogFailure? catalogFailure;
   final artwork = <String, Uint8List>{};
 
   @override
@@ -383,6 +409,38 @@ class CaptureAdapter extends FakeEmbyAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    final failure = catalogFailure;
+    if (failure != null && _isCatalogRequest(options.uri)) {
+      switch (failure) {
+        case CaptureCatalogFailure.empty:
+          // 媒体库列表仍走真实响应,只有条目为空,空态才能给出「去媒体库」。
+          if (!options.uri.path.endsWith('/Views')) {
+            return ResponseBody.fromString(
+              '{"Items":[],"TotalRecordCount":0}',
+              200,
+              headers: {
+                Headers.contentTypeHeader: ['application/json'],
+              },
+            );
+          }
+          break;
+        case CaptureCatalogFailure.deviceOffline:
+          throw DioException(
+            requestOptions: options,
+            type: DioExceptionType.connectionError,
+            error: SocketException(
+              'Network is unreachable',
+              osError: OSError('ENETUNREACH', 101),
+            ),
+          );
+        case CaptureCatalogFailure.serverOffline:
+          throw DioException(
+            requestOptions: options,
+            type: DioExceptionType.receiveTimeout,
+            message: 'Synthetic server timeout',
+          );
+      }
+    }
     if (failLineCheck && options.uri.path.endsWith('/System/Info/Public')) {
       throw DioException(
         requestOptions: options,

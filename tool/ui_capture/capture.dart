@@ -814,6 +814,9 @@ void main() {
             snapshots,
           );
         }
+        if (capture.wants('home')) {
+          await capture.homeFailureStates(app, auth, adapter, server);
+        }
         await tester.pumpWidget(const SizedBox.shrink());
         await capture.advance(500);
         await history.close();

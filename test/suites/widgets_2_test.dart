@@ -7,33 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/app_shell_top_bar_test.dart',
-    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
+    'aggregation/playback_runtime_test.dart [part 1]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#0']!,
+  );
+  group(
+    'catalog/catalog_browse_test.dart',
+    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
   );
   group(
     'catalog/filter_panel_test.dart',
     caseEntrypoints['catalog/filter_panel_cases.dart']!,
   );
   group(
-    'mobile/motion_behaviors_test.dart',
-    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
+    'home/hero_logo_test.dart',
+    caseEntrypoints['home/hero_logo_cases.dart']!,
   );
   group(
-    'player/subtitle_menu_test.dart',
-    caseEntrypoints['player/subtitle_menu_cases.dart']!,
-  );
-  group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
-  group(
-    'tv/tv_lan_pair_test.dart [part 1]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
+    'home/hero_playback_actions_test.dart',
+    caseEntrypoints['home/hero_playback_actions_cases.dart']!,
   );
   group(
-    'tv/tv_lan_pair_test.dart [part 2]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#1']!,
+    'player/ended_navigation_test.dart',
+    caseEntrypoints['player/ended_navigation_cases.dart']!,
   );
   group(
-    'widgets/liquid_glass_test.dart',
-    caseEntrypoints['widgets/liquid_glass_cases.dart']!,
+    'tv/tv_detail_test.dart [part 1]',
+    caseEntrypoints['tv/tv_detail_cases.dart#0']!,
+  );
+  group(
+    'widgets/artwork_crop_test.dart',
+    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
   );
   group(
     'widgets/media_image_test.dart',
