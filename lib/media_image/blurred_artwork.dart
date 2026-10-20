@@ -55,7 +55,7 @@ class BlurredArtwork extends StatelessWidget {
             height: size.height,
             fit: BoxFit.fill,
             filterQuality: FilterQuality.low,
-            color: const Color(0xffffffff).withValues(alpha: opacity),
+            color: AppInk.white.withValues(alpha: opacity),
             colorBlendMode: BlendMode.modulate,
             errorBuilder: (_, _, _) => const SizedBox.expand(),
           );

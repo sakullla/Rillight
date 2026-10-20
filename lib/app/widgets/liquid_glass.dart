@@ -133,8 +133,8 @@ class LiquidGlass extends StatelessWidget {
     );
     // 描边与高光随亮度取反:深色主题提白,浅色主题压深,两种亮度下都可见。
     final edge = scheme.brightness == Brightness.dark
-        ? const Color(0xffffffff)
-        : const Color(0xff000000);
+        ? AppInk.white
+        : AppInk.black;
     Widget body = child;
     if (padding != null) {
       body = Padding(padding: padding!, child: body);
@@ -180,7 +180,7 @@ class LiquidGlass extends StatelessWidget {
                       colors: [
                         edge.withValues(alpha: AppGlass.specular),
                         edge.withValues(alpha: 0.04),
-                        const Color(0x00000000),
+                        AppInk.transparent,
                       ],
                     ),
                   ),

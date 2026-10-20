@@ -6,7 +6,7 @@ class EmbyMark extends StatelessWidget {
 
   final double size;
 
-  static const Color fill = Color(0xFF52B54B);
+  static const Color fill = AppServerBrand.emby;
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +36,7 @@ class _EmbyMarkPainter extends CustomPainter {
       ..lineTo(size.width * 0.72, size.height * 0.50)
       ..lineTo(size.width * 0.36, size.height * 0.72)
       ..close();
-    canvas.drawPath(play, Paint()..color = const Color(0xffffffff));
+    canvas.drawPath(play, Paint()..color = AppInk.white);
   }
 
   @override

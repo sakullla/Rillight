@@ -23,7 +23,6 @@ import '../app/mobile_chrome.dart';
 import '../app/phone_bottom_nav.dart';
 import '../app/phone_nav_style.dart';
 import '../app/presentation_environment.dart';
-import '../app/theme/brand.dart';
 import '../app/routes.dart';
 import '../app/widgets/skeleton.dart';
 import '../app/tv_top_nav.dart';

@@ -445,7 +445,7 @@ class _EpisodeRow extends StatelessWidget {
         border: Border(
           left: BorderSide(
             width: 3,
-            color: isCurrent ? scheme.primary : const Color(0x00000000),
+            color: isCurrent ? scheme.primary : AppInk.transparent,
           ),
         ),
       ),
@@ -455,7 +455,7 @@ class _EpisodeRow extends StatelessWidget {
               decoration: BoxDecoration(
                 color: isCurrent
                     ? scheme.surfaceContainerHighest
-                    : const Color(0x00000000),
+                    : AppInk.transparent,
               ),
               child: AppSurfaceAction(
                 key: Key('player-episode-${episode.id}'),

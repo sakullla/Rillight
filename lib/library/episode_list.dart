@@ -501,7 +501,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
         ? scheme.primaryContainer.withValues(alpha: 0.5)
         : revealed
         ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
-        : const Color(0x00000000);
+        : AppInk.transparent;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -649,7 +649,7 @@ class _EpisodeThumb extends StatelessWidget {
                 IgnorePointer(
                   child: AnimatedContainer(
                     duration: fade,
-                    color: const Color(0xff000000).withValues(
+                    color: AppInk.black.withValues(
                       alpha: hovered
                           ? .36
                           : played && !selected
@@ -689,7 +689,7 @@ class _EpisodeThumb extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: scheme.brightness == Brightness.light
                                 ? scheme.primary
-                                : const Color(0xffffffff),
+                                : AppInk.white,
                             shape: BoxShape.circle,
                           ),
                           key: CatalogKeys.episodePlay(item.id),
@@ -705,7 +705,7 @@ class _EpisodeThumb extends StatelessWidget {
                                 fill: AppIcons.filled,
                                 color: scheme.brightness == Brightness.light
                                     ? scheme.onPrimary
-                                    : const Color(0xff000000),
+                                    : AppInk.black,
                                 size: height * .22,
                               ),
                             ),
@@ -734,8 +734,7 @@ class _EpisodeThumb extends StatelessWidget {
                           ? const EpisodeWatchedBadge()
                           : DecoratedBox(
                               decoration: BoxDecoration(
-                                color: const Color(0xff000000)
-                                    .withValues(alpha: .6),
+                                color: AppInk.black.withValues(alpha: .6),
                                 shape: BoxShape.circle,
                               ),
                               child: Padding(
@@ -743,8 +742,7 @@ class _EpisodeThumb extends StatelessWidget {
                                 child: Icon(
                                   CupertinoIcons.check_mark,
                                   size: 16,
-                                  color: const Color(0xffffffff)
-                                      .withValues(alpha: .7),
+                                  color: AppInk.white.withValues(alpha: .7),
                                 ),
                               ),
                             ),
@@ -781,7 +779,7 @@ class EpisodeThumbBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xff000000).withValues(alpha: .66),
+        color: AppInk.black.withValues(alpha: .66),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Padding(
@@ -790,7 +788,7 @@ class EpisodeThumbBadge extends StatelessWidget {
           label,
           maxLines: 1,
           style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
-            color: const Color(0xffffffff),
+            color: AppInk.white,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
@@ -812,14 +810,12 @@ class EpisodeCurrentMark extends StatelessWidget {
     final light = scheme.brightness == Brightness.light;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: light
-            ? scheme.primary
-            : const Color(0xff000000).withValues(alpha: .86),
+        color: light ? scheme.primary : AppInk.black.withValues(alpha: .86),
         shape: BoxShape.circle,
         border: light
             ? null
             : Border.all(
-                color: const Color(0xffffffff).withValues(alpha: .92),
+                color: AppInk.white.withValues(alpha: .92),
                 width: (size * .07).clamp(1.5, 2.5).toDouble(),
               ),
       ),
@@ -830,7 +826,7 @@ class EpisodeCurrentMark extends StatelessWidget {
           key: iconKey,
           fill: AppIcons.filled,
           size: size,
-          color: light ? scheme.onPrimary : const Color(0xffffffff),
+          color: light ? scheme.onPrimary : AppInk.white,
         ),
       ),
     );
@@ -851,7 +847,7 @@ class EpisodeWatchedBadge extends StatelessWidget {
       label: AppLocalizations.of(context).mobileWatched,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xff000000).withValues(alpha: .6),
+          color: AppInk.black.withValues(alpha: .6),
           shape: BoxShape.circle,
         ),
         child: Padding(
@@ -860,7 +856,7 @@ class EpisodeWatchedBadge extends StatelessWidget {
             CupertinoIcons.check_mark,
             key: iconKey,
             size: size,
-            color: const Color(0xffffffff).withValues(alpha: .95),
+            color: AppInk.white.withValues(alpha: .95),
           ),
         ),
       ),
@@ -945,7 +941,7 @@ class _EpisodeProgressBar extends StatelessWidget {
       child: SizedBox(
         height: 3,
         child: ColoredBox(
-          color: const Color(0xff000000).withValues(alpha: 0.45),
+          color: AppInk.black.withValues(alpha: 0.45),
           child: Align(
             alignment: Alignment.centerLeft,
             child: FractionallySizedBox(

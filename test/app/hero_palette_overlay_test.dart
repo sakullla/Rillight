@@ -6,7 +6,6 @@ import 'dart:ui' as ui;
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/artwork_theme_source.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/hero_palette_overlay.dart';
 import 'package:rillight/auth/auth_scope.dart';

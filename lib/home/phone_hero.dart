@@ -284,7 +284,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                                 const Color(
                                   0xff000000,
                                 ).withValues(alpha: AppScrim.of(context, .5)),
-                                const Color(0x00000000),
+                                AppInk.transparent,
                               ],
                             ),
                           ),

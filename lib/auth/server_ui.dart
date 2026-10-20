@@ -1,7 +1,6 @@
 import 'dart:ui' show ImageFilter;
 
 import '../app/l10n/app_localizations.dart';
-import '../app/theme/brand.dart';
 import '../app/ui/app_icons.dart';
 import '../app/ui/ui.dart';
 import '../media_server/capabilities.dart';
@@ -24,9 +23,9 @@ abstract final class ServerUi {
   static const double rowRadius = AppRadii.md;
 
   static Color accentOf(MediaServerType type) => switch (type) {
-    MediaServerType.emby => const Color(0xFF52B54B),
-    MediaServerType.jellyfin => const Color(0xFF8862E0),
-    MediaServerType.plex => const Color(0xFFE5A00D),
+    MediaServerType.emby => AppServerBrand.emby,
+    MediaServerType.jellyfin => AppServerBrand.jellyfin,
+    MediaServerType.plex => AppServerBrand.plex,
   };
 
   static IconData? customIcon(String? iconId) => switch (iconId) {
@@ -107,14 +106,10 @@ abstract final class ServerUi {
   /// Semantic success colour; the app scheme has no dedicated token and the
   /// tertiary hue is not reliably green across themes.
   static Color success(AppColorScheme colors) =>
-      colors.brightness == Brightness.dark
-      ? const Color(0xFF4ADE80)
-      : const Color(0xFF16A34A);
+      AppSemantic.success(colors.brightness);
 
   static Color warning(AppColorScheme colors) =>
-      colors.brightness == Brightness.dark
-      ? const Color(0xFFFBBF24)
-      : const Color(0xFFB45309);
+      AppSemantic.warning(colors.brightness);
 }
 
 enum ServerTone { neutral, current, success, warning, error }

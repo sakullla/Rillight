@@ -133,7 +133,7 @@ class PlayerRateCell extends StatelessWidget {
     final Color edge;
     if (light) {
       fill = selected ? scheme.primaryContainer : scheme.surfaceContainer;
-      edge = selected ? scheme.primary : const Color(0x00000000);
+      edge = selected ? scheme.primary : AppInk.transparent;
     } else {
       fill = selected ? scheme.surfaceBright : scheme.surfaceContainerHighest;
       edge = selected

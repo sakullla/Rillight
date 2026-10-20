@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/emby/emby_client.dart';

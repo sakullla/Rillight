@@ -190,7 +190,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
               decoration: BoxDecoration(
                 color: theme.brightness == Brightness.light
                     ? theme.scaffoldBackgroundColor
-                    : const Color(0xff000000),
+                    : AppInk.black,
               ),
               key: const Key('home-hero-card'),
               clipBehavior: Clip.antiAlias,
@@ -651,15 +651,15 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         padding: EdgeInsets.zero,
         backgroundColor: light
             ? scheme.surfaceContainerLowest
-            : const Color(0xff000000).withValues(alpha: .42),
-        foregroundColor: light ? scheme.onSurface : const Color(0xffffffff),
+            : AppInk.black.withValues(alpha: .42),
+        foregroundColor: light ? scheme.onSurface : AppInk.white,
         hoverColor: light
             ? scheme.onSurface.withValues(alpha: .06)
-            : const Color(0xffffffff).withValues(alpha: .14),
+            : AppInk.white.withValues(alpha: .14),
         side: BorderSide(
           color: light
               ? scheme.outlineVariant
-              : const Color(0xffffffff).withValues(alpha: .16),
+              : AppInk.white.withValues(alpha: .16),
         ),
       ),
       icon: Icon(icon),

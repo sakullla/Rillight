@@ -702,7 +702,7 @@ class _WideCard extends StatelessWidget {
                     clipBehavior: Clip.hardEdge,
                     children: [
                       _sharedPosterImage(item, shared),
-                      const Positioned.fill(
+                      Positioned.fill(
                         child: IgnorePointer(
                           child: DecoratedBox(
                             decoration: BoxDecoration(
@@ -711,10 +711,10 @@ class _WideCard extends StatelessWidget {
                                 end: Alignment.bottomCenter,
                                 stops: [0.0, 0.35, 0.62, 1.0],
                                 colors: [
-                                  Color(0x40000000),
-                                  Color(0x00000000),
-                                  Color(0x00000000),
-                                  Color(0x9E000000),
+                                  AppInk.black.withValues(alpha: 0.25),
+                                  AppInk.transparent,
+                                  AppInk.transparent,
+                                  AppInk.black.withValues(alpha: 0.62),
                                 ],
                               ),
                             ),
@@ -739,11 +739,11 @@ class _WideCard extends StatelessWidget {
                           left: 10,
                           bottom: 12,
                           child: DecoratedBox(
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Color(0x52000000),
+                                  color: AppInk.black.withValues(alpha: 0.32),
                                   blurRadius: 12,
                                   offset: Offset(0, 4),
                                 ),
@@ -758,8 +758,12 @@ class _WideCard extends StatelessWidget {
                                 minimumSize: const Size(48, 48),
                                 fixedSize: const Size(48, 48),
                                 padding: EdgeInsets.zero,
-                                backgroundColor: const Color(0xF2FFFFFF),
-                                foregroundColor: const Color(0xff000000),
+                                backgroundColor: AppInk.white.withValues(
+                                  // 242/255 与原本的 const 色值逐位相同,
+                                  // 播放钮颜色会被测试精确比较。
+                                  alpha: 242 / 255,
+                                ),
+                                foregroundColor: AppInk.black,
                                 shape: const CircleBorder(),
                               ),
                               onPressed: () => context.push<void>(
@@ -791,8 +795,7 @@ class _WideCard extends StatelessWidget {
                               key: CatalogKeys.resumeProgress,
                               height: 3.5,
                               child: ColoredBox(
-                                color: const Color(0xffffffff)
-                                    .withValues(alpha: 0.22),
+                                color: AppInk.white.withValues(alpha: 0.22),
                                 child: FractionallySizedBox(
                                   alignment: Alignment.centerLeft,
                                   widthFactor: progress.clamp(0.0, 1.0),
@@ -817,8 +820,10 @@ class _WideCard extends StatelessWidget {
                                 height: 44,
                                 child: Center(
                                   child: DecoratedBox(
-                                    decoration: const BoxDecoration(
-                                      color: Color(0x8C000000),
+                                    decoration: BoxDecoration(
+                                      color: AppInk.black.withValues(
+                                        alpha: 0.55,
+                                      ),
                                       shape: BoxShape.circle,
                                     ),
                                     child: const SizedBox(
@@ -828,7 +833,7 @@ class _WideCard extends StatelessWidget {
                                         AppIcons.close,
                                         size: 13,
                                         fill: AppIcons.filled,
-                                        color: Color(0xffffffff),
+                                        color: AppInk.white,
                                       ),
                                     ),
                                   ),

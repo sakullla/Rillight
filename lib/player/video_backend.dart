@@ -4,6 +4,7 @@ import '../media_server/resources.dart';
 import 'playback_recovery_coordinator.dart';
 
 import 'package:flutter/widgets.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_output_status.dart';
@@ -253,7 +254,7 @@ abstract class VideoBackend {
   Future<void> dispose();
 
   Widget buildView({Key? key}) {
-    return ColoredBox(key: key, color: const Color(0xFF000000));
+    return ColoredBox(key: key, color: AppInk.black);
   }
 }
 
@@ -511,6 +512,6 @@ class FakeVideoBackend
 
   @override
   Widget buildView({Key? key}) {
-    return ColoredBox(key: key, color: const Color(0xFF000000));
+    return ColoredBox(key: key, color: AppInk.black);
   }
 }

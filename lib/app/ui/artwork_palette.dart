@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 
+import '../theme/brand.dart';
 import 'theme.dart';
 
 /// A dominant hue family sampled from artwork.
@@ -31,7 +32,7 @@ class ArtworkMood {
   final bool neutral;
 
   static const neutralMood = ArtworkMood(
-    seed: Color(0xFF808080),
+    seed: AppInk.gray,
     confidence: 0,
     dominantShare: 0,
     effectiveShare: 0,

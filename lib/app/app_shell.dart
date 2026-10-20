@@ -724,7 +724,7 @@ class _NavTextButton extends StatelessWidget {
         // 选中底由内部 pill 表达,选中项悬停不再叠一层;未选中项悬停给一层
         // 极浅的底面,作为唯一的可点反馈。
         hoverColor: selected
-            ? const Color(0x00000000)
+            ? AppInk.transparent
             : colorScheme.onSurface.withValues(alpha: 0.05),
         textStyle: theme.textTheme.titleMedium?.copyWith(
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -747,15 +747,15 @@ class _NavTextButton extends StatelessWidget {
               ? (light
                     ? colorScheme.surfaceContainerLowest
                     : colorScheme.surfaceContainerHigh)
-              : const Color(0x00000000),
+              : AppInk.transparent,
           borderRadius: BorderRadius.circular(AppRadii.md),
           border: selected && light
               ? Border.all(color: colorScheme.outlineVariant)
               : null,
           boxShadow: selected && light
-              ? const [
+              ? [
                   BoxShadow(
-                    color: Color(0x14000000),
+                    color: AppInk.black.withValues(alpha: 0.08),
                     blurRadius: 6,
                     offset: Offset(0, 1),
                   ),

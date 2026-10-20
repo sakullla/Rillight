@@ -4,6 +4,7 @@ library;
 
 export 'package:cupertino_ui/cupertino_ui.dart';
 
+export '../theme/brand.dart';
 export '../theme/tokens.dart';
 export '../theme/palette.dart';
 export 'theme.dart';

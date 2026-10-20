@@ -1,4 +1,3 @@
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -74,8 +73,8 @@ class PosterCard extends StatelessWidget {
                     color: highlighted
                         ? (light
                               ? scheme.outline
-                              : const Color(0xffffffff).withValues(alpha: 0.24))
-                        : const Color(0x00000000),
+                              : AppInk.white.withValues(alpha: 0.24))
+                        : AppInk.transparent,
                     width: 1.2,
                   ),
                 ),
@@ -200,13 +199,12 @@ class _PosterTopLeftBadges extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: label == watchedText
                       ? scheme.primary
-                      : const Color(0xff000000).withValues(alpha: 0.68),
+                      : AppInk.black.withValues(alpha: 0.68),
                   borderRadius: BorderRadius.circular(6),
                   border: label == watchedText
                       ? null
                       : Border.all(
-                          color: const Color(0xffffffff)
-                              .withValues(alpha: 0.16),
+                          color: AppInk.white.withValues(alpha: 0.16),
                           width: 0.6,
                         ),
                 ),
@@ -221,7 +219,7 @@ class _PosterTopLeftBadges extends StatelessWidget {
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: label == watchedText
                           ? scheme.onPrimary
-                          : const Color(0xffffffff),
+                          : AppInk.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       height: 1.25,
@@ -340,7 +338,7 @@ class EpisodeThumbCard extends StatelessWidget {
                       ? (AppUiTheme.of(context).brightness == Brightness.light
                             ? AppUiTheme.of(context).colorScheme.onSurface
                                   .withValues(alpha: 0.38)
-                            : const Color(0xffffffff).withValues(alpha: 0.5))
+                            : AppInk.white.withValues(alpha: 0.5))
                       : AppUiTheme.of(context)
                             .colorScheme
                             .surfaceContainerHighest,
@@ -403,7 +401,7 @@ class EpisodeThumbCard extends StatelessWidget {
                                 child: Icon(
                                   CupertinoIcons.check_mark,
                                   size: 14,
-                                  color: Color(0xffffffff),
+                                  color: AppInk.white,
                                 ),
                               ),
                             ),
@@ -454,7 +452,7 @@ class _EpisodeThumbProgress extends StatelessWidget {
         height: 3,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: const Color(0xff000000).withValues(alpha: 0.45),
+            color: AppInk.black.withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(99),
           ),
           child: Align(
@@ -462,9 +460,9 @@ class _EpisodeThumbProgress extends StatelessWidget {
             child: FractionallySizedBox(
               widthFactor: fraction,
               heightFactor: 1,
-              child: const DecoratedBox(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Color(0xeaffffff),
+                  color: AppInk.white.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.all(Radius.circular(99)),
                 ),
               ),
@@ -551,9 +549,7 @@ class SeasonPosterCard extends StatelessWidget {
                                     style: AppUiTheme.of(context)
                                         .textTheme
                                         .labelMedium
-                                        ?.copyWith(
-                                          color: const Color(0xffffffff),
-                                        ),
+                                        ?.copyWith(color: AppInk.white),
                                   ),
                                 ),
                               ),
@@ -727,9 +723,9 @@ class _PosterRevealOverlay extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     stops: const [0, 0.6, 1],
                     colors: [
-                      const Color(0x00000000),
-                      const Color(0xff000000).withValues(alpha: 0.08),
-                      const Color(0xff000000).withValues(
+                      AppInk.transparent,
+                      AppInk.black.withValues(alpha: 0.08),
+                      AppInk.black.withValues(
                         alpha: showMeta && meta.isNotEmpty ? 0.62 : 0,
                       ),
                     ],
@@ -750,11 +746,10 @@ class _PosterRevealOverlay extends StatelessWidget {
                             style: AppButtonStyle(
                               backgroundColor: light
                                   ? scheme.surfaceContainerLowest
-                                  : const Color(0xff000000)
-                                        .withValues(alpha: 0.55),
+                                  : AppInk.black.withValues(alpha: 0.55),
                               foregroundColor: light
                                   ? scheme.onSurface
-                                  : const Color(0xffffffff),
+                                  : AppInk.white,
                               side: light
                                   ? BorderSide(color: scheme.outlineVariant)
                                   : null,
@@ -792,10 +787,10 @@ class _PosterRevealOverlay extends StatelessWidget {
                           style: AppButtonStyle(
                             backgroundColor: light
                                 ? scheme.primary
-                                : const Color(0xffffffff),
+                                : AppInk.white,
                             foregroundColor: light
                                 ? scheme.onPrimary
-                                : const Color(0xff000000),
+                                : AppInk.black,
                             padding: EdgeInsets.zero,
                             minimumSize: const Size(56, 56),
                             shape: const CircleBorder(),
@@ -848,8 +843,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.center,
                                   style: theme.textTheme.labelMedium?.copyWith(
-                                    color: const Color(0xffffffff)
-                                        .withValues(alpha: 0.92),
+                                    color: AppInk.white.withValues(alpha: 0.92),
                                   ),
                                 ),
                         ),

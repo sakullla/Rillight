@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -54,17 +53,17 @@ class HeroKicker extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final color = onScrim
-        ? const Color(0xffffffff).withValues(alpha: .92)
+        ? AppInk.white.withValues(alpha: .92)
         : theme.colorScheme.primary;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: onScrim
-            ? const Color(0x24ffffff)
+            ? AppInk.white.withValues(alpha: 0.14)
             : theme.colorScheme.primaryContainer.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: onScrim
-              ? const Color(0x33ffffff)
+              ? AppInk.white.withValues(alpha: 0.2)
               : theme.colorScheme.primary.withValues(alpha: 0.24),
         ),
       ),
@@ -142,9 +141,7 @@ class HeroRatingBadge extends StatelessWidget {
             Text(
               value.toStringAsFixed(1),
               style: theme.textTheme.labelSmall?.copyWith(
-                color: onScrim
-                    ? const Color(0xffffffff)
-                    : theme.colorScheme.onSurface,
+                color: onScrim ? AppInk.white : theme.colorScheme.onSurface,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
@@ -217,7 +214,7 @@ class HeroScrim extends StatelessWidget {
               ),
             ),
             if (top)
-              const Align(
+              Align(
                 alignment: Alignment.topCenter,
                 child: SizedBox(
                   height: 96,
@@ -226,7 +223,10 @@ class HeroScrim extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0x59000000), Color(0x00000000)],
+                        colors: [
+                          AppInk.black.withValues(alpha: 0.35),
+                          AppInk.transparent,
+                        ],
                       ),
                     ),
                   ),
@@ -241,16 +241,16 @@ class HeroScrim extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           if (leading)
-            const DecoratedBox(
+            DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   stops: [0, .34, .62],
                   colors: [
-                    Color(0xB3000000),
-                    Color(0x59000000),
-                    Color(0x00000000),
+                    AppInk.black.withValues(alpha: 0.70),
+                    AppInk.black.withValues(alpha: 0.35),
+                    AppInk.transparent,
                   ],
                 ),
               ),
@@ -261,10 +261,10 @@ class HeroScrim extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 stops: leading ? const [.3, .68, 1] : const [0, .45, 1],
-                colors: const [
-                  Color(0x00000000),
-                  Color(0x8C000000),
-                  Color(0xD9000000),
+                colors: [
+                  AppInk.transparent,
+                  AppInk.black.withValues(alpha: 0.55),
+                  AppInk.black.withValues(alpha: 0.85),
                 ],
               ),
             ),
@@ -281,7 +281,7 @@ class HeroScrim extends StatelessWidget {
               ),
             ),
           if (top)
-            const Align(
+            Align(
               alignment: Alignment.topCenter,
               child: SizedBox(
                 height: 96,
@@ -290,7 +290,10 @@ class HeroScrim extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0x59000000), Color(0x00000000)],
+                      colors: [
+                        AppInk.black.withValues(alpha: 0.35),
+                        AppInk.transparent,
+                      ],
                     ),
                   ),
                 ),
@@ -303,8 +306,12 @@ class HeroScrim extends StatelessWidget {
 }
 
 /// 压在画面上的文字统一带一层软阴影,亮部/杂色底图上仍可读。
-const List<Shadow> heroScrimTextShadow = [
-  Shadow(blurRadius: 18, color: Color(0xA6000000), offset: Offset(0, 2)),
+final List<Shadow> heroScrimTextShadow = [
+  Shadow(
+    blurRadius: 18,
+    color: AppInk.black.withValues(alpha: 0.65),
+    offset: Offset(0, 2),
+  ),
 ];
 
 /// 左下文字块:标题 → meta 行 + ★ → 简介(可选) → 按钮槽。
@@ -358,10 +365,10 @@ class HeroTextBlock extends StatelessWidget {
     final ink = theme.colorScheme.onSurface;
     final metaColor = onPaper
         ? theme.colorScheme.onSurfaceVariant
-        : const Color(0xb3ffffff);
+        : AppInk.white.withValues(alpha: 0.70);
     final overviewColor = onPaper
         ? ink.withValues(alpha: .78)
-        : const Color(0xffffffff).withValues(alpha: .78);
+        : AppInk.white.withValues(alpha: .78);
     final textShadow = onPaper ? null : heroScrimTextShadow;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,7 +433,7 @@ class HeroTextBlock extends StatelessWidget {
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: style?.copyWith(
-        color: onPaper ? ink : const Color(0xffffffff),
+        color: onPaper ? ink : AppInk.white,
         fontWeight: FontWeight.w700,
         height: 1.15,
         letterSpacing: large ? -.2 : null,
@@ -481,10 +488,9 @@ class HeroDots extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
-    final selected =
-        activeColor ?? (onScrim ? const Color(0xffffffff) : scheme.secondary);
+    final selected = activeColor ?? (onScrim ? AppInk.white : scheme.secondary);
     final resting = onScrim
-        ? const Color(0xffffffff).withValues(alpha: .38)
+        ? AppInk.white.withValues(alpha: .38)
         : scheme.onSurface.withValues(alpha: .22);
     final select = onSelect;
     final extent = select == null ? 16.0 : 44.0;

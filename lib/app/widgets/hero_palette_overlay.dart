@@ -2,7 +2,6 @@ import 'dart:typed_data';
 
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/artwork_theme_source.dart' as theme_source;
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/library/detail_source_scope.dart';

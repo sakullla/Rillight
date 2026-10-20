@@ -452,7 +452,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
         fit: StackFit.expand,
         children: [
           _blurredFill(bytes, opacity: .5, sigma: 32),
-          const ColoredBox(color: Color(0x8a000000)),
+          ColoredBox(color: AppInk.black.withValues(alpha: 0.54)),
         ],
       ),
     );

@@ -51,6 +51,35 @@ abstract final class AppBrand {
   ];
 }
 
+/// 第三方媒体服务器的官方标识色。只用于 Emby/Jellyfin/Plex 标记本身，
+/// 不参与页面主题派生。
+abstract final class AppServerBrand {
+  static const Color emby = Color(0xFF52B54B);
+  static const Color jellyfin = Color(0xFF8862E0);
+  static const Color plex = Color(0xFFE5A00D);
+
+  /// Jellyfin 标记的紫→青渐变两端。
+  static const Color jellyfinPurple = Color(0xFFAA5CC3);
+  static const Color jellyfinBlue = Color(0xFF00A4DC);
+
+  /// Plex 深底标记的底板色。
+  static const Color plexSurface = Color(0xFF282A2D);
+}
+
+/// 服务状态的语义色。明暗主题各取一档，页面不再写原始十六进制。
+abstract final class AppSemantic {
+  static const Color successDark = Color(0xFF4ADE80);
+  static const Color successLight = Color(0xFF16A34A);
+  static const Color warningDark = Color(0xFFFBBF24);
+  static const Color warningLight = Color(0xFFB45309);
+
+  static Color success(Brightness brightness) =>
+      brightness == Brightness.dark ? successDark : successLight;
+
+  static Color warning(Brightness brightness) =>
+      brightness == Brightness.dark ? warningDark : warningLight;
+}
+
 /// 品牌渐变。主播放按钮用粉到月光紫；氛围层用粉/青单层四段渐变。
 abstract final class AppBrandGradient {
   static const LinearGradient primaryDark = LinearGradient(
@@ -99,6 +128,9 @@ abstract final class AppInk {
   static const Color black = Color(0xFF000000);
   static const Color white = Color(0xFFFFFFFF);
   static const Color transparent = Color(0x00000000);
+
+  /// 中性灰:取色种子没有可识别色相时的兜底。
+  static const Color gray = Color(0xFF808080);
 
   static Color scrim(double alpha) => black.withValues(alpha: alpha);
 }

@@ -108,9 +108,9 @@ class _SearchPillState extends State<_SearchPill> {
     final Color border;
     final Color ink;
     if (over) {
-      fill = const Color(0xff000000).withValues(alpha: _hovered ? 0.44 : 0.30);
-      border = const Color(0xffffffff).withValues(alpha: _hovered ? 0.3 : 0.18);
-      ink = const Color(0xffffffff).withValues(alpha: 0.88);
+      fill = AppInk.black.withValues(alpha: _hovered ? 0.44 : 0.30);
+      border = AppInk.white.withValues(alpha: _hovered ? 0.3 : 0.18);
+      ink = AppInk.white.withValues(alpha: 0.88);
     } else if (light) {
       fill = _hovered ? scheme.surfaceContainer : scheme.surfaceContainerLowest;
       border = _hovered
@@ -170,9 +170,7 @@ class _SearchPillState extends State<_SearchPill> {
                   ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(999),
-                    color: (over ? const Color(0xffffffff) : ink).withValues(
-                      alpha: 0.12,
-                    ),
+                    color: (over ? AppInk.white : ink).withValues(alpha: 0.12),
                   ),
                   child: Text(SearchAction.shortcutLabel(), style: keyStyle),
                 ),

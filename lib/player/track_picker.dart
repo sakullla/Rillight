@@ -449,7 +449,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                           },
                           child: Container(
                             decoration: BoxDecoration(
-                              color: const Color(0x00000000),
+                              color: AppInk.transparent,
                             ),
                             child: _panel(context),
                           ),

@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';

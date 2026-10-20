@@ -323,7 +323,7 @@ class LibraryCardFace extends StatelessWidget {
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                     child: ColoredBox(
-                      color: const Color(0xff000000).withValues(alpha: 0.32),
+                      color: AppInk.black.withValues(alpha: 0.32),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.sm,
@@ -335,7 +335,7 @@ class LibraryCardFace extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.start,
                           style: theme.textTheme.titleSmall?.copyWith(
-                            color: const Color(0xffffffff),
+                            color: AppInk.white,
                           ),
                         ),
                       ),

@@ -633,7 +633,7 @@ class _TvLanWaitingState extends State<_TvLanWaiting> {
               width: 156 * s,
               height: 156 * s,
               decoration: BoxDecoration(
-                color: const Color(0xffffffff),
+                color: AppInk.white,
                 borderRadius: BorderRadius.circular(AppRadii.card * s),
               ),
               padding: EdgeInsets.all(10 * s),

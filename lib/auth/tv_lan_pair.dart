@@ -581,11 +581,8 @@ class _QrPainter extends CustomPainter {
     final count = modules.length;
     const quiet = 4;
     final scale = size.shortestSide / (count + quiet * 2);
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xffffffff),
-    );
-    final paint = Paint()..color = const Color(0xff000000);
+    canvas.drawRect(Offset.zero & size, Paint()..color = AppInk.white);
+    final paint = Paint()..color = AppInk.black;
     for (var y = 0; y < count; y++) {
       for (var x = 0; x < count; x++) {
         if (!modules[y][x]) {

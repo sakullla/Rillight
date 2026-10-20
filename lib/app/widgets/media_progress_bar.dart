@@ -30,7 +30,7 @@ class MediaProgressBar extends StatelessWidget {
       child: SizedBox(
         height: height,
         child: ColoredBox(
-          color: const Color(0xff000000).withValues(alpha: 0.45),
+          color: AppInk.black.withValues(alpha: 0.45),
           child: Align(
             alignment: Alignment.centerLeft,
             child: FractionallySizedBox(

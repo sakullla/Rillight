@@ -79,7 +79,13 @@ class TvTopNavBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // 非交互文本不拦截命中:hero/内容区在栏下出血时仍可点按。
-              IgnorePointer(child: _Brand(name: l.appName)),
+              IgnorePointer(
+                child: _Brand(
+                  name: l.appName,
+                  // 200% 文字下字标会和四个入口抢宽度,只保留品牌图形。
+                  wordmark: MediaQuery.textScalerOf(context).scale(1) < 1.5,
+                ),
+              ),
               SizedBox(width: 28 * s),
               for (var i = 0; i < labels.length; i++) ...[
                 Stack(
@@ -200,36 +206,44 @@ class TvTopNavBar extends StatelessWidget {
 }
 
 class _Brand extends StatelessWidget {
-  const _Brand({required this.name});
+  const _Brand({required this.name, this.wordmark = true});
+
   final String name;
+
+  /// 字标是否显示;隐藏时仍以 [name] 提供读屏标签。
+  final bool wordmark;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
+    final mark = Container(
+      width: 22 * s,
+      height: 22 * s,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6 * s),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+        ),
+      ),
+      child: Icon(
+        AppIcons.play,
+        fill: AppIcons.filled,
+        size: 16 * s,
+        color: theme.colorScheme.onPrimary,
+      ),
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 22 * s,
-          height: 22 * s,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6 * s),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
-            ),
-          ),
-          child: Icon(
-            AppIcons.play,
-            fill: AppIcons.filled,
-            size: 16 * s,
-            color: theme.colorScheme.onPrimary,
-          ),
-        ),
-        SizedBox(width: 8 * s),
-        Text(name, style: theme.textTheme.titleMedium),
+        // 字标可见时名字由 Text 提供;收起后由图形单独读出品牌名。
+        if (wordmark) mark else Semantics(label: name, child: mark),
+        if (wordmark) ...[
+          SizedBox(width: 8 * s),
+          Text(name, style: theme.textTheme.titleMedium),
+        ],
       ],
     );
   }

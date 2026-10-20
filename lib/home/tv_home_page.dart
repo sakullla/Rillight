@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
@@ -470,7 +469,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
       width: viewSize.width,
       height: height,
       child: ColoredBox(
-        color: light ? page : const Color(0xff000000),
+        color: light ? page : AppInk.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -630,7 +629,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         style: theme.textTheme.labelMedium?.copyWith(
                           color: light
                               ? theme.colorScheme.onSurfaceVariant
-                              : const Color(0xffffffff).withValues(alpha: .75),
+                              : AppInk.white.withValues(alpha: .75),
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -677,8 +676,7 @@ class _TvPagerDots extends StatelessWidget {
                   ? (i == index
                         ? scheme.primary
                         : scheme.outline.withValues(alpha: .55))
-                  : const Color(0xffffffff)
-                        .withValues(alpha: i == index ? .95 : .4),
+                  : AppInk.white.withValues(alpha: i == index ? .95 : .4),
               borderRadius: BorderRadius.circular(3 * s),
             ),
           ),
@@ -756,11 +754,13 @@ class _TvFeaturedCaption extends StatelessWidget {
     final s = TvDesign.scaleOf(context);
     final meta = heroMetaLabels(l, item);
     final overview = plainOverview(item.overview);
-    final ink = onPaper ? scheme.onSurface : const Color(0xffffffff);
+    final ink = onPaper ? scheme.onSurface : AppInk.white;
     final muted = onPaper
         ? scheme.onSurfaceVariant
-        : const Color(0xffffffff).withValues(alpha: .82);
-    const shadow = [Shadow(blurRadius: 12, color: Color(0x8a000000))];
+        : AppInk.white.withValues(alpha: .82);
+    final shadow = [
+      Shadow(blurRadius: 12, color: AppInk.black.withValues(alpha: 0.54)),
+    ];
     final title = Text(
       heroTitle(item),
       maxLines: 2,
@@ -791,7 +791,7 @@ class _TvFeaturedCaption extends StatelessWidget {
               style: theme.textTheme.labelLarge?.copyWith(
                 color: onPaper
                     ? scheme.onSurface
-                    : const Color(0xffffffff).withValues(alpha: .85),
+                    : AppInk.white.withValues(alpha: .85),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -851,7 +851,7 @@ class _TvFeaturedCaption extends StatelessWidget {
               height: 1.3,
               color: onPaper
                   ? scheme.onSurface.withValues(alpha: .78)
-                  : const Color(0xffffffff).withValues(alpha: .75),
+                  : AppInk.white.withValues(alpha: .75),
             ),
           ),
         ],

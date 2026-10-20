@@ -125,12 +125,12 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
         shape: const StadiumBorder(),
         // 手机头图上的播放钮用反相实底:深色是白底黑字,浅色是墨底白字。
         backgroundColor: onScrim
-            ? const Color(0xffffffff)
+            ? AppInk.white
             : expand
             ? scheme.inverseSurface
             : scheme.primary,
         foregroundColor: onScrim
-            ? const Color(0xff000000)
+            ? AppInk.black
             : expand
             ? scheme.onInverseSurface
             : scheme.onPrimary,
@@ -159,15 +159,13 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
               minimumSize: const Size(0, 52),
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
               shape: const StadiumBorder(),
-              foregroundColor: onScrim
-                  ? const Color(0xffffffff)
-                  : scheme.onSurface,
+              foregroundColor: onScrim ? AppInk.white : scheme.onSurface,
               backgroundColor: onScrim
-                  ? const Color(0xffffffff).withValues(alpha: .16)
+                  ? AppInk.white.withValues(alpha: .16)
                   : scheme.surfaceContainerHigh,
               side: BorderSide(
                 color: onScrim
-                    ? const Color(0xffffffff).withValues(alpha: .32)
+                    ? AppInk.white.withValues(alpha: .32)
                     : scheme.outlineVariant,
               ),
             ),

@@ -218,7 +218,7 @@ class WindowChromeButtons extends StatelessWidget {
   Widget build(BuildContext context) {
     final caption = WindowCaption(
       brightness: brightness,
-      backgroundColor: const Color(0x00000000),
+      backgroundColor: AppInk.transparent,
     );
     if (defaultTargetPlatform == TargetPlatform.windows) {
       return IgnorePointer(child: caption);

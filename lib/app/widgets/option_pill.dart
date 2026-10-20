@@ -44,7 +44,7 @@ class OptionPill extends StatelessWidget {
               shape: StadiumBorder(
                 side: BorderSide(
                   color: selected
-                      ? const Color(0x00000000)
+                      ? AppInk.transparent
                       : AppEdge.of(scheme.brightness, strong: !light),
                 ),
               ),

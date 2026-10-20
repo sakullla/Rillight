@@ -13,7 +13,6 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/webdav/webdav_backup.dart';
 import 'package:rillight/webdav/webdav_client.dart';
 import 'package:rillight/webdav/webdav_config.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/phone_nav_style.dart';

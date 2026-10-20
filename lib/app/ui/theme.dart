@@ -1,5 +1,6 @@
 import 'package:cupertino_ui/cupertino_ui.dart';
 
+import '../theme/brand.dart';
 import '../theme/palette.dart';
 
 /// Shared theme for desktop, phone and television interaction trees.
@@ -251,7 +252,7 @@ class AppColorScheme {
     onInverseSurface: t.onInverseSurface,
     inversePrimary: t.inversePrimary,
     shadow: t.scrim,
-    surfaceTint: const Color(0x00000000),
+    surfaceTint: AppInk.transparent,
   );
   AppColorScheme copyWith({
     Brightness? brightness,

@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/artwork_theme_source.dart';
 import 'package:rillight/app/content_theme.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/hero_palette_overlay.dart';
 import 'package:rillight/media_server/models.dart';

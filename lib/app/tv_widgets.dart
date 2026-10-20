@@ -381,7 +381,7 @@ class _TvActionState extends State<TvAction>
     final rest = scheme.onSurface;
     final Color fill;
     if (card) {
-      fill = const Color(0x00000000);
+      fill = AppInk.transparent;
     } else if (focused) {
       fill = scheme.inverseSurface;
     } else if (widget.emphasized) {
@@ -528,8 +528,7 @@ class _TvActionState extends State<TvAction>
                             BoxShadow(
                               blurRadius: 14 * s,
                               offset: Offset(0, 4 * s),
-                              color: const Color(0xff000000)
-                                  .withValues(alpha: .35),
+                              color: AppInk.black.withValues(alpha: .35),
                             ),
                           ]
                         : null,
@@ -1134,7 +1133,7 @@ class _TvCardState extends State<TvCard> {
               borderRadius: radius,
               border: Border.all(
                 // 当前项不用彩色描边,改用封面上的 primaryContainer 染色区分。
-                color: focused ? scheme.onSurface : const Color(0x00000000),
+                color: focused ? scheme.onSurface : AppInk.transparent,
                 width: TvAction.focusRingWidth * s,
                 strokeAlign: BorderSide.strokeAlignOutside,
               ),
@@ -1176,8 +1175,7 @@ class _TvCardState extends State<TvCard> {
                           value: progress,
                           minHeight: 3 * s,
                           color: scheme.primary,
-                          backgroundColor: const Color(0xff000000)
-                              .withValues(alpha: .5),
+                          backgroundColor: AppInk.black.withValues(alpha: .5),
                         ),
                       ),
                     ),
@@ -1196,11 +1194,10 @@ class _TvCardState extends State<TvCard> {
                       child: DecoratedBox(
                         key: Key('tv-card-season-${item.id}'),
                         decoration: BoxDecoration(
-                          color: const Color(0xff000000).withValues(alpha: .72),
+                          color: AppInk.black.withValues(alpha: .72),
                           borderRadius: BorderRadius.circular(5 * s),
                           border: Border.all(
-                            color: const Color(0xffffffff)
-                                .withValues(alpha: .16),
+                            color: AppInk.white.withValues(alpha: .16),
                             width: .6 * s,
                           ),
                         ),
@@ -1214,7 +1211,7 @@ class _TvCardState extends State<TvCard> {
                                 .cardSeasonCount(item.childCount!),
                             maxLines: 1,
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: const Color(0xffffffff),
+                              color: AppInk.white,
                               fontSize: 10 * s,
                               fontWeight: FontWeight.w600,
                               height: 1.2,
@@ -2050,7 +2047,7 @@ class TvDarkStage extends StatelessWidget {
     return AppUiTheme(
       data: dark,
       child: DefaultTextStyle.merge(
-        style: const TextStyle(color: Color(0xffffffff)),
+        style: const TextStyle(color: AppInk.white),
         child: child,
       ),
     );
@@ -2096,9 +2093,10 @@ class TvHeroScrim extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    const Color(0xff000000)
-                        .withValues(alpha: AppScrim.of(context, AppScrim.top)),
-                    const Color(0xff000000).withValues(alpha: 0),
+                    AppInk.black.withValues(
+                      alpha: AppScrim.of(context, AppScrim.top),
+                    ),
+                    AppInk.black.withValues(alpha: 0),
                   ],
                 ),
               ),
@@ -2112,11 +2110,9 @@ class TvHeroScrim extends StatelessWidget {
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
-                    const Color(0xff000000)
-                        .withValues(alpha: AppScrim.of(context, .82)),
-                    const Color(0xff000000)
-                        .withValues(alpha: AppScrim.of(context, .45)),
-                    const Color(0xff000000).withValues(alpha: 0),
+                    AppInk.black.withValues(alpha: AppScrim.of(context, .82)),
+                    AppInk.black.withValues(alpha: AppScrim.of(context, .45)),
+                    AppInk.black.withValues(alpha: 0),
                   ],
                   stops: const [0, .42, .78],
                 ),
@@ -2131,12 +2127,11 @@ class TvHeroScrim extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    const Color(0xff000000).withValues(alpha: 0),
-                    const Color(0xff000000).withValues(
+                    AppInk.black.withValues(alpha: 0),
+                    AppInk.black.withValues(
                       alpha: AppScrim.of(context, AppScrim.bottomMid),
                     ),
-                    const Color(0xff000000)
-                        .withValues(alpha: AppScrim.of(context, .9)),
+                    AppInk.black.withValues(alpha: AppScrim.of(context, .9)),
                   ],
                   stops: const [.45, .8, 1],
                 ),

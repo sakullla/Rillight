@@ -1,4 +1,3 @@
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';

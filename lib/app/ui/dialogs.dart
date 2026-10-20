@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/brand.dart';
 import '../theme/tokens.dart';
 import 'controls.dart';
 import 'theme.dart';
@@ -273,7 +274,7 @@ Future<T?> showAppMenu<T>({
     context: context,
     barrierDismissible: true,
     barrierLabel: '关闭',
-    barrierColor: const Color(0x00000000),
+    barrierColor: AppInk.transparent,
     transitionDuration: AppMotion.durationOf(context, AppMotion.fast),
     transitionBuilder: (context, animation, secondaryAnimation, child) => child,
     pageBuilder: (dialogContext, animation, secondaryAnimation) {

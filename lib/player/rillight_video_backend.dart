@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
@@ -1692,6 +1693,5 @@ class RillightVideoBackend extends VideoBackend
 
   @override
   Widget buildView({Key? key}) =>
-      _player?.buildView(key: key) ??
-      ColoredBox(key: key, color: const Color(0xFF000000));
+      _player?.buildView(key: key) ?? ColoredBox(key: key, color: AppInk.black);
 }

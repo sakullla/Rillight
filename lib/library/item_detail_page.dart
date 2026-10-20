@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';

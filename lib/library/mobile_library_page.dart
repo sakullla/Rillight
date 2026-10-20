@@ -359,7 +359,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
                   style: AppButtonStyle(
                     backgroundColor: active
                         ? scheme.primary
-                        : const Color(0x00000000),
+                        : AppInk.transparent,
                     foregroundColor: active
                         ? scheme.onPrimary
                         : scheme.onSurface,

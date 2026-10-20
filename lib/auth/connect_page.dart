@@ -5,7 +5,6 @@ import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 
 import 'package:rillight/media_server/server_address.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 
 import 'dart:async';

@@ -1047,7 +1047,7 @@ class _MediaImageState extends State<MediaImage> {
             RepaintBoundary(
               child: BlurredArtwork(bytes: loaded.bytes, sigma: 28),
             ),
-            ColoredBox(color: const Color(0xff000000).withValues(alpha: .18)),
+            ColoredBox(color: AppInk.black.withValues(alpha: .18)),
             image,
           ],
         ),

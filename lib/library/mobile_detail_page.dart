@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
@@ -1523,8 +1522,7 @@ class _ChapterCard extends StatelessWidget {
                       bottom: AppSpacing.xs,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: const Color(0xff000000)
-                              .withValues(alpha: 0.62),
+                          color: AppInk.black.withValues(alpha: 0.62),
                           borderRadius: BorderRadius.circular(AppRadii.sm),
                         ),
                         child: Padding(
@@ -1535,7 +1533,7 @@ class _ChapterCard extends StatelessWidget {
                           child: Text(
                             chapterClock(chapter.startPosition),
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: const Color(0xffffffff),
+                              color: AppInk.white,
                               fontFeatures: const [
                                 FontFeature.tabularFigures(),
                               ],

@@ -159,7 +159,7 @@ class _AppHoverCardState extends State<AppHoverCard> {
         border: Border.all(
           color: highlighted && widget.showRing
               ? colorScheme.primary
-              : const Color(0x00000000),
+              : AppInk.transparent,
           width: widget.focusRingWidth,
         ),
       ),

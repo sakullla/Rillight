@@ -37,7 +37,7 @@ class PlaybackControlScrims extends StatelessWidget {
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                     colors: [
-                      const Color(0x00000000),
+                      AppInk.transparent,
                       scrim.withValues(
                         alpha: AppScrim.of(context, AppScrim.playerBarSoft),
                       ),
@@ -66,7 +66,7 @@ class PlaybackControlScrims extends StatelessWidget {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        const Color(0x00000000),
+                        AppInk.transparent,
                         scrim.withValues(
                           alpha: AppScrim.of(context, AppScrim.playerBar),
                         ),

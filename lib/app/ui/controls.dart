@@ -245,7 +245,7 @@ class _AppButtonState extends State<AppButton> {
           AppButtonVariant.filled => colors.primary,
           AppButtonVariant.tinted => colors.primaryContainer,
           AppButtonVariant.plain ||
-          AppButtonVariant.outlined => const Color(0x00000000),
+          AppButtonVariant.outlined => AppInk.transparent,
         };
     final tvFocus = theme.tv && _focused && enabled;
     var fill = resting;
@@ -255,7 +255,7 @@ class _AppButtonState extends State<AppButton> {
         BorderSide(
           color: widget.variant == AppButtonVariant.outlined
               ? colors.outline
-              : const Color(0x00000000),
+              : AppInk.transparent,
         );
 
     if (!enabled) {
@@ -977,7 +977,9 @@ class AppChoiceChip extends StatelessWidget {
         variant: AppButtonVariant.tinted,
         color: selected ? colors.primary : colors.surfaceContainerHigh,
         foregroundColor: selected ? colors.onPrimary : colors.onSurface,
-        style: const AppButtonStyle(side: BorderSide(color: Color(0x00000000))),
+        style: const AppButtonStyle(
+          side: BorderSide(color: AppInk.transparent),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1311,7 +1313,7 @@ class _AppDisclosureState extends State<AppDisclosure> {
   late bool _expanded = widget.initiallyExpanded;
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: widget.backgroundColor ?? const Color(0x00000000),
+    color: widget.backgroundColor ?? AppInk.transparent,
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1488,7 +1490,7 @@ class _AppRefreshState extends State<AppRefresh> {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF000000).withValues(alpha: .22),
+                          color: AppInk.black.withValues(alpha: .22),
                           blurRadius: 14,
                           offset: const Offset(0, 4),
                         ),

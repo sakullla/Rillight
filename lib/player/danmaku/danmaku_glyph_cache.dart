@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
 import 'package:rillight/player/danmaku/danmaku_timeline.dart';
 
@@ -22,7 +23,7 @@ const double kDanmakuGlyphPrepareBehindSeconds = 15;
 const Duration kDanmakuGlyphPrepareChunkLimit = Duration(milliseconds: 4);
 
 /// 描边颜色(约 90% 黑,接近 B 站重墨/描边)。
-const Color kDanmakuGlyphStrokeColor = Color(0xE6000000);
+final Color kDanmakuGlyphStrokeColor = AppInk.black.withValues(alpha: 0.9);
 
 /// 1080p 中号字对应的描边宽度参考(ASS outline ≈ 1.2)。
 const double kDanmakuGlyphStrokeWidth = 1.2;

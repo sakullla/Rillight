@@ -64,7 +64,7 @@ class PhoneBottomNav extends StatelessWidget {
       activeColor: scheme.onPrimaryContainer,
       inactiveColor: scheme.onSurfaceVariant,
       height: barHeight,
-      backgroundColor: const Color(0x00000000),
+      backgroundColor: AppInk.transparent,
       currentIndex: index,
       onTap: onSelected,
       iconSize: 24,

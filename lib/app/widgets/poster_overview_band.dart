@@ -34,7 +34,7 @@ class PosterOverviewBand extends StatelessWidget {
     final textStyle =
         style ??
         theme.textTheme.bodySmall?.copyWith(
-          color: const Color(0xffffffff).withValues(alpha: 0.94),
+          color: AppInk.white.withValues(alpha: 0.94),
           height: 1.35,
         );
     return Align(

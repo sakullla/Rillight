@@ -1,5 +1,4 @@
 import 'package:rillight/app/ui/ui.dart';
-import 'package:rillight/app/theme/brand.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/search/search_page.dart';

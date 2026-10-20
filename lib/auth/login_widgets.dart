@@ -1,7 +1,6 @@
 import 'package:rillight/app/ui/ui.dart';
 
 import '../app/l10n/app_localizations.dart';
-import '../app/theme/brand.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/emby_mark.dart';
 import '../media_server/capabilities.dart';
@@ -17,9 +16,9 @@ extension MediaServerTypePresentation on MediaServerType {
   };
 
   Color get brandColor => switch (this) {
-    MediaServerType.emby => EmbyMark.fill,
-    MediaServerType.jellyfin => const Color(0xFF8C63D4),
-    MediaServerType.plex => const Color(0xFFE5A00D),
+    MediaServerType.emby => AppServerBrand.emby,
+    MediaServerType.jellyfin => AppServerBrand.jellyfin,
+    MediaServerType.plex => AppServerBrand.plex,
   };
 
   String loginHint(AppLocalizations l) => switch (this) {
@@ -65,7 +64,7 @@ class _JellyfinMarkPainter extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFAA5CC3), Color(0xFF00A4DC)],
+          colors: [AppServerBrand.jellyfinPurple, AppServerBrand.jellyfinBlue],
         ).createShader(rect),
     );
     Offset p(double x, double y) => Offset(size.width * x, size.height * y);
@@ -109,7 +108,7 @@ class _PlexMarkPainter extends CustomPainter {
     final radius = size.shortestSide * 0.22;
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, Radius.circular(radius)),
-      Paint()..color = const Color(0xFF282A2D),
+      Paint()..color = AppServerBrand.plexSurface,
     );
     Offset p(double x, double y) => Offset(size.width * x, size.height * y);
     final chevron = Path()
@@ -120,7 +119,7 @@ class _PlexMarkPainter extends CustomPainter {
       ..lineTo(p(.33, .8).dx, p(.33, .8).dy)
       ..lineTo(p(.53, .5).dx, p(.53, .5).dy)
       ..close();
-    canvas.drawPath(chevron, Paint()..color = const Color(0xFFE5A00D));
+    canvas.drawPath(chevron, Paint()..color = AppServerBrand.plex);
   }
 
   @override

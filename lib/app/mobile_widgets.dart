@@ -1,5 +1,4 @@
 import 'package:flutter/gestures.dart' show kTouchSlop;
-import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -72,10 +71,10 @@ class _MobilePressableState extends State<MobilePressable> {
         child: ColorFiltered(
           colorFilter: _pressed
               ? ColorFilter.mode(
-                  const Color(0xffffffff).withValues(alpha: widget.brighten),
+                  AppInk.white.withValues(alpha: widget.brighten),
                   BlendMode.plus,
                 )
-              : const ColorFilter.mode(Color(0x00000000), BlendMode.plus),
+              : const ColorFilter.mode(AppInk.transparent, BlendMode.plus),
           child: widget.child,
         ),
       ),
@@ -148,10 +147,10 @@ class _MobilePressFeedbackState extends State<MobilePressFeedback> {
         child: ColorFiltered(
           colorFilter: pressed
               ? ColorFilter.mode(
-                  const Color(0xffffffff).withValues(alpha: widget.brighten),
+                  AppInk.white.withValues(alpha: widget.brighten),
                   BlendMode.plus,
                 )
-              : const ColorFilter.mode(Color(0x00000000), BlendMode.plus),
+              : const ColorFilter.mode(AppInk.transparent, BlendMode.plus),
           child: widget.child,
         ),
       ),
@@ -208,14 +207,12 @@ class _PhoneCardBadge extends StatelessWidget {
     final scheme = theme.colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: accent
-            ? scheme.primary
-            : const Color(0xff000000).withValues(alpha: 0.68),
+        color: accent ? scheme.primary : AppInk.black.withValues(alpha: 0.68),
         borderRadius: BorderRadius.circular(6),
         border: accent
             ? null
             : Border.all(
-                color: const Color(0xffffffff).withValues(alpha: 0.16),
+                color: AppInk.white.withValues(alpha: 0.16),
                 width: 0.6,
               ),
       ),
@@ -225,7 +222,7 @@ class _PhoneCardBadge extends StatelessWidget {
           label,
           maxLines: 1,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: accent ? scheme.onPrimary : const Color(0xffffffff),
+            color: accent ? scheme.onPrimary : AppInk.white,
             fontSize: 11,
             fontWeight: FontWeight.w700,
             height: 1.25,
@@ -281,7 +278,7 @@ class PhoneArtworkProgress extends StatelessWidget {
     final bar = SizedBox(
       height: height,
       child: ColoredBox(
-        color: const Color(0xff000000).withValues(alpha: 0.5),
+        color: AppInk.black.withValues(alpha: 0.5),
         child: FractionallySizedBox(
           alignment: Alignment.centerLeft,
           widthFactor: progress.clamp(0.0, 1.0),
@@ -322,8 +319,8 @@ class PhoneArtworkFrame extends StatelessWidget {
         borderRadius: shape,
         border: Border.all(
           color: light
-              ? const Color(0xff000000).withValues(alpha: 0.08)
-              : const Color(0xffffffff).withValues(alpha: 0.10),
+              ? AppInk.black.withValues(alpha: 0.08)
+              : AppInk.white.withValues(alpha: 0.10),
           width: 0.8,
         ),
       ),
@@ -931,18 +928,21 @@ class PhoneLibraryTile extends StatelessWidget {
                     icon,
                     fill: AppIcons.filled,
                     size: large ? 64 : 46,
-                    color: const Color(0x33FFFFFF),
+                    color: AppInk.white.withValues(alpha: 0.2),
                   ),
                 ),
               ),
             ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 stops: [0.35, 1],
-                colors: [Color(0x00000000), Color(0xB3000000)],
+                colors: [
+                  AppInk.transparent,
+                  AppInk.black.withValues(alpha: 0.70),
+                ],
               ),
             ),
           ),
@@ -963,12 +963,15 @@ class PhoneLibraryTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(
-                          color: const Color(0xffffffff),
+                          color: AppInk.white,
                           fontSize: large ? 18 : 15,
                           fontWeight: FontWeight.w700,
                           height: 1.2,
-                          shadows: const [
-                            Shadow(color: Color(0x66000000), blurRadius: 8),
+                          shadows: [
+                            Shadow(
+                              color: AppInk.black.withValues(alpha: 0.4),
+                              blurRadius: 8,
+                            ),
                           ],
                         ),
                       ),
@@ -978,7 +981,7 @@ class PhoneLibraryTile extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: const Color(0xCCFFFFFF),
+                            color: AppInk.white.withValues(alpha: 0.8),
                             height: 1.3,
                           ),
                         ),
@@ -993,7 +996,7 @@ class PhoneLibraryTile extends StatelessWidget {
                         icon,
                         fill: AppIcons.filled,
                         size: large ? 18 : 15,
-                        color: const Color(0xCCFFFFFF),
+                        color: AppInk.white.withValues(alpha: 0.8),
                       ),
                     ),
                   ),

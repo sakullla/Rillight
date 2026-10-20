@@ -196,7 +196,7 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                   child: Center(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: const Color(0xdd000000),
+                        color: AppInk.black.withValues(alpha: 0.867),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Padding(
@@ -214,7 +214,7 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                                   ? AppIcons.volumeUp
                                   : AppIcons.fullscreen,
                               fill: AppIcons.filled,
-                              color: const Color(0xffffffff),
+                              color: AppInk.white,
                             ),
                             const SizedBox(width: 12),
                             Text(
@@ -224,7 +224,7 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                                   ? '$_volume%'
                                   : '${(_scale * 100).round()}%',
                               style: const TextStyle(
-                                color: Color(0xffffffff),
+                                color: AppInk.white,
                                 fontSize: 22,
                               ),
                             ),

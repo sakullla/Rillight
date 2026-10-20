@@ -1464,7 +1464,7 @@ class _FilterButton extends StatelessWidget {
         shape: const StadiumBorder(),
         side: BorderSide(
           color: selected
-              ? const Color(0x00000000)
+              ? AppInk.transparent
               : AppEdge.of(scheme.brightness, strong: true),
         ),
         textStyle: theme.textTheme.labelMedium,

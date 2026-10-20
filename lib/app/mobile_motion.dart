@@ -329,7 +329,7 @@ class _PhonePanelRoute<T> extends PopupRoute<T> {
   @override
   bool get barrierDismissible => true;
   @override
-  Color get barrierColor => const Color(0x66000000);
+  Color get barrierColor => AppInk.black.withValues(alpha: 0.4);
   @override
   String get barrierLabel => '关闭';
   @override

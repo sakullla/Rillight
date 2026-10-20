@@ -269,7 +269,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     final l10n = AppLocalizations.of(context);
     return CupertinoPageScaffold(
       navigationBar: const PhoneTopBar(
-        backgroundColor: Color(0x00000000),
+        backgroundColor: AppInk.transparent,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

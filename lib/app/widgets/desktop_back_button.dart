@@ -40,7 +40,7 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
     final light = scheme.brightness == Brightness.light;
     final artwork = widget.overArtwork && !light;
     final highlighted = _hover || _focus;
-    final foreground = artwork ? const Color(0xffffffff) : scheme.onSurface;
+    final foreground = artwork ? AppInk.white : scheme.onSurface;
     final artworkAlpha = AppScrim.of(context, AppScrim.control);
     final fill = artwork
         ? scheme.scrim.withValues(
@@ -52,9 +52,9 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
         ? (light ? scheme.surfaceContainerHigh : scheme.surfaceContainerHighest)
         : (light ? scheme.surfaceContainerLowest : scheme.surfaceContainerHigh);
     final border = _focus
-        ? (artwork ? const Color(0xffffffff) : scheme.primary)
+        ? (artwork ? AppInk.white : scheme.primary)
         : artwork
-        ? const Color(0xffffffff).withValues(alpha: AppGlass.edgeLight)
+        ? AppInk.white.withValues(alpha: AppGlass.edgeLight)
         : scheme.outlineVariant;
     final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: foreground,
@@ -78,8 +78,9 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
           ),
           shadows: [
             BoxShadow(
-              color: const Color(0xff000000)
-                  .withValues(alpha: artwork ? .28 : (light ? .06 : .18)),
+              color: AppInk.black.withValues(
+                alpha: artwork ? .28 : (light ? .06 : .18),
+              ),
               blurRadius: highlighted ? 12 : 8,
               offset: const Offset(0, 2),
             ),
