@@ -15,11 +15,16 @@ node tool/capture-ui.mjs --only 'poster-hover*,player-settings-*' --platform des
 node tool/capture-ui.mjs --only server-delete-confirm --theme light
 node tool/capture-ui.mjs --only '*loading*' --list
 node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
+node tool/capture-ui.mjs --jobs 2
 ```
 
 支持 `--platform all|desktop|phone|tv`、`--theme all|dark|light`，默认全部平台和两种主题。`--size` 为配置宽度，可指定 `360,412,1024,1440,1920,3840`。TV 两档都按实机渲染：`1920` 是 1080p 面板（DPR 2），`3840` 是 4K 面板（DPR 4），逻辑画布都是 960×540，截图按物理像素输出，可直接对照实机截图与 4K 下的图片清晰度。`--feature` 支持下表功能名及对应中文别名。`--only` 支持一个或多个状态 ID、`*`/`?` 通配符，逗号分隔；与功能、平台、主题和尺寸筛选取交集。`--list` 列出当前筛选匹配的状态，不启动 Flutter；空结果会报错。
 
 默认输出到忽略目录 `build/ui-capture/`，每次生成独立运行目录，终端给出 `index.html`。截图索引支持平台、主题和状态过滤。`manifest.json` 保存尺寸、状态、字体、版本、结果与缺失清单；`capture.log` 保留完整日志。失败返回非零退出码，保留已完成截图。手机横屏的 `profileWidth` 仍是竖屏配置宽度，`width`/`height` 为图片实际尺寸。`theme` 是应用主题，`renderedTheme` 说明播放器固定使用深色。
+
+尺寸和主题组合由一条 `flutter test` 命令并发执行，每个组合独立测试进程；默认并发为 CPU 数量的一半（最少 1、最多 4），可用 `--jobs N` 调整，`--jobs 1` 用于串行排查或内存较少的机器。所有所选状态仍实际执行，失败和缺失检查不变。临时入口保存在本次输出的 `drivers/` 下，`manifest.json` 的 `timing` 记录实际并发、分片数量、Flutter 执行及报告生成前的总耗时。不要同时启动多条 Flutter 命令，尤其在 Windows 上会争用 native-assets DLL。
+
+截图沿用原有动画帧和图片取色等待，使用完整分辨率及真实阴影。捕获无需无障碍断言，不在每帧构造无障碍树；本机密码使用内存验证夹具，真实密码哈希和持久化由测试套件覆盖。不要用降低分辨率、漏拍状态或复用旧截图来比较提速。PNG 直接编码未预乘的 RGBA 像素，保留 sRGB 标记，使用无损 Deflate level 1 与固定行过滤，减少保存开销；代价是输出文件变大（详情矩阵实测约增加 59%）。跨编码器比较应解码后比较像素，PNG 文件哈希本身会改变。
 
 | 功能 | 主要状态 |
 | --- | --- |
@@ -65,3 +70,18 @@ macOS 若运行磁盘缓存测试时出现 `disk-unavailable`，先检查系统�
 由 `tool/android_release_checks.py` 的 `phone_pip_flow` 另验 pinned task、连续会话和变化画面。
 
 `--feature entry` captures the compact film-source selector before verification, its password form and privately verified candidates, plus the recoverable startup history failure page. Synthetic paths identify retained files; these captures do not establish native playback or device acceptance.
+
+## 2026-10-20 性能对比
+
+Windows 11、Flutter 3.47.7、同一微软雅黑字体，`--feature detail` 的完整三端／双尺寸／双主题矩阵：修改前 204.904 秒，优化后默认 4 路并发 85.460 秒，缩短约 58.3%。两次均为 204 张且无缺失；202 张 PNG 哈希完全相同，另两张浅色分集详情只有背景取色各通道最多 1 级差异，布局和内容一致。没有降低分辨率、阴影质量或减少状态。
+
+对比目录为 `build/ui-capture/2026-10-20T14-10-29-336Z-9RYEqP/` 与 `build/ui-capture/2026-10-20T14-18-50-997Z-D4lbs9/`。数字为该机器单轮命令总耗时，完整默认矩阵的耗时另行记录，不能按图片数量线性外推。
+
+完整默认矩阵实测 685.724 秒（11 分 26 秒），24 个测试全部通过，2408 个唯一状态无缺失。日志共 2412 次截图，手机 `account` 在同一流程中重复保存，按文件／状态去重后仍为 2408；没有漏掉注册状态。报告位于 `build/ui-capture/full matrix & audit/2026-10-20T14-33-13-221Z-U83n3y/index.html`，本次也验证了 Windows 输出路径包含空格和 `&`。原交付报告在 1900.7 秒时超时，属于未完成的历史记录，不用它计算同覆盖率的加速百分比。
+
+
+第二轮保留原有帧时序，改用快速无损 PNG 编码。完整默认矩阵从 685.724 秒降到 **532.340 秒（8 分 52 秒，再缩短约 22.4%）**；24 个测试通过，2408 个唯一状态无缺失，重复 `account` 记录与上一轮一致。报告：`build/ui-capture/2026-10-20T14-59-42-045Z-sINrZJ/index.html`。数据仍为同机器单轮测量。
+
+保存阶段的 4K 详情分组从约 9.5 秒降至 4.2 秒，但详情小矩阵命令总耗时本轮为 90.993 秒，未优于上一轮 85.460 秒；不能将编码阶段收益当成每个筛选任务的固定加速。该矩阵 204 张图片中 203 张解码像素完全一致，另一张最多 1 级色值差异。缩减中间帧的实验会改变部分手机截图，未采用。
+
+完成态额外检查：全量像素对比发现服务首页的异步封面偶尔仍为占位图，随后增加了有超时的可见图片解码检查，仅用于 `provider-*-connected`，加载态不受影响。三端／双尺寸／双主题的 36 个完成态已通过。上述 532.340 秒全量计时在增加此检查之前，最终版本的全量复测尚未完成，不据此声称其精确耗时。

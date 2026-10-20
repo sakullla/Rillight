@@ -6,6 +6,7 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+import '../helpers/server_access_fixture.dart';
 import 'configured_source.dart';
 
 import 'package:rillight/app/ui/ui.dart';
@@ -383,7 +384,10 @@ void main() {
 
   test('password and editor configuration commit together and preserve the old state on save failure', () async {
     final store = _EditorFailingStore();
-    final auth = controller(servers: store);
+    final auth = controller(
+      servers: store,
+      access: TestServerAccessController(),
+    );
     addTearDown(auth.dispose);
     await auth.connect(
       address: server.baseUrl.toString(),

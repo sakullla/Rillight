@@ -6,6 +6,7 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+import '../helpers/server_access_fixture.dart';
 import 'configured_source.dart';
 
 import 'package:rillight/app/ui/ui.dart';
@@ -102,6 +103,7 @@ void main() {
       client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
       credentials: store,
       servers: MemoryServerListStore(),
+      serverAccess: TestServerAccessController(),
     );
     addTearDown(auth.dispose);
     await auth.connect(

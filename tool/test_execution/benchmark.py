@@ -19,6 +19,7 @@ MODES = {
 
 def inspect_log(path):
     starts, completed, suites, timings = {}, {}, {}, []
+    suite_timings = {}
     errors, done = [], None
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
@@ -51,6 +52,8 @@ def inspect_log(path):
             errors.append("Failed: " + test["name"])
         visible.append(test["name"])
         timings.append({"name": test["name"], "seconds": (result["time"] - started) / 1000})
+        suite = suites.get(test["suiteID"], str(test["suiteID"]))
+        suite_timings[suite] = suite_timings.get(suite, 0) + (result["time"] - started) / 1000
     return {
         "success": bool(done and done.get("success") and visible and not errors
                         and starts.keys() == completed.keys()),
@@ -59,6 +62,7 @@ def inspect_log(path):
         "errors": errors,
         "suites": len(suites),
         "slowest": sorted(timings, key=lambda item: -item["seconds"])[:15],
+        "suite_test_seconds": dict(sorted(suite_timings.items(), key=lambda item: -item[1])),
     }
 
 

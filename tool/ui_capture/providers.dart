@@ -15,6 +15,7 @@ import 'package:rillight/jellyfin/jellyfin_client.dart';
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/plex/plex_authentication.dart';
 import 'package:rillight/plex/plex_client.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -109,12 +110,66 @@ extension ProviderCaptures on CaptureSession {
     _ => null,
   };
 
-  Future<void> _providerUntil(bool Function() ready, String reason) async {
+  Future<void> _providerUntil(
+    bool Function() ready,
+    String reason, {
+    String Function()? observed,
+  }) async {
     final elapsed = Stopwatch()..start();
     while (!ready() && elapsed.elapsed < const Duration(seconds: 10)) {
       await advance(100);
     }
-    expect(ready(), isTrue, reason: reason);
+    expect(
+      ready(),
+      isTrue,
+      reason: observed == null ? reason : '$reason; ${observed()}',
+    );
+  }
+
+  Future<void> _providerArtworkReady() async {
+    var observation = 'no visible artwork';
+    await _providerUntil(
+      () {
+        final viewport =
+            Offset.zero &
+            (tester.view.physicalSize / tester.view.devicePixelRatio);
+        final artwork = find.byWidgetPredicate(
+          (widget) =>
+              widget is MediaImage &&
+              widget.blurSigma == null &&
+              widget.item
+                  .imageCandidates(
+                    preferBackdrop: widget.preferBackdrop,
+                    preferThumb: widget.preferThumb,
+                    preferParentBackdrop: widget.preferParentBackdrop,
+                  )
+                  .isNotEmpty,
+        );
+        var visible = 0;
+        observation = 'no visible artwork';
+        for (final element in artwork.evaluate()) {
+          final owner = find.byElementPredicate(
+            (value) => identical(value, element),
+          );
+          if (!tester.getRect(owner).overlaps(viewport)) continue;
+          visible++;
+          final frames = tester.widgetList<RawImage>(
+            find.descendant(of: owner, matching: find.byType(RawImage)),
+          );
+          if (frames.isEmpty || frames.any((frame) => frame.image == null)) {
+            observation =
+                '${(element.widget as MediaImage).item.id}: no decoded frame';
+            return false;
+          }
+        }
+        observation = '$visible visible images decoded';
+        return visible > 0;
+      },
+      'Connected provider must display its visible artwork before capture',
+      observed: () => observation,
+    );
+    // Let first-frame fades and the palette transition finish after decoding.
+    await advance(300);
   }
 
   Future<void> closeCapturedPlayer() async {
@@ -272,14 +327,17 @@ extension ProviderCaptures on CaptureSession {
       expect(auth.client.serviceType, type);
       app.router.go('/');
       await advance(800);
-      await save('provider-$name-connected');
-      if (!wants('player')) continue;
-      final backend = newBackend();
       final id = switch (type) {
         MediaServerType.emby => 'movie-up',
         MediaServerType.jellyfin => 'movie-1',
         MediaServerType.plex => '42',
       };
+      if (shouldCapture('provider-$name-connected')) {
+        await _providerArtworkReady();
+      }
+      await save('provider-$name-connected');
+      if (!wants('player')) continue;
+      final backend = newBackend();
       final gate = Completer<void>();
       backend.openGate = gate;
       app.router.go('/item/$id');

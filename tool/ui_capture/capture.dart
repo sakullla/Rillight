@@ -7,14 +7,13 @@ import 'package:flutter/gestures.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/source_sessions.dart';
-import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -42,9 +41,12 @@ import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
 
 import '../../test/emby/fake_emby_server.dart';
 import '../../test/helpers/image_cache_fixture.dart';
+import '../../test/helpers/server_access_fixture.dart';
+import '../../test/helpers/widget_harness.dart';
 import 'fixtures.dart';
 import 'pages.dart';
 import 'providers.dart';
+import 'png.dart';
 
 import 'package:rillight/auth/provider_identity.dart';
 
@@ -63,7 +65,9 @@ class _CaptureBinding extends AutomatedTestWidgetsFlutterBinding {
   bool get disableShadows => false;
 }
 
-void main() {
+void main() => runCapture();
+
+void runCapture({String? profile, String? captureTheme}) {
   _CaptureBinding();
   TestWidgetsFlutterBinding.ensureInitialized();
   WidgetController.hitTestWarningShouldBeFatal = true;
@@ -101,6 +105,10 @@ void main() {
   double pixelRatioOf((String, PresentationEnvironment, Size) config) =>
       config.$1 == 'tv' ? config.$3.width / 960 : 1;
   for (final config in configurations) {
+    if (profile != null &&
+        profile != '${config.$1}-${config.$3.width.toInt()}') {
+      continue;
+    }
     final profiles = Platform.environment['RILLIGHT_CAPTURE_PROFILES'];
     if (profiles != null &&
         !profiles
@@ -117,6 +125,7 @@ void main() {
     final selectedPlatform = Platform.environment['RILLIGHT_CAPTURE_PLATFORM'];
     if (selectedPlatform != 'all' && selectedPlatform != config.$1) continue;
     for (final theme in ['dark', 'light']) {
+      if (captureTheme != null && captureTheme != theme) continue;
       final selectedTheme = Platform.environment['RILLIGHT_CAPTURE_THEME'];
       if (selectedTheme != 'all' && selectedTheme != theme) continue;
       final records = <Map<String, Object>>[];
@@ -178,7 +187,7 @@ void main() {
         final providers = CaptureProviders(adapter, credentials);
         final servers = MemoryServerListStore();
         final sources = SourceSessionRegistry(
-          access: ServerAccessController(store: MemoryServerAccessStore()),
+          access: TestServerAccessController(),
           store: servers,
           credentials: credentials,
           createProviderClient: providers.create,
@@ -1031,9 +1040,22 @@ class CaptureSession {
       final image = await render.toImage(
         pixelRatio: tester.view.devicePixelRatio,
       );
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('$out/$file').writeAsBytes(bytes!.buffer.asUint8List());
-      image.dispose();
+      try {
+        final pixels = await image.toByteData(
+          format: ui.ImageByteFormat.rawStraightRgba,
+        );
+        final bytes = encodeCapturePng(
+          pixels!.buffer.asUint8List(
+            pixels.offsetInBytes,
+            pixels.lengthInBytes,
+          ),
+          image.width,
+          image.height,
+        );
+        await File('$out/$file').writeAsBytes(bytes);
+      } finally {
+        image.dispose();
+      }
       records.add({
         'platform': platform,
         'theme': theme,

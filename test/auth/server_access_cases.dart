@@ -1,3 +1,5 @@
+import '../helpers/server_access_fixture.dart';
+
 import 'dart:async';
 
 import 'package:rillight/auth/server_entry_coordinator.dart';
@@ -27,11 +29,11 @@ class _FailingStore extends MemoryServerAccessStore {
 void main() {
   test('restarting with the same verifier never reissues the old access generation', () async {
     final store = MemoryServerAccessStore();
-    final verifier = await ServerPasswordVerifier.create('local');
+    final verifier = await TestPasswordVerifier.create('local');
     await store.write('saved-verifier', ServerAccessRecord.protected(verifier));
     final server = _server('a', protection: 'saved-verifier');
-    final first = ServerAccessController(store: store);
-    final restarted = ServerAccessController(store: store);
+    final first = TestServerAccessController(store: store);
+    final restarted = TestServerAccessController(store: store);
     addTearDown(first.dispose);
     addTearDown(restarted.dispose);
     await first.register(server);
@@ -45,7 +47,7 @@ void main() {
   });
 
   test('entry cancellation discards late password and preserves original destination', () async {
-    final access = ServerAccessController(store: MemoryServerAccessStore());
+    final access = TestServerAccessController(store: MemoryServerAccessStore());
     addTearDown(access.dispose);
     final server = _server('protected');
     await access.register(server);
@@ -80,7 +82,7 @@ void main() {
   });
 
   test('entry only publishes unlock and locks old server after a successful connection', () async {
-    final access = ServerAccessController(store: MemoryServerAccessStore());
+    final access = TestServerAccessController(store: MemoryServerAccessStore());
     addTearDown(access.dispose);
     final old = _server('old'), next = _server('next');
     for (final server in [old, next]) {
@@ -146,7 +148,7 @@ void main() {
     'failed configuration commit leaves the previous password and permit valid',
     () async {
       final store = MemoryServerAccessStore();
-      final access = ServerAccessController(store: store);
+      final access = TestServerAccessController(store: store);
       addTearDown(access.dispose);
       await access.register(_server('a'));
       final ref = await access.setPassword('a', 'old', 'old');
@@ -195,7 +197,7 @@ void main() {
     () async {
       final store = MemoryServerAccessStore();
       var now = DateTime.utc(2026);
-      final access = ServerAccessController(store: store, clock: () => now);
+      final access = TestServerAccessController(store: store, clock: () => now);
       addTearDown(access.dispose);
       await access.register(_server('a'));
       await access.register(_server('b'));
@@ -220,7 +222,7 @@ void main() {
       expect(await access.unlock('a', 'new'), isTrue);
       access.didEnter('b');
       expect(access.allows('a'), isFalse);
-      final restarted = ServerAccessController(store: store);
+      final restarted = TestServerAccessController(store: store);
       addTearDown(restarted.dispose);
       await restarted.register(_server('a', protection: aRef));
       await restarted.register(_server('b', protection: bRef));
@@ -235,7 +237,7 @@ void main() {
     'old password, confirmation and storage failures keep previous settings',
     () async {
       final store = _FailingStore();
-      final access = ServerAccessController(store: store);
+      final access = TestServerAccessController(store: store);
       addTearDown(access.dispose);
       await access.register(_server('a'));
       final ref = await access.setPassword('a', 'old', 'old');
@@ -261,7 +263,7 @@ void main() {
 
   test('candidate cancellation and lock revoke late unlock without publishing content', () async {
     final store = MemoryServerAccessStore();
-    final access = ServerAccessController(store: store);
+    final access = TestServerAccessController(store: store);
     addTearDown(access.dispose);
     await access.register(_server('a'));
     await access.setPassword('a', 'password', 'password');
@@ -287,7 +289,7 @@ void main() {
         writeSecure: (_, _) async {},
         deleteSecure: (_) async {},
       );
-      final access = ServerAccessController(store: secure);
+      final access = TestServerAccessController(store: secure);
       addTearDown(access.dispose);
       await access.register(_server('a', protection: 'missing'));
       expect(access.isUnavailable('a'), isTrue);
@@ -303,13 +305,13 @@ void main() {
 
   test('disabling requires current password and survives restart', () async {
     final store = MemoryServerAccessStore();
-    final access = ServerAccessController(store: store);
+    final access = TestServerAccessController(store: store);
     addTearDown(access.dispose);
     await access.register(_server('a'));
     await access.setPassword('a', 'password', 'password');
     final ref = await access.disablePassword('a', 'password');
     expect(access.allows('a'), isTrue);
-    final restarted = ServerAccessController(store: store);
+    final restarted = TestServerAccessController(store: store);
     addTearDown(restarted.dispose);
     await restarted.register(_server('a', protection: ref));
     expect(restarted.isProtected('a'), isFalse);

@@ -146,8 +146,8 @@ void main() {
     },
   );
 
-  // Each format is an independent migration. Keep its real password checks
-  // within its own test timeout instead of accumulating eight KDFs in one case.
+  // Check the complete verifier for every format/provider. Version 3 also
+  // exercises real unlocks; repeating identical KDFs adds no migration coverage.
   for (final version in [null, 1, 2, 3]) {
     test(
       'legacy version $version retains three provider identities, lines, credentials and order',
@@ -190,7 +190,11 @@ void main() {
           await controller.register(server);
           if (server.id != 'emby') {
             expect(controller.allows(server.id), isFalse);
-            expect(await controller.unlock(server.id, '1234'), isTrue);
+            final record = await accessStore.read(server.protectionRef!);
+            expect(record!.verifier!.toJson(), verifier);
+            if (version == 3) {
+              expect(await controller.unlock(server.id, '1234'), isTrue);
+            }
           }
         }
         controller.dispose();

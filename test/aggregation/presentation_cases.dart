@@ -4843,7 +4843,7 @@ void desktopProcessMain() {
   );
 }
 
-final cases = CaseShard(3);
+final cases = CaseShard(6);
 
 void mainShard(int part, int expectedParts) =>
     cases.register(part, main, expectedParts: expectedParts);

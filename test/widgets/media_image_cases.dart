@@ -107,15 +107,22 @@ void main() {
   }
 
   Future<void> pumpUntilImage(WidgetTester tester) async {
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pump(const Duration(milliseconds: 1));
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pump(const Duration(milliseconds: 1));
-    await tester.pump(const Duration(milliseconds: 1));
+    // Image widgets exist before the engine has decoded a frame. Wait for
+    // decoding instead of assuming two fixed 100ms sleeps are sufficient.
+    final deadline = Stopwatch()..start();
+    do {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+      await tester.pump(const Duration(milliseconds: 1));
+      final images = tester.widgetList<RawImage>(find.byType(RawImage));
+      if (images.isNotEmpty &&
+          images.every((image) => image.image != null) &&
+          tester.binding.imageCache.pendingImageCount == 0) {
+        return;
+      }
+    } while (deadline.elapsed < const Duration(seconds: 5));
+    fail('Image decoding did not finish within five seconds');
   }
 
   Iterable<String> imageRequests() {

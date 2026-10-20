@@ -1415,6 +1415,9 @@ extension HomeFailureCaptures on CaptureSession {
       // 两条线路才会在服务器离线时给出「更换线路」而不是「切换服务器」。
       await auth.addLine(auth.session!.server.id, backup.baseUrl.toString());
     });
+    // Feature-filtered runs can still be on /item/... here. Reconnecting does
+    // not navigate; reset the destination before mounting the failure fixture.
+    app.router.go('/');
     // 换服务器的同时重建内容壳层:沿用旧控制器会先显示上一台的条目。
     await tester.pumpWidget(const SizedBox.shrink());
     await advance(150);

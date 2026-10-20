@@ -1035,6 +1035,9 @@ void main() {
     backend.openGate!.complete();
     backend.openGate = null;
     await Future.wait([attempt, close]);
+    // close() may return at this fixture's 50ms host deadline while cleanup
+    // continues. Join that work before asserting the terminal resource state.
+    await controller.disposeAsync().timeout(const Duration(seconds: 5));
     expect(controller.activeMediaSourceId, source);
     expect(controller.state.phase, PlaybackPhase.closed);
   });
