@@ -55,6 +55,11 @@ abstract final class AppBrand {
 /// 不参与页面主题派生。
 abstract final class AppServerBrand {
   static const Color emby = Color(0xFF52B54B);
+
+  /// Jellyfin 官方品牌色是 `0xFF8C63D4`;这里统一收敛到 `0xFF8862E0`,
+  /// 与 [jellyfinPurple]/[jellyfinBlue] 的紫青渐变同处一条色带,便于
+  /// 深色底上的标记保持同一明度。属于有意统一,不是笔误;改动前先
+  /// 同步 `lib/library/provider_marks.dart` 与登录页的标记配色。
   static const Color jellyfin = Color(0xFF8862E0);
   static const Color plex = Color(0xFFE5A00D);
 

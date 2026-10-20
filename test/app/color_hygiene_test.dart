@@ -15,23 +15,38 @@ const Set<String> rawColorAllowlist = {
   'lib/player/danmaku/danmaku_display_form.dart',
 };
 
-const String _marker = 'Color(0x';
-const String _hexDigits = '0123456789abcdefABCDEF';
+/// `Color` 后允许跨空白与换行再跟 `0x` 十六进制(6 位 RGB 或 8 位 ARGB)。
+///
+/// 按整份文件内容匹配而不是逐行匹配:dart format 会把超长调用拆成
+/// `const Color(` + 换行 + `0xff000000,` + 换行 + `)`,逐行扫描会整段漏掉。
+final RegExp _rawColorPattern = RegExp(
+  r'Color\s*\(\s*0x(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6})\b',
+);
 
-/// 该行是否手写了十六进制颜色(允许 6 位或 8 位 ARGB)。
-bool _hasRawColor(String line) {
-  var from = 0;
-  while (true) {
-    final start = line.indexOf(_marker, from);
-    if (start < 0) return false;
-    final digits = line.substring(start + _marker.length);
-    final length = digits.length >= 8 && _hexDigits.contains(digits[7]) ? 8 : 6;
-    if (digits.length >= length &&
-        digits.substring(0, length).split('').every(_hexDigits.contains)) {
-      return true;
-    }
-    from = start + _marker.length;
+/// 字符偏移对应的 1 基行号。
+int lineOfOffset(String text, int offset) {
+  var line = 1;
+  final limit = offset < text.length ? offset : text.length;
+  for (var index = 0; index < limit; index++) {
+    if (text.codeUnitAt(index) == 0x0A) line++;
   }
+  return line;
+}
+
+/// 字符偏移所在行的去空白文本,用于失败输出定位。
+String lineAtOffset(String text, int offset) {
+  final start = offset < 1 ? 0 : text.lastIndexOf('\n', offset - 1) + 1;
+  final end = text.indexOf('\n', offset);
+  return text.substring(start, end < 0 ? text.length : end).trim();
+}
+
+/// 文件内容里所有原始十六进制颜色的 `path:line: text` 描述。
+List<String> rawColorViolations(String path, String contents) {
+  return [
+    for (final match in _rawColorPattern.allMatches(contents))
+      '$path:${lineOfOffset(contents, match.start)}: '
+          '${lineAtOffset(contents, match.start)}',
+  ];
 }
 
 String _relative(File file) =>
@@ -69,14 +84,7 @@ void main() {
     for (final file in _libSources()) {
       final path = _relative(file);
       if (rawColorAllowlist.contains(path)) continue;
-      final lines = file.readAsLinesSync();
-      for (var index = 0; index < lines.length; index++) {
-        final line = lines[index];
-        if (!_hasRawColor(line)) continue;
-        final lineNumber = index + 1;
-        final text = line.trim();
-        violations.add('$path:$lineNumber: $text');
-      }
+      violations.addAll(rawColorViolations(path, file.readAsStringSync()));
     }
 
     final separator = Platform.lineTerminator;
@@ -87,6 +95,37 @@ void main() {
       reason:
           '发现调色板外的原始颜色,请改用 AppInk / AppScrim / AppBrand token:'
           '$separator$detail',
+    );
+  });
+
+  test('跨行 Color 字面量同样会被扫描到(回归夹具)', () {
+    // 三引号字符串开头的换行会被 Dart 吃掉,所以从第一行直接起文。
+    const fixture = '''class Fake {
+  static const color = Color(
+    0xff000000,
+  );
+}
+''';
+    final violations = rawColorViolations('lib/fake.dart', fixture);
+    expect(violations, hasLength(1));
+    expect(
+      violations.single,
+      startsWith('lib/fake.dart:2: '),
+      reason: '行号必须由字符偏移换算,指向 Color( 起始行',
+    );
+  });
+
+  test('token 与 8 位 ARGB 同样被识别,普通代码不会误报', () {
+    expect(
+      rawColorViolations(
+        'lib/a.dart',
+        'const c = AppInk.black;\ncolor: AppScrim.scrim(.5),',
+      ),
+      isEmpty,
+    );
+    expect(
+      rawColorViolations('lib/b.dart', 'const c = Color ( 0x80FF7FA8 );'),
+      hasLength(1),
     );
   });
 }
