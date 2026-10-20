@@ -2256,7 +2256,8 @@ void main() {
         )!;
         f.b.requests.clear();
         Future<void> showComparison() async {
-          final action = find.widgetWithText(ui.AppButton, '选择影片来源');
+          // Each platform styles the in-content entry as its own action.
+          final action = find.byKey(const Key('source-selection-open'));
           await tester.ensureVisible(action);
           await tester.tap(action);
           await _settle(tester);
@@ -2601,7 +2602,42 @@ void main() {
           await _settle(tester);
           app.router.go('/item/shared-id');
           await _settle(tester);
-          await tester.tap(find.byKey(const Key('source-selection-open')));
+          final entry = find.byKey(const Key('source-selection-open'));
+          expect(entry, findsOneWidget);
+          // The entry is part of the detail content, not an overlay stacked
+          // above the page: it scrolls with the page and has no Positioned
+          // ancestor between it and the detail page.
+          final page = environment.isTv
+              ? find.byType(TvDetailPage)
+              : environment.isDesktop
+              ? find.byType(ItemDetailPage)
+              : find.byType(MobileDetailPage);
+          expect(find.descendant(of: page, matching: entry), findsOneWidget);
+          expect(
+            find.ancestor(of: entry, matching: find.byType(Scrollable)),
+            findsWidgets,
+          );
+          expect(
+            find.ancestor(of: entry, matching: find.byType(Positioned)),
+            findsNothing,
+          );
+          if (environment.isTv) {
+            // D-pad reaches the entry from the header play action.
+            bool entryFocused() => Focus.of(
+              tester.element(
+                find.descendant(of: entry, matching: find.byType(Text)).first,
+              ),
+            ).hasFocus;
+            for (var i = 0; i < 6 && !entryFocused(); i++) {
+              await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+              await tester.pump();
+            }
+            expect(entryFocused(), isTrue);
+            await tester.sendKeyEvent(LogicalKeyboardKey.select);
+          } else {
+            await tester.ensureVisible(entry);
+            await tester.tap(entry);
+          }
           await _settle(tester);
           expect(
             find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
@@ -2622,6 +2658,12 @@ void main() {
             findsOneWidget,
           );
           expect(f.auth.session!.server.id, f.aId);
+          // Aggregation/search entries keep showComparison=0: the same
+          // detail page renders without the in-content entry.
+          app.router.go('/item/shared-id?showComparison=0');
+          await _settle(tester);
+          expect(page, findsOneWidget);
+          expect(find.byKey(const Key('source-selection-open')), findsNothing);
           await tester.pumpWidget(const SizedBox.shrink());
           app.router.dispose();
         },

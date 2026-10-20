@@ -33,6 +33,7 @@ import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -3136,6 +3137,18 @@ class _DetailActions extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: tools,
         ),
+        // 跨服务器选择影片来源：与圆钮组并列的带字胶囊，随详情内容滚动。
+        if (SourceSelectionAction.availableIn(context))
+          SourceSelectionAction(
+            builder: (context, view) => AppButton.icon(
+              key: SourceSelectionActionView.key,
+              onPressed: view.loading ? null : view.onPressed,
+              style: ghost,
+              icon: Icon(view.icon, size: 20),
+              label: Text(view.label),
+              variant: AppButtonVariant.outlined,
+            ),
+          ),
       ],
     );
   }

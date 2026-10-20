@@ -81,7 +81,8 @@ class PhoneItemBanner extends StatelessWidget {
   final List<PhoneMetaEntry> meta;
   final Widget? pendingMeta;
 
-  /// 头部右上角的状态操作（收藏、标记已看）：有海报时在海报右上方，单集在引导行右侧。
+  /// 头部右上角的状态操作（收藏、标记已看、选择影片来源）：有海报时在海报右上方，
+  /// 单集在引导行右侧。窄屏时按宽度换行。
   final Widget? statusActions;
   final Widget? actions;
 

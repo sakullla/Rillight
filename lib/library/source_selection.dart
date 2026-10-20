@@ -112,13 +112,48 @@ class _SourceSelectionFrame extends StatelessWidget {
   }
 }
 
-/// Mounted in every gated detail tree, independent of global search.
-class SourceSelectionAction extends StatefulWidget {
-  const SourceSelectionAction({super.key, this.itemId});
+/// What a detail page needs to render the source selection entry in its own
+/// action style. The page must put [key] on the activatable button.
+class SourceSelectionActionView {
+  const SourceSelectionActionView({
+    required this.label,
+    required this.icon,
+    required this.loading,
+    required this.onPressed,
+  });
 
-  /// Ordinary selected-server details resolve the same permit as playback,
-  /// without opening a decoder or publishing a target-server entry.
-  final String? itemId;
+  static const Key key = Key('source-selection-open');
+  final String label;
+  final IconData icon;
+
+  /// True while the dialog's origin is resolving or the dialog is open.
+  final bool loading;
+
+  /// Ignores repeated activation while [loading]; pages that must keep focus
+  /// (TV) can stay enabled, others disable on [loading].
+  final Future<void> Function() onPressed;
+}
+
+/// The in-content source selection entry. Each detail page places one inside
+/// its own action row; availability comes from [SourceSelectionAvailability]
+/// published by the source detail gate.
+class SourceSelectionAction extends StatefulWidget {
+  const SourceSelectionAction({super.key, this.builder});
+
+  /// Builds the page-styled button. Defaults to an outlined pill.
+  final Widget Function(BuildContext context, SourceSelectionActionView view)?
+  builder;
+
+  /// Whether an entry would render here, so pages can omit spacing or an
+  /// otherwise empty action row.
+  static bool availableIn(BuildContext context) {
+    final availability = SourceSelectionAvailability.maybeOf(context);
+    if (availability == null || !availability.available) return false;
+    final origin = DetailSourceScope.maybeOf(context);
+    if (origin != null) return origin.permit.isValid;
+    return availability.itemId != null;
+  }
+
   @override
   State<SourceSelectionAction> createState() => _SourceSelectionActionState();
 }
@@ -126,10 +161,15 @@ class SourceSelectionAction extends StatefulWidget {
 class _SourceSelectionActionState extends State<SourceSelectionAction> {
   bool _loading = false;
   Future<void> _show() async {
+    if (_loading) return;
+    final availability = SourceSelectionAvailability.maybeOf(context);
+    if (availability == null || !availability.available) return;
     final scopedOrigin = DetailSourceScope.maybeOf(context);
+    final itemId = availability.itemId;
     final runtime = PlayerScope.of(context).runtime;
     if (runtime == null ||
-        (scopedOrigin != null && !scopedOrigin.permit.isValid)) {
+        (scopedOrigin != null && !scopedOrigin.permit.isValid) ||
+        (scopedOrigin == null && itemId == null)) {
       return;
     }
     final auth = AuthScope.of(context);
@@ -152,7 +192,7 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
           scopedOrigin ??
           await runtime.resolve(
             PlayerOpenRequest(
-              itemId: widget.itemId!,
+              itemId: itemId!,
               accessGeneration: selectedGeneration,
             ),
           );
@@ -199,27 +239,36 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
 
   @override
   Widget build(BuildContext context) {
-    final origin = DetailSourceScope.maybeOf(context);
-    if ((origin == null && widget.itemId == null) ||
-        (origin != null && !origin.permit.isValid)) {
+    if (!SourceSelectionAction.availableIn(context)) {
       return const SizedBox.shrink();
     }
+    final view = SourceSelectionActionView(
+      label: AppLocalizations.of(context).sourceSelectionAction,
+      icon: AppIcons.search,
+      loading: _loading,
+      onPressed: _show,
+    );
+    final builder = widget.builder;
+    if (builder != null) return builder(context, view);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    // A sibling secondary action in the page's own action row: no overlay
+    // shadow, no floating surface.
     return AppButton.icon(
-      key: const Key('source-selection-open'),
-      onPressed: _loading ? null : _show,
-      icon: const Icon(AppIcons.search, size: 18),
-      label: Text(AppLocalizations.of(context).sourceSelectionAction),
+      key: SourceSelectionActionView.key,
+      onPressed: view.loading ? null : view.onPressed,
+      icon: Icon(view.icon, size: 18),
+      label: Text(view.label),
       variant: AppButtonVariant.outlined,
       style: AppButtonStyle(
-        backgroundColor: scheme.surfaceContainerHigh,
         foregroundColor: scheme.onSurface,
-        minimumSize: const Size(0, 40),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.sm,
+        ),
         shape: const StadiumBorder(),
-        side: BorderSide(color: AppEdge.of(scheme.brightness, strong: true)),
-        boxShadow: AppShadow.overlay(theme.brightness),
+        side: BorderSide(color: scheme.onSurface.withValues(alpha: 0.22)),
         textStyle: theme.textTheme.labelLarge,
       ),
     );

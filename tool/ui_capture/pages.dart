@@ -191,13 +191,12 @@ extension PageCaptures on CaptureSession {
         // Use the same ordinary detail route as a home-page poster.
         app.router.go('/item/movie-up');
         await advance(1200);
+        // The entry sits in each platform's detail action row.
         await activate(
-          find
-              .descendant(
-                of: find.byType(SourceSelectionAction),
-                matching: find.byType(AppButton),
-              )
-              .first,
+          find.descendant(
+            of: find.byType(SourceSelectionAction),
+            matching: find.byKey(SourceSelectionActionView.key),
+          ),
         );
         await advance(800);
         expect(

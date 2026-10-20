@@ -10,7 +10,6 @@ import 'package:go_router/go_router.dart';
 
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
-import 'source_selection.dart';
 import '../app/l10n/app_localizations.dart';
 
 import 'package:rillight/auth/auth_controller.dart';
@@ -128,6 +127,41 @@ class DetailSourceScope extends InheritedWidget {
       showComparison: !hideComparison,
     );
   }
+}
+
+/// Published by the source detail gate: whether the detail tree may offer the
+/// cross-server source selection entry. Detail pages only decide placement;
+/// `SourceSelectionAction` reads this and renders nothing when unavailable.
+class SourceSelectionAvailability extends InheritedWidget {
+  const SourceSelectionAvailability({
+    super.key,
+    required this.showComparison,
+    required this.permitValid,
+    this.itemId,
+    required super.child,
+  });
+
+  /// False for aggregation/search/shelf/person routes (`showComparison=0`).
+  final bool showComparison;
+
+  /// Whether the gate's entry permit (selected session or source lease) is
+  /// still valid when this subtree was built.
+  final bool permitValid;
+
+  /// Ordinary selected-server details resolve this item on demand. Null when
+  /// the subtree already runs inside a [DetailSourceScope].
+  final String? itemId;
+
+  bool get available => showComparison && permitValid;
+
+  static SourceSelectionAvailability? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<SourceSelectionAvailability>();
+
+  @override
+  bool updateShouldNotify(SourceSelectionAvailability oldWidget) =>
+      showComparison != oldWidget.showComparison ||
+      permitValid != oldWidget.permitValid ||
+      itemId != oldWidget.itemId;
 }
 
 class SourceDetailGate extends StatelessWidget {
@@ -490,17 +524,11 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
       // routes below still require their original, valid source permit.
       return KeyedSubtree(
         key: ValueKey(_authIdentity),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            widget.child,
-            if (widget.showComparison)
-              Positioned(
-                right: AppSpacing.page,
-                bottom: AppSpacing.xl,
-                child: SourceSelectionAction(itemId: widget.itemId),
-              ),
-          ],
+        child: SourceSelectionAvailability(
+          showComparison: widget.showComparison,
+          permitValid: true,
+          itemId: widget.itemId,
+          child: widget.child,
         ),
       );
     }
@@ -521,17 +549,10 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
       origin: origin,
       cache: _cache,
       imagePolicy: _imagePolicy!,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          widget.child,
-          if (widget.showComparison)
-            const Positioned(
-              right: AppSpacing.page,
-              bottom: AppSpacing.xl,
-              child: SourceSelectionAction(),
-            ),
-        ],
+      child: SourceSelectionAvailability(
+        showComparison: widget.showComparison,
+        permitValid: origin.permit.isValid,
+        child: widget.child,
       ),
     );
   }

@@ -26,6 +26,7 @@ import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/mobile_series_page.dart';
+import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -731,7 +732,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                 statusActions:
                                     item != null &&
                                         (controller.supportsFavorite ||
-                                            !item.isSeries)
+                                            !item.isSeries ||
+                                            SourceSelectionAction.availableIn(
+                                              context,
+                                            ))
                                     ? _DetailStatusActions(
                                         played: item.isSeries
                                             ? null
@@ -1007,8 +1011,9 @@ class _PhoneDetailBar extends StatelessWidget {
   }
 }
 
-/// 头部右上角状态胶囊：收藏（`phone-detail-favorite`）与已看切换
-/// （[CatalogKeys.playedToggle]），填充头部右上留白并释放下方播放控制区宽度。
+/// 头部右上角状态胶囊：收藏（`phone-detail-favorite`）、已看切换
+/// （[CatalogKeys.playedToggle]）与选择影片来源（`source-selection-open`），
+/// 填充头部右上留白并释放下方播放控制区宽度。
 class _DetailStatusActions extends StatelessWidget {
   const _DetailStatusActions({
     this.played,
@@ -1059,6 +1064,17 @@ class _DetailStatusActions extends StatelessWidget {
               highlighted: played,
               compact: true,
               onPressed: onTogglePlayed,
+            ),
+          ),
+        // 跨服务器选择影片来源：与收藏、已看同一行的次级胶囊，随页面滚动。
+        if (SourceSelectionAction.availableIn(context))
+          SourceSelectionAction(
+            builder: (context, view) => _SecondaryAction(
+              key: SourceSelectionActionView.key,
+              icon: view.icon,
+              label: view.label,
+              compact: true,
+              onPressed: view.loading ? null : view.onPressed,
             ),
           ),
       ],

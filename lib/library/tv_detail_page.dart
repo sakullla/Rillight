@@ -18,6 +18,7 @@ import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/item_format.dart';
+import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
 
@@ -391,6 +392,18 @@ class _TvDetailPageState extends State<TvDetailPage> {
           ),
           onPressed: c.playedBusy ? null : _togglePlayed,
           child: Text(item.userData.played ? l.markUnplayed : l.markPlayed),
+        ),
+      // 跨服务器选择影片来源：头部按钮行里的普通可聚焦按钮，D-pad 可达。
+      // 打开对话框期间保持可聚焦，关闭后焦点回到这里。
+      if (SourceSelectionAction.availableIn(context))
+        SourceSelectionAction(
+          builder: (context, view) => TvAction(
+            key: SourceSelectionActionView.key,
+            pill: true,
+            leading: Icon(view.icon),
+            onPressed: view.onPressed,
+            child: Text(view.label),
+          ),
         ),
     ];
   }
