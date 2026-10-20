@@ -74,8 +74,8 @@ String? _phoneSubtitleImportNotice(AppLocalizations l, PlayerController c) {
 
 /// Phone controls with a title bar, a timeline, and transport sitting on the
 /// timeline instead of covering the picture. The stage stays black. Chrome
-/// uses the phone dark palette: a sakura primary transport button and light
-/// secondary targets, with no bar behind them. Series playback gets an episode
+/// uses the phone dark palette: a neutral light play/pause disc like desktop
+/// and translucent secondary targets, with no bar behind them. Series playback gets an episode
 /// list. Less frequent picture, volume and media choices stay in the panel.
 ///
 /// The video surface and control scrims extend to the screen edges. Buttons
@@ -818,8 +818,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         onPressed: onPressed,
         icon: Icon(icon, fill: AppIcons.filled, size: primary ? 30 : 24),
         style: AppButtonStyle(
-          foregroundColor: primary ? scheme.onPrimary : CupertinoColors.white,
-          backgroundColor: primary ? scheme.primary : _phoneSecondaryFill,
+          foregroundColor: primary ? scheme.surface : CupertinoColors.white,
+          backgroundColor: primary ? scheme.onSurface : _phoneSecondaryFill,
           shape: const CircleBorder(),
           fixedSize: const Size(size, size),
           minimumSize: const Size(size, size),

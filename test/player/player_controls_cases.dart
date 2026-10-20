@@ -27,6 +27,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -819,6 +820,27 @@ void main() {
     expect(find.byKey(PlayerKeys.replay), findsOneWidget);
     expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
     expect(find.byKey(PlayerKeys.playPause), findsNothing);
+    // Ended overlay is a fixed dark solid surface with a hairline, not glass.
+    expect(
+      find.descendant(
+        of: find.byType(PlayerPage),
+        matching: find.byType(LiquidGlass),
+      ),
+      findsNothing,
+    );
+    final endedSurface = tester.widget<DecoratedBox>(
+      find
+          .ancestor(
+            of: find.byKey(PlayerKeys.playbackEnded),
+            matching: find.byType(DecoratedBox),
+          )
+          .first,
+    );
+    final endedDecoration = endedSurface.decoration as BoxDecoration;
+    expect(endedDecoration.color!.a, 1);
+    expect(endedDecoration.border, isNotNull);
+    expect(endedDecoration.boxShadow, isNull);
+    expect(endedDecoration.gradient, isNull);
 
     final opens = backend.openCount;
     await tester.tap(find.byKey(PlayerKeys.replay));

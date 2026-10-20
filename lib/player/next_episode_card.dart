@@ -64,13 +64,7 @@ class NextEpisodeCard extends StatelessWidget {
                 color: AppEdge.of(theme.brightness, strong: true),
                 width: 1,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: scheme.scrim.withValues(alpha: .4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+              boxShadow: AppShadow.emphasis(Brightness.dark),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -112,15 +106,6 @@ class NextEpisodeCard extends StatelessWidget {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: scheme.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
                                 Flexible(
                                   child: Text(
                                     remaining == null

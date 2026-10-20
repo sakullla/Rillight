@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/app/ui/app_icons.dart';
+import 'package:rillight/player/playback_ended_panel.dart';
 
 /// 桌面播放页窗口顶栏占用。手机等没有窗口铬的宿主传 0，或用 [DanmakuPanel.embedded]。
 const double kDanmakuPanelDefaultTopChrome =
@@ -176,14 +176,15 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
       behavior: HitTestBehavior.opaque,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: width, maxHeight: maxHeight),
-        child: LiquidGlass(
-          kind: LiquidGlassKind.panel,
+        child: Container(
+          key: DanmakuKeys.panel,
           width: width,
-          child: Container(
-            key: DanmakuKeys.panel,
-            decoration: const BoxDecoration(color: CupertinoColors.transparent),
-            child: body,
+          clipBehavior: Clip.antiAlias,
+          decoration: playerSurfaceDecoration(
+            theme,
+            borderRadius: BorderRadius.circular(AppRadii.xl),
           ),
+          child: body,
         ),
       ),
     );

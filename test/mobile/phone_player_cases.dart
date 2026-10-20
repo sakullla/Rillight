@@ -556,8 +556,10 @@ void main() {
           matching: find.byType(AnimatedContainer),
         ),
       );
+      // Neutral disc like desktop: no brand fill on the centre button.
       final playDecoration = play.decoration! as ShapeDecoration;
-      expect(playDecoration.color, theme.colorScheme.primary);
+      expect(playDecoration.color, theme.colorScheme.onSurface);
+      expect(playDecoration.color, isNot(theme.colorScheme.primary));
       expect(playDecoration.shape, isA<CircleBorder>());
       final rewind = tester.widget<AnimatedContainer>(
         find.descendant(
@@ -2860,6 +2862,28 @@ void main() {
     const skip = Key('mobile-player-skip-segment');
     expect(find.byKey(skip), findsOneWidget);
     expect(find.text('跳过片头'), findsOneWidget);
+    // Neutral dark pill with a hairline: no brand border, dot or drop shadow.
+    final skipStyle = tester.widget<AppButton>(find.byKey(skip)).style!;
+    final primary = AppUiTheme.phoneDark().colorScheme.primary;
+    expect(skipStyle.side!.color, AppEdge.of(Brightness.dark, strong: true));
+    expect(skipStyle.backgroundColor, isNot(primary));
+    for (final icon in tester.widgetList<Icon>(
+      find.descendant(of: find.byKey(skip), matching: find.byType(Icon)),
+    )) {
+      expect(icon.color, isNot(primary));
+    }
+    expect(
+      find.ancestor(
+        of: find.byKey(skip),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is DecoratedBox &&
+              w.decoration is BoxDecoration &&
+              (w.decoration as BoxDecoration).boxShadow != null,
+        ),
+      ),
+      findsNothing,
+    );
     if (!current.controlsVisible) current.onUserActivity();
     await tester.pump();
     final skipRect = tester.getRect(find.byKey(skip));

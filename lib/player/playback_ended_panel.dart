@@ -4,6 +4,18 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
+/// Player overlays share one fixed dark solid surface with a hairline edge:
+/// no glass blur, no brand fill and no decorative shadow. The player always
+/// renders under a dark theme, so [theme] supplies the dark surface ladder.
+BoxDecoration playerSurfaceDecoration(
+  AppUiThemeData theme, {
+  BorderRadius? borderRadius,
+}) => BoxDecoration(
+  color: theme.colorScheme.surfaceContainerLow,
+  borderRadius: borderRadius ?? BorderRadius.circular(AppRadii.overlay),
+  border: Border.all(color: AppEdge.of(Brightness.dark, strong: true)),
+);
+
 /// Touch and remote completion actions. The owning page handles native cleanup
 /// and navigation, so returning to a series also restores phone system chrome.
 class PlaybackEndedPanel extends StatelessWidget {
@@ -41,11 +53,7 @@ class PlaybackEndedPanel extends StatelessWidget {
               constraints: BoxConstraints(maxWidth: tv ? 760 : 480),
               child: Container(
                 key: PlayerKeys.playbackEnded,
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(AppRadii.overlay),
-                  border: Border.all(color: AppEdge.of(theme.brightness)),
-                ),
+                decoration: playerSurfaceDecoration(theme),
                 child: Padding(
                   padding: EdgeInsets.all(tv ? 32 : 20),
                   child: Column(

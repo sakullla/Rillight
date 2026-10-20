@@ -14,6 +14,9 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/desktop_player_window.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/player/danmaku/dandanplay_client.dart';
+import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -23,10 +26,13 @@ import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/player/playback_control_scrims.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
+import 'danmaku/danmaku_controller_cases.dart'
+    show FakeDandanplayClient, unreachable;
 
 void main() {
   const windowChannel = MethodChannel('window_manager');
@@ -65,6 +71,7 @@ void main() {
     Size size = const Size(1280, 720),
     bool independentWindow = false,
     PlayerSettingsStore? settingsStore,
+    DandanplayClient? danmakuClient,
   }) async {
     installDesktopOverrides(tester, size);
     final server = FakeEmbyServer();
@@ -105,6 +112,7 @@ void main() {
       controlsHideAfter: const Duration(seconds: 5),
       snapshotStore: MemoryPlaybackSessionSnapshotStore(),
       settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
+      danmakuClient: danmakuClient,
     );
     await tester.pumpWidget(
       independentWindow
@@ -265,6 +273,226 @@ void main() {
       clearDesktopOverrides();
     }
   }, tags: ['integration']);
+
+  Future<void> hideByTimeout(WidgetTester tester) async {
+    await tester.pump(const Duration(seconds: 5, milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
+  Future<void> settleReveal(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
+  bool controlLayerHidden(WidgetTester tester) {
+    final scrims = tester.widget<PlaybackControlScrims>(
+      find.byKey(const Key('player-control-scrims')),
+    );
+    return !scrims.visible &&
+        find.byKey(PlayerKeys.playPause).hitTestable().evaluate().isEmpty &&
+        find
+            .byKey(const Key('player-window-close'))
+            .hitTestable()
+            .evaluate()
+            .isEmpty;
+  }
+
+  bool controlLayerShown(WidgetTester tester) {
+    final scrims = tester.widget<PlaybackControlScrims>(
+      find.byKey(const Key('player-control-scrims')),
+    );
+    return scrims.visible &&
+        find.byKey(PlayerKeys.playPause).hitTestable().evaluate().isNotEmpty &&
+        find
+            .byKey(const Key('player-window-close'))
+            .hitTestable()
+            .evaluate()
+            .isNotEmpty;
+  }
+
+  testWidgets(
+    'desktop control layer hides while playing and any key wakes it',
+    (tester) async {
+      final backend = FakeVideoBackend();
+      try {
+        final current = await openPlayer(
+          tester,
+          backend,
+          itemId: 'movie-inception',
+        );
+        current.onUserActivity();
+        await settleReveal(tester);
+        expect(current.isPlaying, isTrue);
+        expect(controlLayerShown(tester), isTrue);
+
+        await hideByTimeout(tester);
+        expect(current.controlsVisible, isFalse);
+        expect(controlLayerHidden(tester), isTrue);
+
+        // A key without a shortcut action still reveals the controls once.
+        final position = backend.position;
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await settleReveal(tester);
+        expect(current.controlsVisible, isTrue);
+        expect(controlLayerShown(tester), isTrue);
+        expect(backend.position, position);
+        expect(current.isPlaying, isTrue);
+
+        // Shortcut keys keep their action and also reveal the controls.
+        await hideByTimeout(tester);
+        expect(controlLayerHidden(tester), isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await settleReveal(tester);
+        expect(controlLayerShown(tester), isTrue);
+        expect(backend.position, greaterThan(position));
+
+        await hideByTimeout(tester);
+        expect(controlLayerHidden(tester), isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        for (var i = 0; i < 20 && current.isPlaying; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        await settleReveal(tester);
+        expect(current.isPlaying, isFalse);
+        expect(controlLayerShown(tester), isTrue);
+
+        // Paused playback keeps the controls on screen.
+        await hideByTimeout(tester);
+        expect(current.controlsVisible, isTrue);
+        expect(controlLayerShown(tester), isTrue);
+        expect(tester.takeException(), isNull);
+      } finally {
+        clearDesktopOverrides();
+      }
+    },
+    tags: ['integration'],
+  );
+
+  Future<void> waitForDanmakuStatus(
+    WidgetTester tester,
+    DanmakuStatus status,
+  ) async {
+    final page = tester.state<PlayerPageState>(find.byType(PlayerPage));
+    for (var i = 0; i < 100 && page.danmaku?.status != status; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(page.danmaku?.status, status);
+  }
+
+  void expectSolidPlayerSurface(WidgetTester tester, Key key) {
+    expect(
+      find.descendant(
+        of: find.byType(PlayerPage),
+        matching: find.byType(LiquidGlass),
+      ),
+      findsNothing,
+    );
+    final decoration =
+        tester.widget<Container>(find.byKey(key)).decoration! as BoxDecoration;
+    expect(decoration.color!.a, 1);
+    expect(decoration.border, isNotNull);
+    expect(decoration.gradient, isNull);
+    expect(decoration.boxShadow, isNull);
+  }
+
+  testWidgets(
+    'desktop danmaku match chip appears and hides with the controls',
+    (tester) async {
+      final client = FakeDandanplayClient();
+      try {
+        final current = await openPlayer(
+          tester,
+          FakeVideoBackend(),
+          itemId: 'movie-inception',
+          danmakuClient: client,
+          settingsStore: MemoryPlayerSettingsStore(
+            const PlayerSettings(
+              danmakuEnabled: true,
+              danmakuAppId: 'synthetic-app',
+              danmakuToken: 'synthetic-secret',
+            ),
+          ),
+        );
+        await waitForDanmakuStatus(tester, DanmakuStatus.noMatch);
+        current.onUserActivity();
+        await settleReveal(tester);
+        final chip = find.byKey(DanmakuKeys.matchChip);
+        expect(chip.hitTestable(), findsOneWidget);
+        expectSolidPlayerSurface(tester, DanmakuKeys.matchChip);
+
+        await hideByTimeout(tester);
+        expect(controlLayerHidden(tester), isTrue);
+        expect(chip.hitTestable(), findsNothing);
+        final fade = tester.widget<AnimatedOpacity>(
+          find.ancestor(of: chip, matching: find.byType(AnimatedOpacity)).first,
+        );
+        expect(fade.opacity, 0);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await settleReveal(tester);
+        expect(chip.hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        clearDesktopOverrides();
+      }
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'desktop danmaku source banner appears and hides with the controls',
+    (tester) async {
+      final client = FakeDandanplayClient()..matchError = unreachable;
+      try {
+        final current = await openPlayer(
+          tester,
+          FakeVideoBackend(),
+          itemId: 'movie-inception',
+          danmakuClient: client,
+          settingsStore: MemoryPlayerSettingsStore(
+            const PlayerSettings(
+              danmakuEnabled: true,
+              danmakuServer: 'https://dan.example.com',
+              danmakuToken: 'synthetic-secret',
+            ),
+          ),
+        );
+        await waitForDanmakuStatus(tester, DanmakuStatus.customUnreachable);
+        current.onUserActivity();
+        await settleReveal(tester);
+        final banner = find.byKey(DanmakuKeys.sourceBanner);
+        expect(
+          find.byKey(DanmakuKeys.useOfficial).hitTestable(),
+          findsOneWidget,
+        );
+        expectSolidPlayerSurface(tester, DanmakuKeys.sourceBanner);
+
+        await hideByTimeout(tester);
+        expect(controlLayerHidden(tester), isTrue);
+        expect(find.byKey(DanmakuKeys.useOfficial).hitTestable(), findsNothing);
+        final fade = tester.widget<AnimatedOpacity>(
+          find
+              .ancestor(of: banner, matching: find.byType(AnimatedOpacity))
+              .first,
+        );
+        expect(fade.opacity, 0);
+
+        current.onPointerHover();
+        await settleReveal(tester);
+        expect(
+          find.byKey(DanmakuKeys.useOfficial).hitTestable(),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
+        clearDesktopOverrides();
+      }
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('desktop retry keeps one combined playback and cache timeline', (
     tester,

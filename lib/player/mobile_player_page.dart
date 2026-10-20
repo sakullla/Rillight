@@ -11,7 +11,6 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/player/playback_ended_panel.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
@@ -885,180 +884,171 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
           _close();
         }
       },
-      child: LiquidGlassBackdrop(
-        enabled: false,
-        child: CupertinoPageScaffold(
-          backgroundColor: CupertinoColors.black,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              c.backend.buildView(),
-              if (!_pip) ...[
-                // 弹幕让出顶栏(返回、标题、画中画、锁定)一带,不再压在标题上。
-                if (danmaku != null && _showDanmakuLayer(c))
-                  Positioned(
-                    top:
-                        phonePlayerControlInsets(MediaQuery.of(context)).top +
-                        56,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: IgnorePointer(
-                      child: DanmakuView(controller: danmaku),
-                    ),
-                  ),
-                if (!ended)
-                  PhonePlayerGestures(
-                    controller: c,
-                    display: _display!,
-                    interaction: _interaction,
-                  ),
-                if (!ended)
-                  ListenableBuilder(
-                    listenable: Listenable.merge([c, _interaction]),
-                    builder: (context, _) {
-                      final visible =
-                          _interaction.controlsVisibleFor(c) ||
-                          (!_interaction.locked && playbackNeedsLineStatus(c));
-                      // Hidden controls sit at opacity 0 behind IgnorePointer.
-                      // Reusing the same widget skips rebuilding and laying
-                      // out the whole overlay on every playback tick (5 Hz for
-                      // the entire session). The first hidden build is fresh,
-                      // and any reveal rebuilds before it is painted.
-                      final frozen = _hiddenControls;
-                      if (!visible &&
-                          frozen != null &&
-                          identical(frozen.$1, c)) {
-                        return frozen.$2;
-                      }
-                      final built = PhoneMotion.reveal(
-                        context: context,
-                        visible: visible,
-                        child: PhonePlayerControls(
-                          controller: c,
-                          danmaku: danmaku,
-                          onClose: _close,
-                          pipSupported: _pipSupported,
-                          onPictureInPicture: _presentation == null
-                              ? null
-                              : _enterPip,
-                          onOpenDanmakuPanel: _openDanmakuPanel,
-                          onOpenDanmakuSearch: _openDanmakuSearch,
-                          center: _centerStatus(context, c),
-                          interaction: _interaction,
-                          fillFrame: _fillFrame,
-                          onFillFrame: (fill) {
-                            if (_fillFrame == fill) return;
-                            setState(() => _fillFrame = fill);
-                            final backend = c.backend;
-                            if (backend is RillightVideoBackend) {
-                              unawaited(
-                                backend.setVideoScale(fill ? 'fill' : 'fit'),
-                              );
-                            }
-                          },
-                        ),
-                      );
-                      _hiddenControls = visible ? null : (c, built);
-                      return built;
-                    },
-                  ),
-                // 锁屏只挡住误触画面和控制条；跳过片头/片尾是用户明确想要的
-                // 提示，锁定时照常弹出，位置贴到底边（锁定态没有控制条）。
-                if (!ended)
-                  ListenableBuilder(
-                    listenable: Listenable.merge([c, _interaction]),
-                    builder: (context, _) {
-                      final segment = c.activeSkipSegment;
-                      final show =
-                          segment != null &&
-                          c.skipPromptVisible &&
-                          c.nextEpisode == null &&
-                          !c.loading &&
-                          c.error == null &&
-                          !c.sessionExpired &&
-                          !c.disconnected &&
-                          !c.playbackEnded;
-                      if (!show) return const SizedBox.shrink();
-                      final media = MediaQuery.of(context);
-                      final insets = phonePlayerControlInsets(media);
-                      final controls =
-                          !_interaction.locked &&
-                          _interaction.controlsVisibleFor(c);
-                      return Positioned(
-                        right: insets.right + 12,
-                        bottom: insets.bottom + (controls ? 168 : 16),
-                        child: _PhoneSkipSegmentButton(
-                          controller: c,
-                          segment: segment,
-                        ),
-                      );
-                    },
-                  ),
-                if (!_interaction.locked &&
-                    c.nextEpisode != null &&
-                    c.error == null &&
-                    !c.sessionExpired)
-                  ListenableBuilder(
-                    listenable: _interaction,
-                    builder: (context, _) {
-                      final media = MediaQuery.of(context);
-                      final insets = phonePlayerControlInsets(media);
-                      final controls = _interaction.controlsVisibleFor(c);
-                      final wide = media.size.width >= 640;
-                      final maxCardWidth =
-                          (media.size.width - insets.left - insets.right - 24)
-                              .clamp(0.0, 412.0);
-                      return Positioned(
-                        right: 12 + insets.right,
-                        bottom:
-                            insets.bottom +
-                            (controls ? (wide ? 128 : 168) : 16),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: maxCardWidth),
-                          child: NextEpisodeCard(controller: c),
-                        ),
-                      );
-                    },
-                  ),
-                if (!ended &&
-                    !_interaction.locked &&
-                    danmaku != null &&
-                    danmaku.isConfigured &&
-                    c.error == null &&
-                    !c.loading &&
-                    _danmakuNeedsAttention(danmaku))
-                  Positioned(
-                    top: 8,
-                    left: 12,
-                    right: 12,
-                    child: SafeArea(
-                      child: _PhoneDanmakuFailure(
+      child: CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            c.backend.buildView(),
+            if (!_pip) ...[
+              // 弹幕让出顶栏(返回、标题、画中画、锁定)一带,不再压在标题上。
+              if (danmaku != null && _showDanmakuLayer(c))
+                Positioned(
+                  top:
+                      phonePlayerControlInsets(MediaQuery.of(context)).top + 56,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(child: DanmakuView(controller: danmaku)),
+                ),
+              if (!ended)
+                PhonePlayerGestures(
+                  controller: c,
+                  display: _display!,
+                  interaction: _interaction,
+                ),
+              if (!ended)
+                ListenableBuilder(
+                  listenable: Listenable.merge([c, _interaction]),
+                  builder: (context, _) {
+                    final visible =
+                        _interaction.controlsVisibleFor(c) ||
+                        (!_interaction.locked && playbackNeedsLineStatus(c));
+                    // Hidden controls sit at opacity 0 behind IgnorePointer.
+                    // Reusing the same widget skips rebuilding and laying
+                    // out the whole overlay on every playback tick (5 Hz for
+                    // the entire session). The first hidden build is fresh,
+                    // and any reveal rebuilds before it is painted.
+                    final frozen = _hiddenControls;
+                    if (!visible && frozen != null && identical(frozen.$1, c)) {
+                      return frozen.$2;
+                    }
+                    final built = PhoneMotion.reveal(
+                      context: context,
+                      visible: visible,
+                      child: PhonePlayerControls(
+                        controller: c,
                         danmaku: danmaku,
-                        onRetry: _retryDanmaku,
-                        onDisable: () => unawaited(danmaku.toggleDanmaku()),
+                        onClose: _close,
+                        pipSupported: _pipSupported,
+                        onPictureInPicture: _presentation == null
+                            ? null
+                            : _enterPip,
+                        onOpenDanmakuPanel: _openDanmakuPanel,
+                        onOpenDanmakuSearch: _openDanmakuSearch,
+                        center: _centerStatus(context, c),
+                        interaction: _interaction,
+                        fillFrame: _fillFrame,
+                        onFillFrame: (fill) {
+                          if (_fillFrame == fill) return;
+                          setState(() => _fillFrame = fill);
+                          final backend = c.backend;
+                          if (backend is RillightVideoBackend) {
+                            unawaited(
+                              backend.setVideoScale(fill ? 'fill' : 'fit'),
+                            );
+                          }
+                        },
                       ),
+                    );
+                    _hiddenControls = visible ? null : (c, built);
+                    return built;
+                  },
+                ),
+              // 锁屏只挡住误触画面和控制条；跳过片头/片尾是用户明确想要的
+              // 提示，锁定时照常弹出，位置贴到底边（锁定态没有控制条）。
+              if (!ended)
+                ListenableBuilder(
+                  listenable: Listenable.merge([c, _interaction]),
+                  builder: (context, _) {
+                    final segment = c.activeSkipSegment;
+                    final show =
+                        segment != null &&
+                        c.skipPromptVisible &&
+                        c.nextEpisode == null &&
+                        !c.loading &&
+                        c.error == null &&
+                        !c.sessionExpired &&
+                        !c.disconnected &&
+                        !c.playbackEnded;
+                    if (!show) return const SizedBox.shrink();
+                    final media = MediaQuery.of(context);
+                    final insets = phonePlayerControlInsets(media);
+                    final controls =
+                        !_interaction.locked &&
+                        _interaction.controlsVisibleFor(c);
+                    return Positioned(
+                      right: insets.right + 12,
+                      bottom: insets.bottom + (controls ? 168 : 16),
+                      child: _PhoneSkipSegmentButton(
+                        controller: c,
+                        segment: segment,
+                      ),
+                    );
+                  },
+                ),
+              if (!_interaction.locked &&
+                  c.nextEpisode != null &&
+                  c.error == null &&
+                  !c.sessionExpired)
+                ListenableBuilder(
+                  listenable: _interaction,
+                  builder: (context, _) {
+                    final media = MediaQuery.of(context);
+                    final insets = phonePlayerControlInsets(media);
+                    final controls = _interaction.controlsVisibleFor(c);
+                    final wide = media.size.width >= 640;
+                    final maxCardWidth =
+                        (media.size.width - insets.left - insets.right - 24)
+                            .clamp(0.0, 412.0);
+                    return Positioned(
+                      right: 12 + insets.right,
+                      bottom:
+                          insets.bottom + (controls ? (wide ? 128 : 168) : 16),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: maxCardWidth),
+                        child: NextEpisodeCard(controller: c),
+                      ),
+                    );
+                  },
+                ),
+              if (!ended &&
+                  !_interaction.locked &&
+                  danmaku != null &&
+                  danmaku.isConfigured &&
+                  c.error == null &&
+                  !c.loading &&
+                  _danmakuNeedsAttention(danmaku))
+                Positioned(
+                  top: 8,
+                  left: 12,
+                  right: 12,
+                  child: SafeArea(
+                    child: _PhoneDanmakuFailure(
+                      danmaku: danmaku,
+                      onRetry: _retryDanmaku,
+                      onDisable: () => unawaited(danmaku.toggleDanmaku()),
                     ),
                   ),
-                if (ended)
-                  Positioned.fill(
-                    child: PlaybackEndedPanel(
-                      title: c.item?.displayName ?? '',
-                      onReplay: () => unawaited(c.replay()),
-                      onClose: () => unawaited(_close()),
-                      onViewSeries: c.item?.seriesId?.isNotEmpty == true
-                          ? () => unawaited(
-                              _close(
-                                viewSeriesId: c.item!.seriesId,
-                                seasonId: c.item!.seasonId,
-                              ),
-                            )
-                          : null,
-                    ),
+                ),
+              if (ended)
+                Positioned.fill(
+                  child: PlaybackEndedPanel(
+                    title: c.item?.displayName ?? '',
+                    onReplay: () => unawaited(c.replay()),
+                    onClose: () => unawaited(_close()),
+                    onViewSeries: c.item?.seriesId?.isNotEmpty == true
+                        ? () => unawaited(
+                            _close(
+                              viewSeriesId: c.item!.seriesId,
+                              seasonId: c.item!.seasonId,
+                            ),
+                          )
+                        : null,
                   ),
-              ],
+                ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -1082,55 +1072,29 @@ class _PhoneSkipSegmentButton extends StatelessWidget {
     final label = segment.kind == PlayerSkipKind.outro
         ? l.skipOutro
         : l.skipIntro;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.scrim.withValues(alpha: .4),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
+    return AppButton.icon(
+      key: const Key('mobile-player-skip-segment'),
+      onPressed: () => unawaited(controller.skipCurrentSegment()),
+      style: AppButtonStyle(
+        minimumSize: const Size(48, 46),
+        backgroundColor: scheme.surfaceContainerLow.withValues(alpha: .88),
+        foregroundColor: CupertinoColors.white,
+        side: BorderSide(color: AppEdge.of(Brightness.dark, strong: true)),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.fromLTRB(14, 8, 16, 8),
       ),
-      child: AppButton.icon(
-        key: const Key('mobile-player-skip-segment'),
-        onPressed: () => unawaited(controller.skipCurrentSegment()),
-        style: AppButtonStyle(
-          minimumSize: const Size(48, 46),
-          backgroundColor: scheme.surfaceContainerHighest.withValues(
-            alpha: .94,
-          ),
-          foregroundColor: CupertinoColors.white,
-          side: BorderSide(
-            color: scheme.primary.withValues(alpha: 0.55),
-            width: 1.2,
-          ),
-          shape: const StadiumBorder(),
-          padding: const EdgeInsets.fromLTRB(12, 8, 16, 8),
-        ),
-        icon: Container(
-          width: 26,
-          height: 26,
-          decoration: BoxDecoration(
-            color: scheme.primary.withValues(alpha: 0.22),
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Icon(
-            AppIcons.skipNext,
-            fill: AppIcons.filled,
-            size: 16,
-            color: scheme.primary,
-          ),
-        ),
-        label: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-          ),
+      icon: const Icon(
+        AppIcons.skipNext,
+        fill: AppIcons.filled,
+        size: 18,
+        color: CupertinoColors.white,
+      ),
+      label: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.2,
         ),
       ),
     );

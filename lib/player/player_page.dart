@@ -12,7 +12,6 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -27,6 +26,7 @@ import 'package:rillight/player/episode_browser.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/next_episode_card.dart';
+import 'package:rillight/player/playback_ended_panel.dart';
 import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -456,379 +456,380 @@ class PlayerPageState extends State<PlayerPage> {
     if (current == null) {
       return const ColoredBox(color: CupertinoColors.black);
     }
-    return LiquidGlassBackdrop(
-      enabled: false,
-      child: Focus(
-        focusNode: _playerShortcuts,
-        autofocus: true,
-        descendantsAreFocusable: true,
-        onFocusChange: (focused) {
-          if (focused) controller?.onUserActivity();
-        },
-        onKeyEvent: (node, event) {
-          if (event is! KeyDownEvent) {
-            return KeyEventResult.ignored;
-          }
-          if (_danmakuSearchOpen) {
-            if (event.logicalKey == LogicalKeyboardKey.escape) {
-              _closeDanmakuSearch();
-              return KeyEventResult.handled;
-            }
-            return KeyEventResult.ignored;
-          }
-          // An open settings panel owns its keyboard interactions. Arrow and
-          // space keys must not seek or toggle playback behind that panel.
-          if (current.controlsPinned && !_danmakuPanelOpen && !_episodesOpen) {
-            return KeyEventResult.ignored;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.space) {
-            current.togglePlay();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            current.seekRelative(-current.seekStep);
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            current.seekRelative(current.seekStep);
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.keyF) {
-            current.toggleFullScreen();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.bracketLeft) {
-            current.nudgeRateDown();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.bracketRight) {
-            current.nudgeRateUp();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.keyT) {
-            unawaited(current.toggleAlwaysOnTop());
-            return KeyEventResult.handled;
-          }
+    return Focus(
+      focusNode: _playerShortcuts,
+      autofocus: true,
+      descendantsAreFocusable: true,
+      onFocusChange: (focused) {
+        if (focused) controller?.onUserActivity();
+      },
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
+        }
+        // Any key press reveals the controls once, like pointer movement.
+        // Shortcut handling below is unchanged.
+        current.onUserActivity();
+        if (_danmakuSearchOpen) {
           if (event.logicalKey == LogicalKeyboardKey.escape) {
-            if (_danmakuSearchOpen) {
-              _closeDanmakuSearch();
-              return KeyEventResult.handled;
-            }
-            if (_danmakuPanelOpen) {
-              _closeDanmakuPanel();
-              return KeyEventResult.handled;
-            }
-            if (_episodesOpen) {
-              _closeEpisodeList();
-              return KeyEventResult.handled;
-            }
-            current.onEscape();
+            _closeDanmakuSearch();
             return KeyEventResult.handled;
           }
           return KeyEventResult.ignored;
+        }
+        // An open settings panel owns its keyboard interactions. Arrow and
+        // space keys must not seek or toggle playback behind that panel.
+        if (current.controlsPinned && !_danmakuPanelOpen && !_episodesOpen) {
+          return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.space) {
+          current.togglePlay();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          current.seekRelative(-current.seekStep);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          current.seekRelative(current.seekStep);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.keyF) {
+          current.toggleFullScreen();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.bracketLeft) {
+          current.nudgeRateDown();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.bracketRight) {
+          current.nudgeRateUp();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.keyT) {
+          unawaited(current.toggleAlwaysOnTop());
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          if (_danmakuSearchOpen) {
+            _closeDanmakuSearch();
+            return KeyEventResult.handled;
+          }
+          if (_danmakuPanelOpen) {
+            _closeDanmakuPanel();
+            return KeyEventResult.handled;
+          }
+          if (_episodesOpen) {
+            _closeEpisodeList();
+            return KeyEventResult.handled;
+          }
+          current.onEscape();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: PopScope(
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) {
+            unawaited(current.shutdownSession());
+          }
         },
-        child: PopScope(
-          onPopInvokedWithResult: (didPop, result) {
-            if (didPop) {
-              unawaited(current.shutdownSession());
-            }
-          },
-          child: DesktopPlaybackGestures(
-            position: current.position,
-            duration: current.duration,
-            volume: current.volume,
-            enabled:
-                !current.loading &&
-                !current.disconnected &&
-                !_episodesOpen &&
-                !_danmakuPanelOpen &&
-                !_danmakuSearchOpen,
-            onSeek: current.seekTo,
-            onVolume: current.setVolume,
-            onFullScreen: current.window.setFullScreen,
-            child: CupertinoPageScaffold(
-              backgroundColor: _nativePresentation?.value == true
-                  ? CupertinoColors.transparent
-                  : CupertinoColors.black,
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerSignal: (event) {
-                  if (defaultTargetPlatform == TargetPlatform.macOS) return;
-                  if (event is! PointerScrollEvent) {
+        child: DesktopPlaybackGestures(
+          position: current.position,
+          duration: current.duration,
+          volume: current.volume,
+          enabled:
+              !current.loading &&
+              !current.disconnected &&
+              !_episodesOpen &&
+              !_danmakuPanelOpen &&
+              !_danmakuSearchOpen,
+          onSeek: current.seekTo,
+          onVolume: current.setVolume,
+          onFullScreen: current.window.setFullScreen,
+          child: CupertinoPageScaffold(
+            backgroundColor: _nativePresentation?.value == true
+                ? CupertinoColors.transparent
+                : CupertinoColors.black,
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerSignal: (event) {
+                if (defaultTargetPlatform == TargetPlatform.macOS) return;
+                if (event is! PointerScrollEvent) {
+                  return;
+                }
+                if (event.scrollDelta.dy == 0) {
+                  return;
+                }
+                // 剧集/弹幕侧栏自己吃滚轮;根 Listener 是 translucent,
+                // 不拦住的话滑列表会把音量一起改掉。
+                if (_episodesOpen || _danmakuPanelOpen || _danmakuSearchOpen) {
+                  return;
+                }
+                final delta = event.scrollDelta.dy < 0
+                    ? PlayerController.volumeWheelStep
+                    : -PlayerController.volumeWheelStep;
+                unawaited(current.nudgeVolume(delta));
+              },
+              child: MouseRegion(
+                onEnter: (_) => current.onUserActivity(),
+                onHover: (event) {
+                  if (_pointerNearWindowEdge(event.localPosition)) {
                     return;
                   }
-                  if (event.scrollDelta.dy == 0) {
-                    return;
-                  }
-                  // 剧集/弹幕侧栏自己吃滚轮;根 Listener 是 translucent,
-                  // 不拦住的话滑列表会把音量一起改掉。
-                  if (_episodesOpen ||
-                      _danmakuPanelOpen ||
-                      _danmakuSearchOpen) {
-                    return;
-                  }
-                  final delta = event.scrollDelta.dy < 0
-                      ? PlayerController.volumeWheelStep
-                      : -PlayerController.volumeWheelStep;
-                  unawaited(current.nudgeVolume(delta));
+                  current.onPointerHover();
                 },
-                child: MouseRegion(
-                  onEnter: (_) => current.onUserActivity(),
-                  onHover: (event) {
-                    if (_pointerNearWindowEdge(event.localPosition)) {
-                      return;
-                    }
-                    current.onPointerHover();
-                  },
-                  onExit: (_) {
-                    current.hideControlsOnPointerExit();
-                  },
-                  cursor:
-                      (!current.controlsVisible &&
-                          current.nextEpisode == null &&
-                          !current.playbackEnded &&
-                          !_episodesOpen &&
-                          !_danmakuPanelOpen &&
-                          !_danmakuSearchOpen)
-                      ? SystemMouseCursors.none
-                      : MouseCursor.defer,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      RepaintBoundary(
+                onExit: (_) {
+                  current.hideControlsOnPointerExit();
+                },
+                cursor:
+                    (!current.controlsVisible &&
+                        current.nextEpisode == null &&
+                        !current.playbackEnded &&
+                        !_episodesOpen &&
+                        !_danmakuPanelOpen &&
+                        !_danmakuSearchOpen)
+                    ? SystemMouseCursors.none
+                    : MouseCursor.defer,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    RepaintBoundary(
+                      child: IgnorePointer(
+                        child: current.backend.buildView(
+                          key: const ValueKey('player-video-surface'),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: SubtitleViewportReporter(controller: current),
+                      ),
+                    ),
+                    if (current.loading)
+                      const Positioned.fill(
                         child: IgnorePointer(
-                          child: current.backend.buildView(
-                            key: const ValueKey('player-video-surface'),
+                          child: ColoredBox(color: CupertinoColors.black),
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: PlaybackControlScrims(
+                        key: const Key('player-control-scrims'),
+                        visible: current.controlsVisible,
+                        topExtent: kPlayerChromeBarExtent,
+                        showBottom:
+                            !current.loading &&
+                            current.resolved != null &&
+                            !current.playbackEnded &&
+                            current.error == null,
+                      ),
+                    ),
+                    // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
+                    // 弹幕让出顶栏一带:标题、置顶/最小化/关闭钮不再被飘过的
+                    // 弹幕压住;画面区域固定,不随控制层显隐重排轨道。
+                    if (_danmakuOverlayVisible(current))
+                      Positioned(
+                        top: kPlayerChromeBarExtent,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: IgnorePointer(
+                          child: TickerMode(
+                            enabled: _danmaku!.danmakuOn,
+                            child: DanmakuView(controller: _danmaku!),
                           ),
                         ),
                       ),
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: SubtitleViewportReporter(controller: current),
-                        ),
+                    Positioned.fill(
+                      child: GestureDetector(
+                        key: PlayerKeys.surface,
+                        behavior: HitTestBehavior.opaque,
+                        onTapUp: (_) {
+                          if (_danmakuPanelOpen) {
+                            _closeDanmakuPanel();
+                            return;
+                          }
+                          current.toggleControls();
+                        },
+                        child: const SizedBox.expand(),
                       ),
-                      if (current.loading)
-                        const Positioned.fill(
-                          child: IgnorePointer(
-                            child: ColoredBox(color: CupertinoColors.black),
-                          ),
-                        ),
-                      Positioned.fill(
-                        child: PlaybackControlScrims(
-                          key: const Key('player-control-scrims'),
-                          visible: current.controlsVisible,
-                          topExtent: kPlayerChromeBarExtent,
-                          showBottom:
-                              !current.loading &&
-                              current.resolved != null &&
-                              !current.playbackEnded &&
-                              current.error == null,
-                        ),
-                      ),
-                      // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
-                      // 弹幕让出顶栏一带:标题、置顶/最小化/关闭钮不再被飘过的
-                      // 弹幕压住;画面区域固定,不随控制层显隐重排轨道。
-                      if (_danmakuOverlayVisible(current))
-                        Positioned(
-                          top: kPlayerChromeBarExtent,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: IgnorePointer(
-                            child: TickerMode(
-                              enabled: _danmaku!.danmakuOn,
-                              child: DanmakuView(controller: _danmaku!),
+                    ),
+                    if (!playbackNeedsLineStatus(current) &&
+                        (current.loading || current.isBuffering))
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: CupertinoActivityIndicator(),
                             ),
-                          ),
-                        ),
-                      Positioned.fill(
-                        child: GestureDetector(
-                          key: PlayerKeys.surface,
-                          behavior: HitTestBehavior.opaque,
-                          onTapUp: (_) {
-                            if (_danmakuPanelOpen) {
-                              _closeDanmakuPanel();
-                              return;
-                            }
-                            current.toggleControls();
-                          },
-                          child: const SizedBox.expand(),
+                            const SizedBox(height: AppSpacing.md),
+                            Text(
+                              l10n.playerLoading,
+                              style: AppUiTheme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: AppUiTheme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.7),
+                                  ),
+                            ),
+                          ],
                         ),
                       ),
-                      if (!playbackNeedsLineStatus(current) &&
-                          (current.loading || current.isBuffering))
-                        Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(
-                                width: 44,
-                                height: 44,
-                                child: CupertinoActivityIndicator(),
-                              ),
-                              const SizedBox(height: AppSpacing.md),
-                              Text(
-                                l10n.playerLoading,
-                                style: AppUiTheme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: AppUiTheme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withValues(alpha: 0.7),
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (!playbackNeedsLineStatus(current) &&
-                          _errorText(l10n, current) != null)
-                        AppErrorView(
-                          message: _errorText(l10n, current)!,
-                          onRetry: () {
-                            unawaited(current.retryPlayback());
-                          },
-                        ),
-                      if (playbackNeedsLineStatus(current))
-                        PlayerLineStatus(
-                          controller: current,
-                          onChooseLines: () => unawaited(
-                            showPlaybackLineDialog(context, current),
-                          ),
-                        ),
-                      if (!current.playbackEnded && current.error == null)
-                        _ControlsBar(
-                          controller: current,
-                          visible: current.controlsVisible || current.loading,
-                          dragging: _dragSeeking,
-                          dragValue: _dragValue,
-                          danmaku: _danmaku,
-                          onOpenEpisodes: _openEpisodeList,
-                          onDanmakuSearch: _openDanmakuPanel,
-                          onDragStart: (value) {
-                            current.setControlsPinned(true);
-                            current.onUserActivity();
-                            setState(() {
-                              _dragSeeking = true;
-                              _dragValue = value;
-                            });
-                          },
-                          onDragUpdate: (value) {
-                            current.onUserActivity();
-                            setState(() => _dragValue = value);
-                          },
-                          onDragEnd: (value) {
-                            current.setControlsPinned(false);
-                            setState(() => _dragSeeking = false);
-                            final duration = current.duration;
-                            if (duration <= Duration.zero) {
-                              return;
-                            }
-                            unawaited(
-                              current.seekTo(
-                                Duration(
-                                  milliseconds:
-                                      (duration.inMilliseconds * value).round(),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      if (current.nextEpisode != null)
-                        _NextEpisodeBanner(controller: current),
-                      if (current.activeSkipSegment != null &&
-                          current.skipPromptVisible &&
-                          current.nextEpisode == null &&
-                          !current.loading &&
-                          !current.playbackEnded)
-                        _SkipSegmentButton(controller: current),
-                      if (current.playbackEnded && current.nextEpisode == null)
-                        _PlaybackEndedOverlay(controller: current),
-                      if (!playbackNeedsLineStatus(current) &&
-                          current.disconnected &&
-                          !current.isPlaying)
-                        _Banner(
-                          key: PlayerKeys.disconnect,
-                          text:
-                              current.disconnectDetail ??
-                              l10n.playbackDisconnected,
-                        ),
-                      if (current.networkSlow && !current.disconnected)
-                        _Banner(
-                          key: const ValueKey('player-network-slow'),
-                          text: l10n.networkSlowHint,
-                          onDismiss: current.dismissNetworkSlowHint,
-                        ),
-                      if (current.progressSyncFailed &&
-                          !(current.disconnected && !current.isPlaying))
-                        _Banner(
-                          key: PlayerKeys.progressSyncFailed,
-                          text: current.sessionExpired
-                              ? l10n.playbackSessionExpired
-                              : l10n.progressSyncFailed,
-                          onDismiss: current.progressSyncPersistent
-                              ? current.dismissProgressSyncBanner
-                              : null,
-                        ),
-                      if (current.subtitleNotice != null)
-                        _Banner(
-                          key: PlayerKeys.subtitleNotice,
-                          text: _subtitleNoticeText(
-                            l10n,
-                            current.subtitleNotice!,
-                          ),
-                        ),
-                      if (!playbackNeedsLineStatus(current) &&
-                          current.playbackLineFailure != null)
-                        _Banner(
-                          key: const ValueKey('playback-line-failure'),
-                          text: current.playbackLineFailure!,
-                          onDismiss: current.dismissPlaybackLineFailure,
-                        ),
-                      if (current.trackFailure != null)
-                        _Banner(
-                          key: const ValueKey('player-track-failure'),
-                          text:
-                              '${l10n.audioTrack} / ${l10n.subtitleTrack}：${l10n.errorLoadFailed}',
-                          onDismiss: current.dismissTrackFailure,
-                        ),
-                      if (_danmaku?.status == DanmakuStatus.customUnreachable &&
-                          !current.loading)
-                        _DanmakuSourceBanner(controller: _danmaku!),
-                      _PlayerChromeBar(
+                    if (!playbackNeedsLineStatus(current) &&
+                        _errorText(l10n, current) != null)
+                      AppErrorView(
+                        message: _errorText(l10n, current)!,
+                        onRetry: () {
+                          unawaited(current.retryPlayback());
+                        },
+                      ),
+                    if (playbackNeedsLineStatus(current))
+                      PlayerLineStatus(
                         controller: current,
+                        onChooseLines: () =>
+                            unawaited(showPlaybackLineDialog(context, current)),
+                      ),
+                    if (!current.playbackEnded && current.error == null)
+                      _ControlsBar(
+                        controller: current,
+                        visible: current.controlsVisible || current.loading,
+                        dragging: _dragSeeking,
+                        dragValue: _dragValue,
+                        danmaku: _danmaku,
+                        onOpenEpisodes: _openEpisodeList,
+                        onDanmakuSearch: _openDanmakuPanel,
+                        onDragStart: (value) {
+                          current.setControlsPinned(true);
+                          current.onUserActivity();
+                          setState(() {
+                            _dragSeeking = true;
+                            _dragValue = value;
+                          });
+                        },
+                        onDragUpdate: (value) {
+                          current.onUserActivity();
+                          setState(() => _dragValue = value);
+                        },
+                        onDragEnd: (value) {
+                          current.setControlsPinned(false);
+                          setState(() => _dragSeeking = false);
+                          final duration = current.duration;
+                          if (duration <= Duration.zero) {
+                            return;
+                          }
+                          unawaited(
+                            current.seekTo(
+                              Duration(
+                                milliseconds: (duration.inMilliseconds * value)
+                                    .round(),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    if (current.nextEpisode != null)
+                      _NextEpisodeBanner(controller: current),
+                    if (current.activeSkipSegment != null &&
+                        current.skipPromptVisible &&
+                        current.nextEpisode == null &&
+                        !current.loading &&
+                        !current.playbackEnded)
+                      _SkipSegmentButton(controller: current),
+                    if (current.playbackEnded && current.nextEpisode == null)
+                      _PlaybackEndedOverlay(controller: current),
+                    if (!playbackNeedsLineStatus(current) &&
+                        current.disconnected &&
+                        !current.isPlaying)
+                      _Banner(
+                        key: PlayerKeys.disconnect,
+                        text:
+                            current.disconnectDetail ??
+                            l10n.playbackDisconnected,
+                      ),
+                    if (current.networkSlow && !current.disconnected)
+                      _Banner(
+                        key: const ValueKey('player-network-slow'),
+                        text: l10n.networkSlowHint,
+                        onDismiss: current.dismissNetworkSlowHint,
+                      ),
+                    if (current.progressSyncFailed &&
+                        !(current.disconnected && !current.isPlaying))
+                      _Banner(
+                        key: PlayerKeys.progressSyncFailed,
+                        text: current.sessionExpired
+                            ? l10n.playbackSessionExpired
+                            : l10n.progressSyncFailed,
+                        onDismiss: current.progressSyncPersistent
+                            ? current.dismissProgressSyncBanner
+                            : null,
+                      ),
+                    if (current.subtitleNotice != null)
+                      _Banner(
+                        key: PlayerKeys.subtitleNotice,
+                        text: _subtitleNoticeText(
+                          l10n,
+                          current.subtitleNotice!,
+                        ),
+                      ),
+                    if (!playbackNeedsLineStatus(current) &&
+                        current.playbackLineFailure != null)
+                      _Banner(
+                        key: const ValueKey('playback-line-failure'),
+                        text: current.playbackLineFailure!,
+                        onDismiss: current.dismissPlaybackLineFailure,
+                      ),
+                    if (current.trackFailure != null)
+                      _Banner(
+                        key: const ValueKey('player-track-failure'),
+                        text:
+                            '${l10n.audioTrack} / ${l10n.subtitleTrack}：${l10n.errorLoadFailed}',
+                        onDismiss: current.dismissTrackFailure,
+                      ),
+                    if (_danmaku?.status == DanmakuStatus.customUnreachable &&
+                        !current.loading)
+                      _DanmakuSourceBanner(
+                        controller: _danmaku!,
                         visible: current.controlsVisible,
                       ),
-                      if (_danmaku != null &&
-                          _danmaku!.isConfigured &&
-                          _danmaku!.danmakuOn &&
-                          !_danmakuPanelOpen &&
-                          !_danmakuSearchOpen &&
-                          !_episodesOpen &&
-                          !current.loading &&
-                          current.error == null &&
-                          (_danmaku!.status == DanmakuStatus.noMatch))
-                        _DanmakuMatchChip(onSearch: _openDanmakuSearch),
-                      if (_danmakuPanelOpen && _danmaku != null)
-                        DanmakuPanel(
-                          danmaku: _danmaku!,
-                          onClose: _closeDanmakuPanel,
-                          onSearch: _openDanmakuSearch,
-                        ),
-                      if (_danmakuSearchOpen && _danmaku != null)
-                        _DanmakuSearchPanel(
-                          danmaku: _danmaku!,
-                          initialKeyword: _danmakuSearchKeyword(),
-                          onClose: _closeDanmakuSearch,
-                        ),
-                      if (_episodesOpen && current.canBrowseEpisodes)
-                        _EpisodeOverlay(
-                          controller: current,
-                          onClose: _closeEpisodeList,
-                        ),
-                    ],
-                  ),
+                    _PlayerChromeBar(
+                      controller: current,
+                      visible: current.controlsVisible,
+                    ),
+                    if (_danmaku != null &&
+                        _danmaku!.isConfigured &&
+                        _danmaku!.danmakuOn &&
+                        !_danmakuPanelOpen &&
+                        !_danmakuSearchOpen &&
+                        !_episodesOpen &&
+                        !current.loading &&
+                        current.error == null &&
+                        (_danmaku!.status == DanmakuStatus.noMatch))
+                      _DanmakuMatchChip(
+                        visible: current.controlsVisible,
+                        onSearch: _openDanmakuSearch,
+                      ),
+                    if (_danmakuPanelOpen && _danmaku != null)
+                      DanmakuPanel(
+                        danmaku: _danmaku!,
+                        onClose: _closeDanmakuPanel,
+                        onSearch: _openDanmakuSearch,
+                      ),
+                    if (_danmakuSearchOpen && _danmaku != null)
+                      _DanmakuSearchPanel(
+                        danmaku: _danmaku!,
+                        initialKeyword: _danmakuSearchKeyword(),
+                        onClose: _closeDanmakuSearch,
+                      ),
+                    if (_episodesOpen && current.canBrowseEpisodes)
+                      _EpisodeOverlay(
+                        controller: current,
+                        onClose: _closeEpisodeList,
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -1145,14 +1146,14 @@ class _PlaybackEndedOverlay extends StatelessWidget {
                 MediaQuery.sizeOf(context),
               ),
             ),
-            child: LiquidGlass(
-              kind: LiquidGlassKind.panel,
-              padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: DecoratedBox(
+              decoration: playerSurfaceDecoration(
+                theme,
+                borderRadius: BorderRadius.circular(AppRadii.xl),
+              ),
               child: Container(
                 key: PlayerKeys.playbackEnded,
-                decoration: const BoxDecoration(
-                  color: CupertinoColors.transparent,
-                ),
+                padding: const EdgeInsets.all(AppSpacing.xxl),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1279,7 +1280,7 @@ class _NextEpisodeBanner extends StatelessWidget {
 }
 
 /// 播放到片头/片尾区间时右下角的跳过按钮:点击跳到区间终点。
-/// 用贴合文字的黑曜玻璃胶囊,与下一集提示卡视觉同源。
+/// 中性深色半透明胶囊加细边,不带品牌色描边与圆点。
 class _SkipSegmentButton extends StatelessWidget {
   const _SkipSegmentButton({required this.controller});
 
@@ -1298,42 +1299,23 @@ class _SkipSegmentButton extends StatelessWidget {
         key: const Key('player-skip-segment'),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: .94),
+          color: scheme.surfaceContainerLow.withValues(alpha: .88),
           borderRadius: BorderRadius.circular(AppRadii.pill),
-          border: Border.all(
-            color: scheme.primary.withValues(alpha: 0.55),
-            width: 1.2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: scheme.scrim.withValues(alpha: .4),
-              blurRadius: 18,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          border: Border.all(color: AppEdge.of(Brightness.dark, strong: true)),
         ),
         child: AppSurfaceAction(
           onTap: () => unawaited(controller.skipCurrentSegment()),
           borderRadius: BorderRadius.circular(AppRadii.pill),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 7, 16, 7),
+            padding: const EdgeInsets.fromLTRB(12, 9, 16, 9),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.22),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    AppIcons.skipNext,
-                    fill: AppIcons.filled,
-                    size: 16,
-                    color: scheme.primary,
-                  ),
+                const Icon(
+                  AppIcons.skipNext,
+                  fill: AppIcons.filled,
+                  size: 18,
+                  color: CupertinoColors.white,
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 Text(
@@ -1402,13 +1384,6 @@ class _EpisodeOverlay extends StatelessWidget {
                 border: Border.all(
                   color: scheme.outlineVariant.withValues(alpha: 0.65),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: scheme.scrim.withValues(alpha: 0.45),
-                    blurRadius: 28,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
               ),
               child: PlayerEpisodeBrowser(
                 controller: controller,
@@ -1771,8 +1746,10 @@ class _DanmakuButton extends StatelessWidget {
 
 /// 未自动匹配时的提示胶囊:点开手动搜索,不必翻设置菜单。
 class _DanmakuMatchChip extends StatelessWidget {
-  const _DanmakuMatchChip({required this.onSearch});
+  const _DanmakuMatchChip({required this.visible, required this.onSearch});
 
+  /// 随控制层显隐:播放中静置后不在画面上残留。
+  final bool visible;
   final VoidCallback onSearch;
 
   @override
@@ -1783,11 +1760,15 @@ class _DanmakuMatchChip extends StatelessWidget {
     return Positioned(
       left: AppSpacing.xl,
       bottom: 112,
-      child: LiquidGlass(
-        kind: LiquidGlassKind.pill,
+      child: _FadeThrough(
+        visible: visible,
         child: Container(
           key: DanmakuKeys.matchChip,
-          decoration: const BoxDecoration(color: CupertinoColors.transparent),
+          clipBehavior: Clip.antiAlias,
+          decoration: playerSurfaceDecoration(
+            theme,
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+          ),
           child: AppSurfaceAction(
             onTap: () {
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1826,9 +1807,12 @@ class _DanmakuMatchChip extends StatelessWidget {
 
 /// 自定义弹幕服务不可用提示:明确提示并可一键回退官方源。
 class _DanmakuSourceBanner extends StatelessWidget {
-  const _DanmakuSourceBanner({required this.controller});
+  const _DanmakuSourceBanner({required this.controller, required this.visible});
 
   final DanmakuController controller;
+
+  /// 随控制层显隐:播放中静置后不在画面上残留。
+  final bool visible;
 
   @override
   Widget build(BuildContext context) {
@@ -1848,16 +1832,17 @@ class _DanmakuSourceBanner extends StatelessWidget {
               MediaQuery.sizeOf(context),
             ),
           ),
-          child: LiquidGlass(
-            kind: LiquidGlassKind.control,
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
+          child: _FadeThrough(
+            visible: visible,
             child: Container(
               key: DanmakuKeys.sourceBanner,
-              decoration: const BoxDecoration(
-                color: CupertinoColors.transparent,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              decoration: playerSurfaceDecoration(
+                theme,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1866,7 +1851,7 @@ class _DanmakuSourceBanner extends StatelessWidget {
                     AppIcons.wifiOff,
                     fill: AppIcons.filled,
                     size: 18,
-                    color: scheme.primary,
+                    color: scheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: AppSpacing.xs),
                   Flexible(child: Text(l10n.danmakuCustomUnreachable)),
