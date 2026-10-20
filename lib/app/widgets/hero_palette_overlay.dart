@@ -5,6 +5,7 @@ import 'package:rillight/app/artwork_theme_source.dart' as theme_source;
 import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/media_server/models.dart';
 
@@ -56,7 +57,12 @@ class HeroPaletteOverlay extends StatefulWidget {
     }
     final ref = theme_source.resolveThemeArtwork(item, parent);
     if (ref == null) return null;
-    final scope = mediaImageAccountScope(AuthScope.maybeOf(context));
+    // 详情页的图片范围由 [DetailSourceScope] 提供。覆盖层必须和 MediaImage、
+    // ContentTheme 用同一个范围,否则同一个条目在聚合页会取到登录服务器的缓存。
+    final policy = DetailSourceScope.imagePolicyOf(context);
+    final scope = policy != null && policy.isValid
+        ? policy.scope
+        : mediaImageAccountScope(AuthScope.maybeOf(context));
     return theme_source.paletteKey(scope, ref.itemId, ref.type, ref.tag);
   }
 

@@ -102,6 +102,8 @@ void main() {
     await tester.pumpWidget(page('episode-2', 'shared'));
     expect(scheme.surface, resolved.surface);
     await tester.pumpWidget(page('episode-2', 'replacement'));
+    // 表面淡回中性需要一段过渡;文字和主色不受这段动画影响。
+    await tester.pump(ContentTheme.surfaceTransition);
     expect(scheme, AppUiTheme.dark().colorScheme);
   });
 

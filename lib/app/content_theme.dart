@@ -40,6 +40,10 @@ class ContentTheme extends StatefulWidget {
 
   static const sampleMaxWidth = 64;
 
+  /// 7 个表面字段随剧照淡入的时长;减少动态效果时由
+  /// [AppMotion.durationOf] 归零,文字与主色始终立即切换。
+  static const surfaceTransition = AppMotion.slow;
+
   @visibleForTesting
   static void debugClear() => ArtworkMoodCache.instance.clear();
 
@@ -103,26 +107,127 @@ class _ContentThemeState extends State<ContentTheme> {
     final scheme = mood == null
         ? base
         : composeContentPaletteFromMood(base, mood);
-    return AppUiTheme(
-      data: theme.copyWith(
-        colorScheme: scheme,
-        scaffoldBackgroundColor: scheme.surface,
-        textTheme: theme.textTheme.apply(
-          bodyColor: scheme.onSurface,
-          displayColor: scheme.onSurface,
+    return _AnimatedSurfaceScheme(
+      scheme: scheme,
+      builder: (context, surfaces) => AppUiTheme(
+        data: theme.copyWith(
+          colorScheme: surfaces,
+          scaffoldBackgroundColor: surfaces.surface,
+          textTheme: theme.textTheme.apply(
+            bodyColor: scheme.onSurface,
+            displayColor: scheme.onSurface,
+          ),
         ),
-      ),
-      child: ArtworkColorScope(
-        report: (itemId, reportedKey, bytes) {
-          if (_paletteKey == reportedKey) _report(reportedKey, bytes);
-        },
-        child: widget.fillSurface
-            ? ColoredBox(color: scheme.surface, child: widget.child)
-            : widget.child,
+        child: ArtworkColorScope(
+          report: (itemId, reportedKey, bytes) {
+            if (_paletteKey == reportedKey) _report(reportedKey, bytes);
+          },
+          child: widget.fillSurface
+              ? ColoredBox(color: surfaces.surface, child: widget.child)
+              : widget.child,
+        ),
       ),
     );
   }
 }
+
+/// 只让剧照允许染色的 7 个表面字段过渡。
+///
+/// 文字、主色、错误与选中态由 [AppColorScheme.lerpSurfaces] 原样保留,
+/// 因此按钮和选中态不会跟着海报慢慢变色。主题明暗切换不是取色结果,
+/// 直接跳变,避免整个页面在 320ms 里处于旧亮度。
+class _AnimatedSurfaceScheme extends StatefulWidget {
+  const _AnimatedSurfaceScheme({required this.scheme, required this.builder});
+
+  final AppColorScheme scheme;
+  final Widget Function(BuildContext context, AppColorScheme scheme) builder;
+
+  @override
+  State<_AnimatedSurfaceScheme> createState() => _AnimatedSurfaceSchemeState();
+}
+
+class _AnimatedSurfaceSchemeState extends State<_AnimatedSurfaceScheme>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final CurvedAnimation _progress;
+  late AppColorScheme _from;
+  late AppColorScheme _to;
+
+  @override
+  void initState() {
+    super.initState();
+    _from = widget.scheme;
+    _to = widget.scheme;
+    _controller = AnimationController(
+      vsync: this,
+      duration: ContentTheme.surfaceTransition,
+      value: 1,
+    );
+    _progress = CurvedAnimation(parent: _controller, curve: AppMotion.standard);
+  }
+
+  @override
+  void didUpdateWidget(_AnimatedSurfaceScheme oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_sameSurfaces(_to, widget.scheme)) return;
+    final shown = _controller.value >= 1
+        ? _to
+        : AppColorScheme.lerpSurfaces(_from, _to, _progress.value);
+    _from = shown;
+    _to = widget.scheme;
+    // A brightness switch replaces the whole neutral base; blending it would
+    // keep the old brightness in every descendant for the whole transition.
+    final duration = oldWidget.scheme.brightness == widget.scheme.brightness
+        ? AppMotion.durationOf(context, ContentTheme.surfaceTransition)
+        : Duration.zero;
+    if (duration == Duration.zero) {
+      _from = _to;
+      _controller.stop();
+      return;
+    }
+    _controller
+      ..duration = duration
+      ..forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _progress.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (AppMotion.durationOf(context, ContentTheme.surfaceTransition) ==
+        Duration.zero) {
+      // Reduce motion: snap to the resolved surfaces, keep no in-flight frame.
+      _from = widget.scheme;
+      _to = widget.scheme;
+      if (_controller.value != 1) _controller.value = 1;
+      return widget.builder(context, widget.scheme);
+    }
+    return AnimatedBuilder(
+      animation: _progress,
+      builder: (context, _) {
+        final value = _progress.value;
+        return widget.builder(
+          context,
+          value >= 1 ? _to : AppColorScheme.lerpSurfaces(_from, _to, value),
+        );
+      },
+    );
+  }
+}
+
+bool _sameSurfaces(AppColorScheme a, AppColorScheme b) =>
+    a.surface == b.surface &&
+    a.surfaceContainerLowest == b.surfaceContainerLowest &&
+    a.surfaceContainerLow == b.surfaceContainerLow &&
+    a.surfaceContainer == b.surfaceContainer &&
+    a.surfaceContainerHigh == b.surfaceContainerHigh &&
+    a.surfaceContainerHighest == b.surfaceContainerHighest &&
+    a.surfaceBright == b.surfaceBright;
 
 /// 取色的中性底:手机用影院黑/纸白,桌面和电视沿用各自的应用取色。
 AppColorScheme _baseScheme(AppUiThemeData theme, Brightness brightness) {

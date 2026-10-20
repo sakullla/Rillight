@@ -3,12 +3,23 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
+import 'package:rillight/app/artwork_theme_source.dart';
 import 'package:rillight/app/theme/brand.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/hero_palette_overlay.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/library/detail_source_scope.dart';
+import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
+import 'package:rillight/player/playback_runtime.dart';
 
+import '../emby/fake_emby_server.dart';
 import '../helpers/cupertino_test_app.dart';
+import '../helpers/synthetic_source_fixture.dart';
 import '../helpers/widget_harness.dart';
 
 /// Reports a frame from inside [HeroPaletteOverlay], the way HeroArtwork and
@@ -131,6 +142,89 @@ void main() {
         )
         .where((wrapper) => wrapper.ignoring);
     expect(hitTestWrappers, isNotEmpty);
+  });
+
+  testWidgets('detail source scope decides the overlay palette key', (
+    tester,
+  ) async {
+    // 详情页的聚合条目由 DetailSourceScope 授权图片范围;覆盖层必须和
+    // ContentTheme、MediaImage 用同一范围,不能回落到登录服务器的账号范围。
+    final server = FakeEmbyServer();
+    final auth = SyntheticSourceAuth(
+      adapter: FakeEmbyAdapter([server]),
+      device: const ClientDeviceInfo(
+        clientName: 'test',
+        deviceName: 'overlay',
+        deviceId: 'hero-palette-overlay',
+        version: '1',
+      ),
+      libraryIds: const {'view-movies'},
+    );
+    addTearDown(auth.dispose);
+    final session = await tester.runAsync(() async {
+      await auth.sources.load();
+      final connected = await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      if (!connected) throw StateError('signed-in fixture failed');
+      return auth.sources.authenticate(auth.session!.server.id);
+    });
+    final account = session!.account;
+    final origin = PlaybackOrigin(
+      source: SourceReference(account: account, itemId: 'movie-inception'),
+      work: SourceReference(account: account, itemId: 'movie-inception'),
+      libraryId: 'view-movies',
+      permit: auth.sources.permit(account, libraryId: 'view-movies'),
+      client: session.client,
+    );
+    final policy = MediaImageSourcePolicy(origin);
+    addTearDown(policy.dispose);
+
+    String? scoped;
+    String? keyed;
+    String? fallback;
+    await tester.pumpWidget(
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: AuthScope(
+          controller: auth,
+          child: DetailSourceScope(
+            origin: origin,
+            cache: CatalogCache()..debugSetDiskStore(null),
+            imagePolicy: policy,
+            child: Builder(
+              builder: (context) {
+                scoped = DetailSourceScope.imagePolicyOf(context)?.scope;
+                keyed = HeroPaletteOverlay.paletteKeyFor(
+                  context,
+                  const MediaItem(
+                    id: 'movie-inception',
+                    name: '',
+                    type: 'Movie',
+                    backdropImageTag: 'backdrop',
+                  ),
+                );
+                fallback = paletteKey(
+                  mediaImageAccountScope(auth),
+                  'movie-inception',
+                  'Backdrop',
+                  'backdrop',
+                );
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(scoped, isNotNull);
+    expect(
+      keyed,
+      paletteKey(scoped!, 'movie-inception', 'Backdrop', 'backdrop'),
+    );
+    expect(keyed, isNot(fallback));
   });
 
   for (final brightness in Brightness.values) {
