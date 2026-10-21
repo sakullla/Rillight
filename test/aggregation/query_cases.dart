@@ -163,6 +163,264 @@ Future<void> _until(bool Function() predicate) async {
 
 void main() {
   late _Fixture f;
+  test('same-source lookup targets provider IDs and title instead of the catalog first page', () async {
+    await f.open();
+    final row = _movie('origin', title: '牧神记', type: 'Series')
+      ..['ProviderIds'] = {
+        'Tmdb': '0001',
+        'IMDb': 'TT00123',
+        'Custom': 'untrusted',
+        'Tvdb': 'invalid',
+      };
+    f.a.items = (_) async => _page([row], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
+    f.b.viewIds = ['library', 'excluded'];
+    f.b.items = (request) async {
+      final params = request.uri.queryParameters;
+      if (params.containsKey('AnyProviderIdEquals')) {
+        return _page([
+          _movie('localized', title: 'Tales of Herding Gods', type: 'Series'),
+        ], total: 1);
+      }
+      if (params['SearchTerm'] == '牧神记') {
+        return _page([
+          _movie('candidate', title: '牧神记', type: 'Series', provider: null),
+          _movie('conflict', title: '牧神记', type: 'Series', provider: '999'),
+        ], total: 2);
+      }
+      // The old implementation reads only this unrelated first page, hiding
+      // the target among thousands of rows and leaving the dialog spinning.
+      return _page([
+        for (var i = 0; i < 50; i++)
+          _movie('unrelated-$i', title: 'Other $i', provider: '${i + 100}'),
+      ], total: 10000);
+    };
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(
+      origin: f.query.items.single,
+      scope: QueryScope(
+        serverIds: {'b'},
+        libraries: {
+          'b': {'library'},
+        },
+      ),
+    );
+    expect(
+      detail.comparisons
+          .firstWhere((c) => c.source.reference.itemId == 'localized')
+          .decision
+          .confirmed,
+      isTrue,
+    );
+    expect(
+      detail.comparisons
+          .firstWhere((c) => c.source.reference.itemId == 'candidate')
+          .decision
+          .kind,
+      MatchKind.candidate,
+    );
+    expect(
+      detail.comparisons
+          .firstWhere((c) => c.source.reference.itemId == 'conflict')
+          .decision
+          .kind,
+      MatchKind.conflict,
+    );
+    expect(detail.complete, isTrue);
+    expect(detail.loading, isFalse);
+    expect(f.b.itemRequests, hasLength(2));
+    expect(
+      f.b.itemRequests.every(
+        (r) =>
+            r.queryParameters['ParentId'] == 'library' &&
+            r.queryParameters['IncludeItemTypes'] == 'Series',
+      ),
+      isTrue,
+    );
+    expect(
+      f.b.itemRequests
+          .singleWhere(
+            (r) => r.queryParameters.containsKey('AnyProviderIdEquals'),
+          )
+          .queryParameters['AnyProviderIdEquals'],
+      'tmdb.1,imdb.tt00123',
+    );
+    expect(
+      f.b.itemRequests.every(
+        (r) =>
+            r.queryParameters.containsKey('AnyProviderIdEquals') ||
+            r.queryParameters['SearchTerm'] == '牧神记',
+      ),
+      isTrue,
+    );
+  });
+
+  for (final blockedLane in ['provider', 'title']) {
+    test(
+      'same-source publishes results while the $blockedLane lookup is blocked',
+      () async {
+        await f.open();
+        f.a.items = (_) async => _page([_movie('origin')], total: 1);
+        await f.query.start(QueryScope(serverIds: {'a'}));
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        addTearDown(() {
+          if (!release.isCompleted) release.complete();
+        });
+        f.b.items = (request) async {
+          final provider = request.uri.queryParameters.containsKey(
+            'AnyProviderIdEquals',
+          );
+          if (provider == (blockedLane == 'provider')) {
+            if (!entered.isCompleted) entered.complete();
+            await release.future;
+          }
+          return _page([
+            _movie(provider ? 'provider-hit' : 'title-hit'),
+          ], total: 1);
+        };
+        final detail = SameSourceQueryController(
+          registry: f.registry,
+          history: f.history,
+        );
+        addTearDown(detail.dispose);
+        final pending = detail.start(
+          origin: f.query.items.single,
+          scope: QueryScope(serverIds: {'b'}),
+        );
+        await entered.future;
+        await _until(() => detail.comparisons.isNotEmpty);
+        expect(
+          detail.comparisons.single.source.reference.itemId,
+          blockedLane == 'provider' ? 'title-hit' : 'provider-hit',
+        );
+        expect(detail.loading, isTrue);
+        release.complete();
+        await pending;
+        expect(detail.comparisons, hasLength(2));
+        expect(detail.complete, isTrue);
+        expect(detail.loading, isFalse);
+      },
+    );
+  }
+
+  test('same-source provider and title pagination keep independent offsets and deduplicate hits', () async {
+    await f.open();
+    f.a.items = (_) async => _page([_movie('origin')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}));
+    f.b.items = (request) async {
+      final provider = request.uri.queryParameters.containsKey(
+        'AnyProviderIdEquals',
+      );
+      final cursor = request.uri.queryParameters['StartIndex'];
+      return _page([
+        _movie(provider && cursor == '1' ? 'second' : 'first'),
+      ], total: provider ? 2 : 1);
+    };
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(
+      origin: f.query.items.single,
+      scope: QueryScope(serverIds: {'b'}, pageSize: 1),
+    );
+    expect(detail.comparisons, hasLength(1));
+    expect(detail.complete, isFalse);
+    expect(detail.loading, isFalse);
+    await detail.loadMore(const QuerySourceKey('b', 'library'));
+    expect(detail.comparisons, hasLength(2));
+    expect(detail.complete, isTrue);
+    expect(
+      f.b.itemRequests
+          .where((r) => r.queryParameters.containsKey('AnyProviderIdEquals'))
+          .map((r) => r.queryParameters['StartIndex']),
+      ['0', '1'],
+    );
+    expect(
+      f.b.itemRequests
+          .where((r) => r.queryParameters.containsKey('SearchTerm'))
+          .map((r) => r.queryParameters['StartIndex']),
+      ['0'],
+    );
+  });
+
+  test('same-source without reliable provider IDs searches by title without scanning', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('origin', provider: null)], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}));
+    f.b.items = (_) async =>
+        _page([_movie('candidate', provider: null)], total: 1);
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(
+      origin: f.query.items.single,
+      scope: QueryScope(serverIds: {'b'}),
+    );
+    expect(detail.comparisons.single.decision.kind, MatchKind.candidate);
+    expect(f.b.itemRequests.single.queryParameters['SearchTerm'], 'Film');
+    expect(detail.complete, isTrue);
+  });
+
+  test(
+    'same-source failure stops loading and retries only the failed lookup',
+    () async {
+      await f.open();
+      f.a.items = (_) async => _page([_movie('origin')], total: 1);
+      await f.query.start(QueryScope(serverIds: {'a'}));
+      final release = Completer<void>();
+      addTearDown(() {
+        if (!release.isCompleted) release.complete();
+      });
+      f.b.items = (request) async {
+        if (request.uri.queryParameters.containsKey('SearchTerm')) {
+          await release.future;
+        }
+        return _page([_movie('hit')], total: 1);
+      };
+      final detail = SameSourceQueryController(
+        registry: f.registry,
+        history: f.history,
+        timeout: const Duration(seconds: 1),
+      );
+      addTearDown(detail.dispose);
+      await detail.start(
+        origin: f.query.items.single,
+        scope: QueryScope(serverIds: {'b'}),
+      );
+      expect(detail.comparisons, hasLength(1));
+      expect(detail.loading, isFalse);
+      expect(
+        detail.sources.where((s) => s.failed).single.status,
+        SourceQueryStatus.timeout,
+      );
+      release.complete();
+      await detail.retry(const QuerySourceKey('b', 'library'));
+      expect(detail.complete, isTrue);
+      expect(
+        f.b.itemRequests.where(
+          (r) => r.queryParameters.containsKey('AnyProviderIdEquals'),
+        ),
+        hasLength(1),
+      );
+      expect(
+        f.b.itemRequests.where(
+          (r) => r.queryParameters.containsKey('SearchTerm'),
+        ),
+        hasLength(2),
+      );
+    },
+  );
+
   for (final filtered in [false, true]) {
     test(
       'discovery retry rebuilds real libraries and preserves siblings filtered=$filtered',

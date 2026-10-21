@@ -2896,6 +2896,69 @@ void main() {
     tags: ['integration'],
   );
 
+  for (final failure in [false, true]) {
+    cases.testWidgets(
+      'source selection stops spinning and exposes ${failure ? 'retry' : 'pagination'} with no matches',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
+        f.b.items = [
+          for (var i = 0; i < 60; i++)
+            FakeEmbyItem(
+              id: 'other-$i',
+              name: '合成作品 extra $i',
+              type: 'Movie',
+              parentId: 'view-movies',
+            ),
+        ];
+        if (failure) {
+          f.b.itemsStatus = 503;
+          f.b.searchStatus = 503;
+        }
+        final app = f.app(PresentationEnvironment.desktop);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        await _openOwnedDetail(
+          tester,
+          f,
+          app,
+          serverId: f.aId,
+          itemId: 'shared-id',
+        );
+        await tester.tap(find.byKey(const Key('source-selection-open')));
+        await _settle(tester);
+        final dialog = find.byType(AppModalFrame);
+        expect(dialog, findsOneWidget);
+        expect(
+          find.descendant(
+            of: dialog,
+            matching: find.byType(CupertinoActivityIndicator),
+          ),
+          findsNothing,
+        );
+        final action = find.widgetWithText(
+          AppButton,
+          failure ? '部分来源加载失败，重试' : '继续查找',
+        );
+        expect(action, findsOneWidget);
+        if (failure) {
+          f.b.itemsStatus = null;
+          f.b.searchStatus = null;
+        }
+        await tester.tap(action);
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const Key('source-selection-close')));
+        await _settle(tester);
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+
   cases.testWidgets(
     'source comparison distinguishes title candidate and unknown metadata without confirmed resume',
     (tester) async {

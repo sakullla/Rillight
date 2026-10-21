@@ -1521,6 +1521,17 @@ class FakeEmbyServer {
         .where((value) => value.isNotEmpty)
         .toSet();
     var matched = items.where((item) {
+      final providerFilter = options.uri.queryParameters['AnyProviderIdEquals'];
+      if (providerFilter != null) {
+        final ids = item.toJson()['ProviderIds'] as Map? ?? const {};
+        final values = {
+          for (final entry in ids.entries)
+            '${entry.key}.${entry.value}'.toLowerCase(),
+        };
+        if (!providerFilter.toLowerCase().split(',').any(values.contains)) {
+          return false;
+        }
+      }
       final filters = (options.uri.queryParameters['Filters'] ?? '').split(',');
       if (filters.contains('IsPlayed') && !item.played) return false;
       if (filters.contains('IsUnplayed') && item.played) return false;

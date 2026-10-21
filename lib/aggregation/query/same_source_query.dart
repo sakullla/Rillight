@@ -35,8 +35,9 @@ class EpisodeComparison {
 }
 
 /// Detail-owned query; never mutates or depends on global search state.
-/// Discovery walks allowed libraries (not only title search), so localized
-/// titles cannot hide a provider-confirmed edition. Title-only is candidate.
+/// Provider and title lookups run independently in allowed libraries, so
+/// localized titles cannot hide a provider-confirmed edition. Adapters without
+/// provider lookup retain library discovery alongside the fast title query.
 class SameSourceQueryController extends ChangeNotifier {
   SameSourceQueryController({
     required SourceSessionRegistry registry,
@@ -56,11 +57,17 @@ class SameSourceQueryController extends ChangeNotifier {
   bool _disposed = false;
   final Map<SourceReference, EpisodeComparison> _episodes = {};
   final Map<SourceReference, int> _attempts = {};
+  WorkIndex? _index;
   int _nextAttempt = 0;
   QueryItem? get origin => _originPermit?.isValid == true ? _origin : null;
   List<SourceQuerySnapshot> get sources => query.sources;
-  bool get complete => query.complete;
-  WorkIndex _comparisonIndex() => WorkIndex()
+  bool get complete => sources.isEmpty || query.complete;
+  bool get loading => sources.any(
+    (source) =>
+        source.status == SourceQueryStatus.loading ||
+        source.status == SourceQueryStatus.idle,
+  );
+  WorkIndex _comparisonIndex() => _index ??= WorkIndex()
     ..upsert([
       if (origin != null) origin!.work,
       ...query.items.map((i) => i.work),
@@ -139,6 +146,7 @@ class SameSourceQueryController extends ChangeNotifier {
     _revision++;
     _origin = origin;
     _originPermit = permit;
+    _index = null;
     _episodes.clear();
     _attempts.clear();
     return query.start(
@@ -147,6 +155,7 @@ class SameSourceQueryController extends ChangeNotifier {
         libraries: scope.libraries,
         pageSize: scope.pageSize,
         types: {origin.item.type},
+        sameWork: origin.work,
       ),
     );
   }
@@ -156,8 +165,30 @@ class SameSourceQueryController extends ChangeNotifier {
   OperationPermit permitForItem(QueryItem item) =>
       query.permitFor(item.reference.account, libraryId: item.libraryId);
 
-  Future<void> loadMore(QuerySourceKey key) => query.loadMore(key);
-  Future<void> retry(QuerySourceKey key) => query.retry(key);
+  // Keep the independent provider/title cursors together for the library's
+  // user-facing actions; neither lane can consume the other's page offset.
+  Future<void> loadMore(QuerySourceKey key) => Future.wait([
+    for (final source in sources)
+      if (source.key.serverId == key.serverId &&
+          source.key.libraryId == key.libraryId &&
+          !source.failed)
+        query.loadMore(source.key),
+  ]).then((_) {});
+
+  Future<void> retry(QuerySourceKey key) {
+    final related = sources
+        .where(
+          (source) =>
+              source.key.serverId == key.serverId &&
+              source.key.libraryId == key.libraryId,
+        )
+        .toList();
+    final failed = related.any((source) => source.failed);
+    return Future.wait([
+      for (final source in related)
+        if (!failed || source.failed) query.retry(source.key),
+    ]).then((_) {});
+  }
 
   /// Call for a confirmed series edition only. Unknown numbering is deliberately
   /// uncertain. A verified numbering scheme must come from explicit mapping,
@@ -281,6 +312,7 @@ class SameSourceQueryController extends ChangeNotifier {
   }
 
   void _changed() {
+    _index = null;
     if (origin == null) {
       _origin = null;
       _originPermit = null;

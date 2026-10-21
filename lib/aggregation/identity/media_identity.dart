@@ -98,6 +98,11 @@ class WorkSource {
   final String title;
   final int? year;
   final Map<String, String> providerIds;
+
+  Map<String, String> get reliableProviderIds => {
+    for (final entry in providerIds.entries)
+      if (_reliable(entry.key, entry.value)) entry.key: entry.value,
+  };
 }
 
 enum MatchKind { confirmed, candidate, unrelated, conflict }

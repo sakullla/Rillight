@@ -76,7 +76,8 @@ class _GuardedEmbyTransport implements HttpClientAdapter {
   }
 }
 
-class EmbyClient implements MediaServerClient, MediaFavorites {
+class EmbyClient
+    implements MediaServerClient, MediaFavorites, MediaProviderLookup {
   @override
   MediaServerType get serviceType => MediaServerType.emby;
   @override
@@ -655,6 +656,29 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
       fields: fields,
     )).items;
   }
+
+  @override
+  Future<MediaItemPage> queryProviderItems({
+    required String parentId,
+    required String includeItemTypes,
+    required Map<String, String> providerIds,
+    required int limit,
+    required int startIndex,
+  }) => _getItemPage(
+    '/Users/${_requireUserId()}/Items',
+    queryParameters: {
+      'ParentId': parentId,
+      'IncludeItemTypes': includeItemTypes,
+      'AnyProviderIdEquals': providerIds.entries
+          .map((entry) => '${entry.key}.${entry.value}')
+          .join(','),
+      'Recursive': 'true',
+      'Limit': '$limit',
+      'StartIndex': '$startIndex',
+      'Fields': itemFields,
+      'EnableImageTypes': imageTypes,
+    },
+  );
 
   /// 官方筛选参数:[filters] 对应 `Filters`(IsPlayed/IsUnplayed 等已看状态),
   /// [genres] 对应 `Genres`(竖线分隔),[years] 对应 `Years`(逗号分隔)。

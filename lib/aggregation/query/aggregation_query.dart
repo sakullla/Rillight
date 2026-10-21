@@ -54,6 +54,7 @@ class QueryScope {
     this.pageSize = 50,
     this.sortBy = 'SortName',
     this.descending = false,
+    this.sameWork,
   }) : serverIds = serverIds == null ? null : Set.unmodifiable(serverIds),
        libraries = Map.unmodifiable(
          libraries.map((k, v) => MapEntry(k, Set<String>.unmodifiable(v))),
@@ -84,20 +85,32 @@ class QueryScope {
   final int pageSize;
   final String sortBy;
   final bool descending;
+
+  /// Detail source lookup uses independent provider and title cursors. A
+  /// localized title must not exclude an indexed provider match.
+  final WorkSource? sameWork;
 }
 
+enum QuerySourceLane { catalog, title }
+
 class QuerySourceKey {
-  const QuerySourceKey(this.serverId, this.libraryId);
+  const QuerySourceKey(
+    this.serverId,
+    this.libraryId, {
+    this.lane = QuerySourceLane.catalog,
+  });
   final String serverId;
   final String libraryId;
+  final QuerySourceLane lane;
   bool get isDiscovery => libraryId.isEmpty;
   @override
   bool operator ==(Object other) =>
       other is QuerySourceKey &&
       serverId == other.serverId &&
-      libraryId == other.libraryId;
+      libraryId == other.libraryId &&
+      lane == other.lane;
   @override
-  int get hashCode => Object.hash(serverId, libraryId);
+  int get hashCode => Object.hash(serverId, libraryId, lane);
 }
 
 class SourceQueryState {
@@ -460,10 +473,21 @@ class AggregationQueryController extends ChangeNotifier {
                 !scope.libraries[serverId]!.contains(view.id))) {
           continue;
         }
-        final key = QuerySourceKey(serverId, view.id);
-        final state = SourceQueryState(key);
-        _states[key] = state;
-        states.add(state);
+        final work = scope.sameWork;
+        final lanes = [
+          if (work == null ||
+              work.reliableProviderIds.isNotEmpty ||
+              work.title.trim().isEmpty)
+            QuerySourceLane.catalog,
+          if (work != null && work.title.trim().isNotEmpty)
+            QuerySourceLane.title,
+        ];
+        for (final lane in lanes) {
+          final key = QuerySourceKey(serverId, view.id, lane: lane);
+          final state = SourceQueryState(key);
+          _states[key] = state;
+          states.add(state);
+        }
       }
       notifyListeners();
       if (_disposed || revision != _revision) return;
@@ -565,7 +589,19 @@ class AggregationQueryController extends ChangeNotifier {
       state.permit = permit;
       final page = await permit
           .dispatch(
-            (client) => scope.mode == QueryMode.nextUp
+            (client) =>
+                scope.sameWork != null &&
+                    state.key.lane == QuerySourceLane.catalog &&
+                    scope.sameWork!.reliableProviderIds.isNotEmpty &&
+                    client is MediaProviderLookup
+                ? (client as MediaProviderLookup).queryProviderItems(
+                    parentId: state.key.libraryId,
+                    includeItemTypes: scope.types.join(','),
+                    providerIds: scope.sameWork!.reliableProviderIds,
+                    limit: scope.pageSize,
+                    startIndex: state.cursor,
+                  )
+                : scope.mode == QueryMode.nextUp
                 ? client.queryNextUp(
                     parentId: state.key.libraryId,
                     limit: scope.pageSize,
@@ -575,7 +611,9 @@ class AggregationQueryController extends ChangeNotifier {
                 : client.queryItems(
                     parentId: state.key.libraryId,
                     recursive: true,
-                    searchTerm: scope.mode == QueryMode.search
+                    searchTerm: state.key.lane == QuerySourceLane.title
+                        ? scope.sameWork!.title.trim()
+                        : scope.mode == QueryMode.search
                         ? scope.keyword.trim()
                         : null,
                     includeItemTypes: scope.types.join(','),

@@ -103,6 +103,18 @@ abstract interface class MediaFavorites {
   Future<void> setFavorite(String itemId, {required bool favorite});
 }
 
+/// Optional indexed lookup. Provider matches are candidates until the caller
+/// checks the returned type, year and all provider IDs for conflicts.
+abstract interface class MediaProviderLookup {
+  Future<MediaItemPage> queryProviderItems({
+    required String parentId,
+    required String includeItemTypes,
+    required Map<String, String> providerIds,
+    required int limit,
+    required int startIndex,
+  });
+}
+
 abstract interface class CatalogNotifications {
   void start();
   Future<void> stop();

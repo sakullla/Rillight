@@ -822,7 +822,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                       });
                     },
                   ),
-              if (!controller.complete && shown.isEmpty)
+              if (controller.loading && shown.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 28),
                   child: Center(child: CupertinoActivityIndicator()),
@@ -907,7 +907,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                     child: Text(l.sourceSelectionRetry),
                   ),
                 ),
-              if (hasMore && (controller.complete || comparisons.isNotEmpty))
+              if (hasMore)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: AppButton(
@@ -972,13 +972,13 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
           ),
           footer: Row(
             children: [
-              if (!controller.complete) ...[
+              if (controller.loading) ...[
                 const CupertinoActivityIndicator(),
                 const SizedBox(width: 8),
               ],
               Expanded(
                 child: Text(
-                  !controller.complete && comparisons.isEmpty
+                  controller.loading && comparisons.isEmpty
                       ? l.sourceSelectionSearching
                       : l.sourceSelectionFound(
                           _filtering ? shown.length : comparisons.length,
