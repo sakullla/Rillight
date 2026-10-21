@@ -427,7 +427,8 @@ class _TopBar extends StatelessWidget {
     // 宽窗口用带提示文字的搜索胶囊,窄窗口退回图标。
     final wideSearch =
         MediaQuery.sizeOf(context).width >= AppShell.searchPillMinWidth;
-    final showBrowseMenu = !AppRoutes.showsBrowseNav(location);
+    final showBrowseMenu =
+        !AppRoutes.showsBrowseNav(location) && !AppRoutes.isItem(location);
     final showBrowseLabel =
         MediaQuery.sizeOf(context).width >= AppShell.browseLabelMinWidth;
     return SizedBox(

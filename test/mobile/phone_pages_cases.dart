@@ -7,7 +7,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/rendering.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -1620,8 +1619,9 @@ void main() {
           find.byKey(const Key('phone-detail-favorite')),
         );
         final seriesPlay = tester.getRect(play);
-        expect(seriesFavorite.left, greaterThan(seriesPoster.right));
-        expect(seriesFavorite.bottom, lessThan(seriesPlay.top));
+        // 状态圆钮与播放钮同左边距，排在播放钮下方的圆钮组里。
+        expect(seriesFavorite.left, closeTo(seriesPoster.left, 1));
+        expect(seriesFavorite.top, greaterThan(seriesPlay.bottom));
         expect(seriesPlay.width, closeTo(360 - 32, 1));
         expect(
           tester
@@ -1673,18 +1673,13 @@ void main() {
           find.byKey(const Key('phone-detail-play-start')),
         );
         final episodeNext = tester.getRect(find.byKey(CatalogKeys.nextEpisode));
-        expect(episodeFavorite.bottom, lessThan(episodePlay.top));
-        expect(episodePlayed.bottom, lessThan(episodePlay.top));
+        expect(episodeFavorite.top, greaterThan(episodePlay.bottom));
+        expect(episodePlayed.top, greaterThan(episodePlay.bottom));
         expect(episodeRestart.top, greaterThan(episodePlay.bottom));
         expect(episodeNext.top, closeTo(episodeRestart.top, 1));
-        for (final text in ['收藏', '标记已看', '从头播放', '下一集']) {
-          expect(
-            tester
-                .renderObject<RenderParagraph>(find.text(text))
-                .didExceedMaxLines,
-            isFalse,
-            reason: text,
-          );
+        // 次级操作全部是图标圆钮，说明由 tooltip 承担。
+        for (final tip in ['收藏', '标记已看', '从头播放', '下一集']) {
+          expect(findAppTooltip(tip), findsOneWidget, reason: tip);
         }
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await settle(tester);
@@ -1795,10 +1790,7 @@ void main() {
         await openItem(tester, router, 'movie-inception');
         final favorite = find.byKey(const Key('phone-detail-favorite'));
         expect(favorite, findsOneWidget);
-        expect(
-          find.descendant(of: favorite, matching: find.text('收藏')),
-          findsOneWidget,
-        );
+        expect(findAppTooltip('收藏'), findsOneWidget);
         await tester.ensureVisible(favorite);
         await tester.tap(favorite);
         await settle(tester);
@@ -1808,23 +1800,14 @@ void main() {
               .favorite,
           isTrue,
         );
-        expect(
-          find.descendant(of: favorite, matching: find.text('已收藏')),
-          findsOneWidget,
-        );
+        expect(findAppTooltip('已收藏'), findsOneWidget);
         expect(find.text('已加入收藏'), findsOneWidget);
 
         // 重新打开详情仍是已收藏：状态来自服务器的 IsFavorite。
         await tester.binding.handlePopRoute();
         await settle(tester);
         await openItem(tester, router, 'movie-inception');
-        expect(
-          find.descendant(
-            of: find.byKey(const Key('phone-detail-favorite')),
-            matching: find.text('已收藏'),
-          ),
-          findsOneWidget,
-        );
+        expect(findAppTooltip('已收藏'), findsOneWidget);
 
         // 写入失败时回到原状态并提示。
         server.failNextFavorite = true;
@@ -1839,13 +1822,7 @@ void main() {
               .favorite,
           isTrue,
         );
-        expect(
-          find.descendant(
-            of: find.byKey(const Key('phone-detail-favorite')),
-            matching: find.text('已收藏'),
-          ),
-          findsOneWidget,
-        );
+        expect(findAppTooltip('已收藏'), findsOneWidget);
         expect(find.text('收藏没有保存，请稍后再试'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },

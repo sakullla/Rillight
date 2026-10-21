@@ -2538,7 +2538,7 @@ void main() {
       final original = DetailSourceScope.maybeOf(
         tester.element(find.byType(ItemDetailPage)),
       )!;
-      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
+      await tester.tap(find.byKey(const Key('source-selection-open')));
       await _settle(tester);
       await tester.tap(find.byKey(Key('source-selection-verify-${f.bId}')));
       await _settle(tester);
@@ -2622,12 +2622,23 @@ void main() {
             findsNothing,
           );
           if (environment.isTv) {
-            // D-pad reaches the entry from the header play action.
-            bool entryFocused() => Focus.of(
-              tester.element(
-                find.descendant(of: entry, matching: find.byType(Text)).first,
-              ),
-            ).hasFocus;
+            // D-pad reaches the entry from the header play action。入口是
+            // 图标钮（无 Text 子节点），以「主焦点落在入口子树内」判定。
+            final entryElement = tester.element(entry);
+            bool entryFocused() {
+              final context = tester.binding.focusManager.primaryFocus?.context;
+              if (context is! Element) return false;
+              var inside = false;
+              context.visitAncestorElements((element) {
+                if (identical(element, entryElement)) {
+                  inside = true;
+                  return false;
+                }
+                return true;
+              });
+              return inside;
+            }
+
             for (var i = 0; i < 6 && !entryFocused(); i++) {
               await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
               await tester.pump();
@@ -2993,7 +3004,7 @@ void main() {
         serverId: f.aId,
         itemId: 'shared-id',
       );
-      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
+      await tester.tap(find.byKey(const Key('source-selection-open')));
       await _settle(tester);
       expect(
         find.byKey(Key('source-selection-item-${f.bId}-candidate')),
@@ -3057,7 +3068,7 @@ void main() {
         ),
       );
       await _settle(tester);
-      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
+      await tester.tap(find.byKey(const Key('source-selection-open')));
       await _settle(tester);
       expect(find.text('查找此集'), findsOneWidget);
       await tester.tap(find.text('查找此集'));
@@ -3178,7 +3189,7 @@ void main() {
         serverId: f.bId,
         itemId: 'shared-id',
       );
-      await tester.tap(find.widgetWithText(ui.AppButton, '选择影片来源'));
+      await tester.tap(find.byKey(const Key('source-selection-open')));
       await _settle(tester);
       expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
       await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));

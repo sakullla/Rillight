@@ -213,6 +213,9 @@ void main() {
     expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
     await pump(tester, AppRoutes.library('movies'));
     expect(find.byKey(BrowseMenuButton.buttonKey), findsOneWidget);
+    // 详情/季页顶栏只留 返回/搜索/账户。
+    await pump(tester, AppRoutes.item('movie-1'));
+    expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
   });
 
   testWidgets('closing search returns focus to the search trigger', (

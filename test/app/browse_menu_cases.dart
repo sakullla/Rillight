@@ -80,6 +80,11 @@ void main() {
               builder: (context, state) =>
                   Text('item-${state.pathParameters['id']}'),
             ),
+            GoRoute(
+              path: '/person/:id',
+              builder: (context, state) =>
+                  Text('person-${state.pathParameters['id']}'),
+            ),
           ],
         ),
       ],
@@ -169,10 +174,10 @@ void main() {
     expect(path(tester), AppRoutes.library('view-movies'));
   });
 
-  testWidgets('detail to library keeps detail on the back stack', (
+  testWidgets('person to library pushes, keeping person on the back stack', (
     tester,
   ) async {
-    final router = await pump(tester, AppRoutes.item('movie-1'));
+    final router = await pump(tester, AppRoutes.person('person-1'));
     await openMenu(tester);
     await tester.tap(
       find.byKey(BrowseMenuButton.libraryEntryKey('view-movies')),
@@ -183,7 +188,7 @@ void main() {
     expect(router.canPop(), isTrue);
     router.pop();
     await settle(tester);
-    expect(path(tester), AppRoutes.item('movie-1'));
+    expect(path(tester), AppRoutes.person('person-1'));
   });
 
   testWidgets('closing the menu returns focus to its trigger', (tester) async {

@@ -62,6 +62,10 @@ class _DesktopNavigationGesturesState extends State<DesktopNavigationGestures> {
 enum _PlaybackGesture { seek, volume, zoom }
 
 /// Trackpad movement previews locally; a seek is issued once on release.
+///
+/// 全屏切换有两条路径:macOS 触控板捏合(缩放系数越阈值进/退),以及
+/// 双击画面(鼠标双击,macOS 触控板双按以上报鼠标点击同路径;双击识别
+/// 不抢单击,画面上的控件照常响应)。
 class DesktopPlaybackGestures extends StatefulWidget {
   const DesktopPlaybackGestures({
     super.key,
@@ -69,6 +73,7 @@ class DesktopPlaybackGestures extends StatefulWidget {
     required this.position,
     required this.duration,
     required this.volume,
+    required this.isFullScreen,
     required this.onSeek,
     required this.onVolume,
     required this.onFullScreen,
@@ -77,6 +82,7 @@ class DesktopPlaybackGestures extends StatefulWidget {
   final Widget child;
   final Duration position, duration;
   final int volume;
+  final bool isFullScreen;
   final bool enabled;
   final Future<void> Function(Duration) onSeek;
   final Future<void> Function(int) onVolume;
@@ -102,8 +108,33 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
   );
   int get _volume => (_startVolume - _pan.dy / 8).round().clamp(0, 150);
 
+  Offset? _firstTap;
+  Timer? _doubleTapWindow;
+
+  /// 双击切换全屏用 Listener 自实现,不进手势竞技场:画面上的按钮单击
+  /// 零延迟。鼠标(含 macOS 触控板双按,系统以上报鼠标点击送达)快速
+  /// 点两次,且落点相距不超过 [kDoubleTapSlop] 即切换。
+  void _trackDoubleTap(PointerUpEvent event) {
+    if (event.kind != PointerDeviceKind.mouse || !widget.enabled) {
+      _doubleTapWindow?.cancel();
+      _firstTap = null;
+      return;
+    }
+    final first = _firstTap;
+    _doubleTapWindow?.cancel();
+    _doubleTapWindow = null;
+    if (first != null && (event.position - first).distance <= kDoubleTapSlop) {
+      _firstTap = null;
+      unawaited(widget.onFullScreen(!widget.isFullScreen));
+      return;
+    }
+    _firstTap = event.position;
+    _doubleTapWindow = Timer(kDoubleTapTimeout, () => _firstTap = null);
+  }
+
   @override
   void dispose() {
+    _doubleTapWindow?.cancel();
     _wheelEnd?.cancel();
     super.dispose();
   }
@@ -162,7 +193,14 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
 
   @override
   Widget build(BuildContext context) {
-    if (defaultTargetPlatform != TargetPlatform.macOS) return widget.child;
+    // 双击画面切换全屏:Windows/Linux 鼠标双击、macOS 鼠标双击与触控板
+    // 双按同一条路径;只监听 pointer up,不进手势竞技场,控件单击零延迟。
+    final tapLayer = Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerUp: _trackDoubleTap,
+      child: widget.child,
+    );
+    if (defaultTargetPlatform != TargetPlatform.macOS) return tapLayer;
     return Listener(
       onPointerSignal: _scroll,
       child: GestureDetector(
@@ -189,7 +227,7 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
         child: Stack(
           fit: StackFit.passthrough,
           children: [
-            widget.child,
+            tapLayer,
             if (_gesture != null)
               Positioned.fill(
                 child: IgnorePointer(

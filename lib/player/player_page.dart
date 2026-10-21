@@ -538,6 +538,7 @@ class PlayerPageState extends State<PlayerPage> {
           position: current.position,
           duration: current.duration,
           volume: current.volume,
+          isFullScreen: current.isFullScreen,
           enabled:
               !current.loading &&
               !current.disconnected &&

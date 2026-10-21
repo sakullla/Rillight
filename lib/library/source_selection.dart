@@ -16,7 +16,9 @@ import '../auth/tv_server_access_page.dart';
 import '../auth/server_list_store.dart';
 import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
+import '../app/widgets/skeleton.dart';
 import '../search/search_action.dart';
+import '../player/playback_runtime.dart';
 import '../player/player_bindings.dart';
 import '../player/player_host_command.dart';
 import '../player/player_window_host.dart';
@@ -112,6 +114,133 @@ class _SourceSelectionFrame extends StatelessWidget {
   }
 }
 
+/// 手机底部弹层的框架：顶部拖拽条、标题区、可滚内容与贴底页脚，
+/// 结构与 [_SourceSelectionFrame] 一一对应，只是外框换成贴底圆角弹层。
+class _SourceSelectionSheetFrame extends StatelessWidget {
+  const _SourceSelectionSheetFrame({
+    required this.title,
+    required this.scroll,
+    required this.content,
+    required this.footer,
+    this.caption,
+  });
+
+  final String title;
+  final ScrollController scroll;
+  final Widget content;
+  final Widget footer;
+  final Widget? caption;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final hairline = BorderSide(color: scheme.outlineVariant);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 10),
+        Center(
+          child: Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: scheme.onSurfaceVariant.withValues(alpha: .32),
+              borderRadius: BorderRadius.circular(AppRadii.pill),
+            ),
+          ),
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+          decoration: BoxDecoration(border: Border(bottom: hairline)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                key: const Key('source-selection-title'),
+                style: theme.textTheme.titleLarge,
+              ),
+              if (caption != null) ...[const SizedBox(height: 6), caption!],
+            ],
+          ),
+        ),
+        Flexible(
+          child: SingleChildScrollView(
+            key: const Key('source-selection-content'),
+            controller: scroll,
+            primary: false,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: content,
+          ),
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          decoration: BoxDecoration(border: Border(top: hairline)),
+          child: SafeArea(top: false, child: footer),
+        ),
+      ],
+    );
+  }
+}
+
+/// 查询中占位的来源骨架卡：与 [_SourceCard] 同外形（服务器标记圆块 +
+/// 两行文字），骨架到结果的切换不跳动。
+class _SourceCardSkeleton extends StatelessWidget {
+  const _SourceCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          border: Border.all(
+            color: AppEdge.of(scheme.brightness, strong: true),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(
+                width: 36,
+                height: 36,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                animated: animate,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(width: 96, height: 14, animated: animate),
+                    const SizedBox(height: 8),
+                    SkeletonBlock(
+                      width: double.infinity,
+                      height: 12,
+                      animated: animate,
+                    ),
+                    const SizedBox(height: 6),
+                    SkeletonBlock(width: 168, height: 12, animated: animate),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// What a detail page needs to render the source selection entry in its own
 /// action style. The page must put [key] on the activatable button.
 class SourceSelectionActionView {
@@ -185,6 +314,17 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
                 identical(auth.session, selected) &&
                 auth.serverAccess.generation(selected.server.id) ==
                     selectedGeneration));
+    // 手机端立刻弹底部弹层，预取与查询都在弹层内进行；桌面/TV 维持原对话框流程。
+    if (PresentationScope.isPhoneOf(context)) {
+      await _showPhoneSheet(
+        runtime: runtime,
+        scopedOrigin: scopedOrigin,
+        itemId: itemId,
+        selectedGeneration: selectedGeneration,
+        stillHere: stillHere,
+      );
+      return;
+    }
     setState(() => _loading = true);
     SameSourceQueryController? controller;
     try {
@@ -215,7 +355,9 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
         registry: runtime.registry,
         history: runtime.history,
       );
-      unawaited(controller.start(origin: item, scope: QueryScope()));
+      unawaited(
+        controller.start(origin: item, scope: QueryScope(pageSize: 24)),
+      );
       await showAppDialog<void>(
         context: context,
         // Desktop overlays must cover the shell header. TV keeps its route-local
@@ -231,6 +373,40 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
           AppLocalizations.of(context).sourceSelectionUnavailable,
         );
       }
+    } finally {
+      controller?.dispose();
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// 手机端：点击后立刻打开底部弹层，片源解析（resolve + getItem）移入弹层
+  /// 异步执行，查询即开即走；弹层关闭后统一 dispose 控制器。
+  Future<void> _showPhoneSheet({
+    required PlaybackRuntime runtime,
+    required PlaybackOrigin? scopedOrigin,
+    required String? itemId,
+    required int? selectedGeneration,
+    required bool Function() stillHere,
+  }) async {
+    setState(() => _loading = true);
+    SameSourceQueryController? controller;
+    try {
+      controller = SameSourceQueryController(
+        registry: runtime.registry,
+        history: runtime.history,
+      );
+      await showAppModalSheet<void>(
+        context: context,
+        builder: (context) => _SourceSelectionDialog(
+          controller: controller!,
+          phoneSheet: true,
+          runtime: runtime,
+          scopedOrigin: scopedOrigin,
+          itemId: itemId,
+          selectedGeneration: selectedGeneration,
+          stillHere: stillHere,
+        ),
+      );
     } finally {
       controller?.dispose();
       if (mounted) setState(() => _loading = false);
@@ -276,19 +452,41 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
 }
 
 class _SourceSelectionDialog extends StatefulWidget {
-  const _SourceSelectionDialog({required this.controller, this.episode});
+  const _SourceSelectionDialog({
+    required this.controller,
+    this.episode,
+    this.phoneSheet = false,
+    this.runtime,
+    this.scopedOrigin,
+    this.itemId,
+    this.selectedGeneration,
+    this.stillHere,
+  });
   final SameSourceQueryController controller;
   final EpisodeSource? episode;
+
+  /// 手机端走底部弹层：入口点击后立刻弹层，预取在弹层内完成，此时
+  /// [runtime]/[scopedOrigin]/[itemId]/[selectedGeneration]/[stillHere]
+  /// 由入口在弹层外捕获传入（弹层挂在根导航上，读不到页面级 scope）。
+  final bool phoneSheet;
+  final PlaybackRuntime? runtime;
+  final PlaybackOrigin? scopedOrigin;
+  final String? itemId;
+  final int? selectedGeneration;
+  final bool Function()? stillHere;
+
   @override
   State<_SourceSelectionDialog> createState() => _SourceSelectionDialogState();
 }
 
 class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   SameSourceQueryController get controller => widget.controller;
-  EpisodeSource? get episode => widget.episode;
+  EpisodeSource? get episode => widget.episode ?? _resolvedEpisode;
+  EpisodeSource? _resolvedEpisode;
   SavedServer? _passwordTarget;
   ServerEntryTicket? _pendingEntry;
   bool _busy = false;
+  bool _resolved = false;
   String? _error;
   String? _resolution;
   String? _range;
@@ -296,6 +494,75 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   String? _subtitle;
   String? _audio;
   final ScrollController _scroll = ScrollController();
+
+  bool get _sheetResolving => widget.phoneSheet && !_resolved;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolved = !widget.phoneSheet;
+    if (widget.phoneSheet) unawaited(_resolveAndStart());
+  }
+
+  /// 弹层内预取：解析来源 → 取条目（单集再取剧集）→ 启动跨服务器查询。
+  /// 全程骨架卡占位，失败才关闭弹层并提示。
+  Future<void> _resolveAndStart() async {
+    final runtime = widget.runtime;
+    final stillHere = widget.stillHere;
+    if (runtime == null || stillHere == null) return;
+    try {
+      final origin =
+          widget.scopedOrigin ??
+          await runtime.resolve(
+            PlayerOpenRequest(
+              itemId: widget.itemId!,
+              accessGeneration: widget.selectedGeneration,
+            ),
+          );
+      if (!mounted || !stillHere() || !origin.permit.isValid) {
+        _closeAfterFrame();
+        return;
+      }
+      var dto = await origin.permit.dispatch(
+        (c) => c.getItem(origin.source.itemId),
+      );
+      EpisodeSource? episode;
+      if (dto.isEpisode && dto.seriesId != null) {
+        episode = EpisodeSource.fromMediaItem(origin.source, dto);
+        dto = await origin.permit.dispatch((c) => c.getItem(dto.seriesId!));
+      }
+      if (!mounted || !stillHere() || !origin.permit.isValid) {
+        _closeAfterFrame();
+        return;
+      }
+      _resolvedEpisode = episode;
+      final item = QueryItem(
+        SourceReference(account: origin.source.account, itemId: dto.id),
+        origin.libraryId,
+        dto,
+      );
+      unawaited(
+        widget.controller.start(origin: item, scope: QueryScope(pageSize: 24)),
+      );
+      if (mounted) setState(() => _resolved = true);
+    } catch (_) {
+      if (mounted && stillHere()) {
+        showAppNotice(
+          context,
+          AppLocalizations.of(context).sourceSelectionUnavailable,
+        );
+      }
+      _closeAfterFrame();
+    }
+  }
+
+  void _closeAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
 
   bool get _filtering =>
       _resolution != null ||
@@ -644,12 +911,69 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     );
   }
 
+  Widget _closeButton() => AppButton(
+    key: const Key('source-selection-close'),
+    autofocus: PresentationScope.of(context).isTv,
+    onPressed: () => Navigator.pop(context),
+    variant: AppButtonVariant.plain,
+    child: const Text('关闭'),
+  );
+
+  /// 桌面/TV 走居中对话框；手机底部弹层走带拖拽条的弹层框架，两者共用
+  /// 标题、内容与页脚，键盘快捷键只保留在桌面/TV。
+  Widget _frame({
+    required String title,
+    required Widget content,
+    required Widget footer,
+    Widget? caption,
+  }) {
+    if (widget.phoneSheet) {
+      return _SourceSelectionSheetFrame(
+        title: title,
+        scroll: _scroll,
+        content: content,
+        footer: footer,
+        caption: caption,
+      );
+    }
+    return _DialogKeyboard(
+      autofocus: !PresentationScope.of(context).isTv,
+      child: _SourceSelectionFrame(
+        title: title,
+        scroll: _scroll,
+        content: content,
+        footer: footer,
+        caption: caption,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
       final l = AppLocalizations.of(context);
       if (controller.origin == null) {
+        if (_sheetResolving) {
+          // 弹层解析来源中：骨架卡占位，页脚只有解析指示与关闭。
+          return _frame(
+            title: l.sourceSelectionAction,
+            content: const Column(
+              children: [
+                _SourceCardSkeleton(),
+                _SourceCardSkeleton(),
+                _SourceCardSkeleton(),
+              ],
+            ),
+            footer: Row(
+              children: [
+                const CupertinoActivityIndicator(),
+                const Spacer(),
+                _closeButton(),
+              ],
+            ),
+          );
+        }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (context.mounted && ModalRoute.of(context)?.isCurrent == true) {
             Navigator.of(context).pop();
@@ -683,53 +1007,49 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       final theme = AppUiTheme.of(context);
       final scheme = theme.colorScheme;
       if (passwordTarget != null) {
-        return _DialogKeyboard(
-          autofocus: !PresentationScope.of(context).isTv,
-          child: _SourceSelectionFrame(
-            title: l.sourceSelectionPasswordTitle,
-            scroll: _scroll,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  passwordTarget.displayName,
-                  style: theme.textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                PresentationScope.of(context).isTv
-                    ? TvServerUnlockForm(
-                        onSubmit: _verifyTarget,
-                        prompt: l.sourceSelectionPasswordPrompt,
-                        submitLabel: l.sourceSelectionUnlock,
-                        busy: _busy,
-                        unavailable: access.isUnavailable(passwordTarget.id),
-                        retryAt: access.retryAt(passwordTarget.id),
-                        error: _error,
-                      )
-                    : ServerUnlockForm(
-                        onSubmit: _verifyTarget,
-                        prompt: l.sourceSelectionPasswordPrompt,
-                        submitLabel: l.sourceSelectionUnlock,
-                        busy: _busy,
-                        unavailable: access.isUnavailable(passwordTarget.id),
-                        retryAt: access.retryAt(passwordTarget.id),
-                        error: _error,
-                      ),
-              ],
-            ),
-            footer: Align(
-              alignment: Alignment.centerRight,
-              child: AppButton(
-                key: const Key('source-selection-verification-cancel'),
-                onPressed: _busy
-                    ? null
-                    : () => setState(() {
-                        _passwordTarget = null;
-                        _error = null;
-                      }),
-                variant: AppButtonVariant.plain,
-                child: Text(l.cancelAction),
+        return _frame(
+          title: l.sourceSelectionPasswordTitle,
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                passwordTarget.displayName,
+                style: theme.textTheme.titleMedium,
               ),
+              const SizedBox(height: 12),
+              PresentationScope.of(context).isTv
+                  ? TvServerUnlockForm(
+                      onSubmit: _verifyTarget,
+                      prompt: l.sourceSelectionPasswordPrompt,
+                      submitLabel: l.sourceSelectionUnlock,
+                      busy: _busy,
+                      unavailable: access.isUnavailable(passwordTarget.id),
+                      retryAt: access.retryAt(passwordTarget.id),
+                      error: _error,
+                    )
+                  : ServerUnlockForm(
+                      onSubmit: _verifyTarget,
+                      prompt: l.sourceSelectionPasswordPrompt,
+                      submitLabel: l.sourceSelectionUnlock,
+                      busy: _busy,
+                      unavailable: access.isUnavailable(passwordTarget.id),
+                      retryAt: access.retryAt(passwordTarget.id),
+                      error: _error,
+                    ),
+            ],
+          ),
+          footer: Align(
+            alignment: Alignment.centerRight,
+            child: AppButton(
+              key: const Key('source-selection-verification-cancel'),
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _passwordTarget = null;
+                      _error = null;
+                    }),
+              variant: AppButtonVariant.plain,
+              child: Text(l.cancelAction),
             ),
           ),
         );
@@ -766,239 +1086,223 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       final failed = controller.sources.any((source) => source.failed);
       String? serverName(String id) =>
           servers.where((server) => server.id == id).firstOrNull?.displayName;
-      return _DialogKeyboard(
-        autofocus: !PresentationScope.of(context).isTv,
-        child: _SourceSelectionFrame(
-          title: l.sourceSelectionAction,
-          scroll: _scroll,
-          caption: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                controller.origin!.item.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium,
+      return _frame(
+        title: l.sourceSelectionAction,
+        caption: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              controller.origin!.item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              l.sourceSelectionHint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 4),
-              Text(
-                l.sourceSelectionHint,
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(_error!, style: TextStyle(color: scheme.error)),
+              ),
+            _filterBar(
+              l,
+              resolutions: resolutions,
+              ranges: ranges,
+              videos: videos,
+              subtitles: subtitles,
+              sounds: sounds,
+            ),
+            for (final server in servers)
+              if (!access.allows(server.id) &&
+                  controller.entryFor(server.id)?.isValid != true)
+                _LockedServerRow(
+                  server: server,
+                  lockedLabel: l.serversLocked,
+                  unlockLabel: l.sourceSelectionUnlock,
+                  enabled: !_busy,
+                  onUnlock: () {
+                    if (_scroll.hasClients) _scroll.jumpTo(0);
+                    setState(() {
+                      _passwordTarget = server;
+                      _error = null;
+                    });
+                  },
+                ),
+            if (controller.loading && shown.isEmpty) ...const [
+              _SourceCardSkeleton(),
+              _SourceCardSkeleton(),
+              _SourceCardSkeleton(),
+            ],
+            if (controller.complete && comparisons.isEmpty && unlocked)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                child: Center(
+                  child: Text(
+                    l.sourceSelectionEmpty,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            if (controller.complete && comparisons.isNotEmpty && shown.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: Text(
+                    l.sourceSelectionNoMatch,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            for (final comparison in shown)
+              _SourceCard(
+                cardKey: ValueKey(
+                  'source-selection-item-${comparison.source.reference.account.configuredServerId}-${comparison.source.reference.itemId}',
+                ),
+                serverName:
+                    serverName(
+                      comparison.source.reference.account.configuredServerId,
+                    ) ??
+                    '',
+                meta: _sourceMeta(l, comparison.source.item),
+                caution: comparison.decision.confirmed
+                    ? null
+                    : l.sourceSelectionCheckDetails,
+                faces: _versionFaces(comparison.source.item),
+                badges: [
+                  for (
+                    var i = 0;
+                    i < _versionFaces(comparison.source.item).length;
+                    i++
+                  )
+                    badges[_versionKey(comparison, i)],
+                ],
+                onOpen: _busy ? null : () => _openTarget(comparison.source),
+                lookup:
+                    episode != null &&
+                        comparison.decision.confirmed &&
+                        comparison.source.item.isSeries
+                    ? AppButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _lookupEpisode(context, comparison.source),
+                        variant: AppButtonVariant.tinted,
+                        child: Text(l.aggregationEpisodeLookup),
+                      )
+                    : null,
+              ),
+            if (failed)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: AppButton(
+                  onPressed: _busy
+                      ? null
+                      : () {
+                          for (final source in controller.sources.where(
+                            (source) => source.failed,
+                          )) {
+                            unawaited(controller.retry(source.key));
+                          }
+                        },
+                  variant: AppButtonVariant.outlined,
+                  style: const AppButtonStyle(
+                    minimumSize: Size(double.infinity, 40),
+                  ),
+                  child: Text(l.sourceSelectionRetry),
+                ),
+              ),
+            if (hasMore)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: AppButton(
+                  onPressed: _busy
+                      ? null
+                      : () {
+                          for (final source in controller.sources.where(
+                            (source) => source.hasMore && !source.failed,
+                          )) {
+                            unawaited(controller.loadMore(source.key));
+                          }
+                        },
+                  variant: AppButtonVariant.outlined,
+                  style: const AppButtonStyle(
+                    minimumSize: Size(double.infinity, 40),
+                  ),
+                  child: Text(l.sourceSelectionMore),
+                ),
+              ),
+            for (final result in controller.episodes)
+              _EpisodeStatusRow(
+                label: _episodeStatusLabel(l, result.lookup.status),
+                retryLabel: l.aggregationRetry,
+                onRetry: result.lookup.status == EpisodeLookupStatus.queryFailed
+                    ? () => _lookupEpisode(
+                        context,
+                        controller.comparisons
+                            .firstWhere(
+                              (comparison) =>
+                                  comparison.source.reference == result.target,
+                            )
+                            .source,
+                      )
+                    : null,
+                onOpen: result.lookup.source == null
+                    ? null
+                    : () {
+                        final target = controller.comparisons
+                            .firstWhere(
+                              (comparison) =>
+                                  comparison.source.reference == result.target,
+                            )
+                            .source;
+                        final ref = result.lookup.source!.reference;
+                        _openTarget(
+                          QueryItem(
+                            ref,
+                            target.libraryId,
+                            MediaItem(
+                              id: ref.itemId,
+                              name: l.aggregationEpisodeConfirmed,
+                              type: 'Episode',
+                            ),
+                          ),
+                        );
+                      },
+              ),
+          ],
+        ),
+        footer: Row(
+          children: [
+            if (controller.loading) ...[
+              const CupertinoActivityIndicator(),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                controller.loading && comparisons.isEmpty
+                    ? l.sourceSelectionSearching
+                    : l.sourceSelectionFound(
+                        _filtering ? shown.length : comparisons.length,
+                      ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(_error!, style: TextStyle(color: scheme.error)),
-                ),
-              _filterBar(
-                l,
-                resolutions: resolutions,
-                ranges: ranges,
-                videos: videos,
-                subtitles: subtitles,
-                sounds: sounds,
-              ),
-              for (final server in servers)
-                if (!access.allows(server.id) &&
-                    controller.entryFor(server.id)?.isValid != true)
-                  _LockedServerRow(
-                    server: server,
-                    lockedLabel: l.serversLocked,
-                    unlockLabel: l.sourceSelectionUnlock,
-                    enabled: !_busy,
-                    onUnlock: () {
-                      if (_scroll.hasClients) _scroll.jumpTo(0);
-                      setState(() {
-                        _passwordTarget = server;
-                        _error = null;
-                      });
-                    },
-                  ),
-              if (controller.loading && shown.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 28),
-                  child: Center(child: CupertinoActivityIndicator()),
-                ),
-              if (controller.complete && comparisons.isEmpty && unlocked)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 28),
-                  child: Center(
-                    child: Text(
-                      l.sourceSelectionEmpty,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              if (controller.complete &&
-                  comparisons.isNotEmpty &&
-                  shown.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  child: Center(
-                    child: Text(
-                      l.sourceSelectionNoMatch,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              for (final comparison in shown)
-                _SourceCard(
-                  cardKey: ValueKey(
-                    'source-selection-item-${comparison.source.reference.account.configuredServerId}-${comparison.source.reference.itemId}',
-                  ),
-                  serverName:
-                      serverName(
-                        comparison.source.reference.account.configuredServerId,
-                      ) ??
-                      '',
-                  meta: _sourceMeta(l, comparison.source.item),
-                  caution: comparison.decision.confirmed
-                      ? null
-                      : l.sourceSelectionCheckDetails,
-                  faces: _versionFaces(comparison.source.item),
-                  badges: [
-                    for (
-                      var i = 0;
-                      i < _versionFaces(comparison.source.item).length;
-                      i++
-                    )
-                      badges[_versionKey(comparison, i)],
-                  ],
-                  onOpen: _busy ? null : () => _openTarget(comparison.source),
-                  lookup:
-                      episode != null &&
-                          comparison.decision.confirmed &&
-                          comparison.source.item.isSeries
-                      ? AppButton(
-                          onPressed: _busy
-                              ? null
-                              : () =>
-                                    _lookupEpisode(context, comparison.source),
-                          variant: AppButtonVariant.tinted,
-                          child: Text(l.aggregationEpisodeLookup),
-                        )
-                      : null,
-                ),
-              if (failed)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: AppButton(
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            for (final source in controller.sources.where(
-                              (source) => source.failed,
-                            )) {
-                              unawaited(controller.retry(source.key));
-                            }
-                          },
-                    variant: AppButtonVariant.outlined,
-                    style: const AppButtonStyle(
-                      minimumSize: Size(double.infinity, 40),
-                    ),
-                    child: Text(l.sourceSelectionRetry),
-                  ),
-                ),
-              if (hasMore)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: AppButton(
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            for (final source in controller.sources.where(
-                              (source) => source.hasMore && !source.failed,
-                            )) {
-                              unawaited(controller.loadMore(source.key));
-                            }
-                          },
-                    variant: AppButtonVariant.outlined,
-                    style: const AppButtonStyle(
-                      minimumSize: Size(double.infinity, 40),
-                    ),
-                    child: Text(l.sourceSelectionMore),
-                  ),
-                ),
-              for (final result in controller.episodes)
-                _EpisodeStatusRow(
-                  label: _episodeStatusLabel(l, result.lookup.status),
-                  retryLabel: l.aggregationRetry,
-                  onRetry:
-                      result.lookup.status == EpisodeLookupStatus.queryFailed
-                      ? () => _lookupEpisode(
-                          context,
-                          controller.comparisons
-                              .firstWhere(
-                                (comparison) =>
-                                    comparison.source.reference ==
-                                    result.target,
-                              )
-                              .source,
-                        )
-                      : null,
-                  onOpen: result.lookup.source == null
-                      ? null
-                      : () {
-                          final target = controller.comparisons
-                              .firstWhere(
-                                (comparison) =>
-                                    comparison.source.reference ==
-                                    result.target,
-                              )
-                              .source;
-                          final ref = result.lookup.source!.reference;
-                          _openTarget(
-                            QueryItem(
-                              ref,
-                              target.libraryId,
-                              MediaItem(
-                                id: ref.itemId,
-                                name: l.aggregationEpisodeConfirmed,
-                                type: 'Episode',
-                              ),
-                            ),
-                          );
-                        },
-                ),
-            ],
-          ),
-          footer: Row(
-            children: [
-              if (controller.loading) ...[
-                const CupertinoActivityIndicator(),
-                const SizedBox(width: 8),
-              ],
-              Expanded(
-                child: Text(
-                  controller.loading && comparisons.isEmpty
-                      ? l.sourceSelectionSearching
-                      : l.sourceSelectionFound(
-                          _filtering ? shown.length : comparisons.length,
-                        ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              AppButton(
-                key: const Key('source-selection-close'),
-                autofocus: PresentationScope.of(context).isTv,
-                onPressed: () => Navigator.pop(context),
-                variant: AppButtonVariant.plain,
-                child: const Text('关闭'),
-              ),
-            ],
-          ),
+            ),
+            _closeButton(),
+          ],
         ),
       );
     },

@@ -2,13 +2,13 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/update_check_cases.dart' as case1;
-import '../app/update_ui_cases.dart' as case2;
-import '../catalog/desktop_provider_filter_cases.dart' as case3;
-import '../home/hero_playback_actions_cases.dart' as case4;
-import '../home/library_tiles_cases.dart' as case5;
-import '../library/album_cases.dart' as case6;
-import '../mobile/mobile_flow_cases.dart' as case7;
+import '../app/app_shell_top_bar_cases.dart' as case1;
+import '../app/artwork_mood_cases.dart' as case2;
+import '../app/update_ui_cases.dart' as case3;
+import '../auth/connect_page_cases.dart' as case4;
+import '../catalog/desktop_provider_filter_cases.dart' as case5;
+import '../mobile/mobile_flow_cases.dart' as case6;
+import '../mobile/phone_detail_redesign_cases.dart' as case7;
 import '../mobile/phone_player_cases.dart' as case8;
 import '../tv/tv_focus_cases.dart' as case9;
 import '../widgets/desktop_back_button_cases.dart' as case10;
@@ -20,13 +20,13 @@ void main() {
     'aggregation/presentation_test.dart [part 4]',
     () => case0.mainShard(3, 6),
   );
-  group('app/update_check_test.dart', case1.main);
-  group('app/update_ui_test.dart', case2.main);
-  group('catalog/desktop_provider_filter_test.dart', case3.main);
-  group('home/hero_playback_actions_test.dart', case4.main);
-  group('home/library_tiles_test.dart', case5.main);
-  group('library/album_test.dart', case6.main);
-  group('mobile/mobile_flow_test.dart [part 4]', () => case7.mainShard(3, 4));
+  group('app/app_shell_top_bar_test.dart', case1.main);
+  group('app/artwork_mood_test.dart', case2.main);
+  group('app/update_ui_test.dart', case3.main);
+  group('auth/connect_page_test.dart', case4.main);
+  group('catalog/desktop_provider_filter_test.dart', case5.main);
+  group('mobile/mobile_flow_test.dart [part 4]', () => case6.mainShard(3, 4));
+  group('mobile/phone_detail_redesign_test.dart', case7.main);
   group('mobile/phone_player_test.dart [part 1]', () => case8.mainShard(0, 4));
   group('tv/tv_focus_test.dart', case9.main);
   group('widgets/desktop_back_button_test.dart', case10.main);

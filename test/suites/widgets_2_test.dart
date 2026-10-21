@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/artwork_mood_cases.dart' as case1;
-import '../app/desktop_scroll_cases.dart' as case2;
-import '../app/update_app_cases.dart' as case3;
-import '../auth/connect_page_cases.dart' as case4;
-import '../auth/provider_connect_routing_cases.dart' as case5;
+import '../app/desktop_scroll_cases.dart' as case1;
+import '../app/home_failure_cases.dart' as case2;
+import '../auth/backup_import/backup_import_flow_cases.dart' as case3;
+import '../auth/provider_connect_routing_cases.dart' as case4;
+import '../mobile/phone_nav_style_cases.dart' as case5;
 import '../mobile/phone_pages_cases.dart' as case6;
-import '../player/buffer_snapshot_cases.dart' as case7;
-import '../player/phone_presentation_lifecycle_cases.dart' as case8;
-import '../player/player_window_cases.dart' as case9;
-import '../tv/tv_detail_header_scale_cases.dart' as case10;
+import '../player/player_cache_status_cases.dart' as case7;
+import '../player/player_window_cases.dart' as case8;
+import '../tv/tv_detail_header_scale_cases.dart' as case9;
+import '../widgets/app_button_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 2]',
     () => case0.mainShard(1, 6),
   );
-  group('app/artwork_mood_test.dart', case1.main);
-  group('app/desktop_scroll_test.dart', case2.main);
-  group('app/update_app_test.dart', case3.main);
-  group('auth/connect_page_test.dart', case4.main);
-  group('auth/provider_connect_routing_test.dart', case5.main);
+  group('app/desktop_scroll_test.dart', case1.main);
+  group('app/home_failure_test.dart', case2.main);
+  group('auth/backup_import/backup_import_flow_test.dart', case3.main);
+  group('auth/provider_connect_routing_test.dart', case4.main);
+  group('mobile/phone_nav_style_test.dart', case5.main);
   group('mobile/phone_pages_test.dart [part 3]', () => case6.mainShard(2, 3));
-  group('player/buffer_snapshot_test.dart', case7.main);
-  group('player/phone_presentation_lifecycle_test.dart', case8.main);
-  group('player/player_window_test.dart', case9.main);
-  group('tv/tv_detail_header_scale_test.dart', case10.main);
+  group('player/player_cache_status_test.dart', case7.main);
+  group('player/player_window_test.dart', case8.main);
+  group('tv/tv_detail_header_scale_test.dart', case9.main);
+  group('widgets/app_button_test.dart', case10.main);
 }

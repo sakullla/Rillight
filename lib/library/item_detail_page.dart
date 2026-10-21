@@ -3118,7 +3118,20 @@ class _DetailActions extends StatelessWidget {
           onSelected: (value) =>
               onSubtitle?.call(value == _subtitleOffToken ? null : value),
         ),
+      // 跨服务器选择影片来源：与状态/轨道圆钮同族，说明走 tooltip。
+      if (SourceSelectionAction.availableIn(context))
+        SourceSelectionAction(
+          builder: (context, view) => _detailToolButton(
+            context,
+            key: SourceSelectionActionView.key,
+            tooltip: view.label,
+            icon: Icon(view.icon, size: 20),
+            onPressed: view.loading ? null : view.onPressed,
+          ),
+        ),
     ];
+    // 两组之间 16 留白、组内 12：导航带字胶囊（播放/从头/上下集）与
+    // 状态圆钮（已看/片源/音轨/字幕/跨服务器片源）各自成组，窄窗整组折行。
     return Wrap(
       spacing: AppSpacing.md,
       runSpacing: AppSpacing.sm,
@@ -3131,23 +3144,12 @@ class _DetailActions extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: primary,
           ),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: tools,
-        ),
-        // 跨服务器选择影片来源：与圆钮组并列的带字胶囊，随详情内容滚动。
-        if (SourceSelectionAction.availableIn(context))
-          SourceSelectionAction(
-            builder: (context, view) => AppButton.icon(
-              key: SourceSelectionActionView.key,
-              onPressed: view.loading ? null : view.onPressed,
-              style: ghost,
-              icon: Icon(view.icon, size: 20),
-              label: Text(view.label),
-              variant: AppButtonVariant.outlined,
-            ),
+        if (tools.isNotEmpty)
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: tools,
           ),
       ],
     );

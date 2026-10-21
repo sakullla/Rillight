@@ -8,8 +8,9 @@ import 'package:rillight/media_server/models.dart';
 
 /// 顶栏「浏览」入口:一次展开首页、聚合与全部媒体库。
 ///
-/// 首页/聚合本身已有直接导航,所以在那些页面不显示本按钮。片库、货架、
-/// 详情与人物页把它放在搜索左侧,两次操作内即可到达三个浏览目的地。
+/// 首页/聚合本身已有直接导航,详情页顶栏只保留返回/搜索/账户,
+/// 所以在那些页面不显示本按钮。片库、货架与人物页把它放在搜索左侧,
+/// 两次操作内即可到达三个浏览目的地。
 class BrowseMenuButton extends StatefulWidget {
   const BrowseMenuButton({
     super.key,

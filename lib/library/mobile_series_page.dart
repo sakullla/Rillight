@@ -51,7 +51,6 @@ class PhoneItemBanner extends StatelessWidget {
     this.titleWidget,
     this.meta = const [],
     this.pendingMeta,
-    this.statusActions,
     this.actions,
     this.onTitleTap,
     this.titleHint,
@@ -80,10 +79,6 @@ class PhoneItemBanner extends StatelessWidget {
   final Widget? titleWidget;
   final List<PhoneMetaEntry> meta;
   final Widget? pendingMeta;
-
-  /// 头部右上角的状态操作（收藏、标记已看、选择影片来源）：有海报时在海报右上方，
-  /// 单集在引导行右侧。窄屏时按宽度换行。
-  final Widget? statusActions;
   final Widget? actions;
 
   /// 单集标题进所属剧集。非空时标题上方带剧集名和箭头。
@@ -168,7 +163,6 @@ class PhoneItemBanner extends StatelessWidget {
               title: title,
               hint: onTitleTap == null ? null : titleHint,
               onTap: onTitleTap,
-              trailing: showPoster ? null : statusActions,
               compact: showPoster,
             ),
         if (meta.isNotEmpty || pendingMeta != null) ...[
@@ -258,21 +252,9 @@ class PhoneItemBanner extends StatelessWidget {
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisAlignment: statusActions != null
-                              ? MainAxisAlignment.spaceBetween
-                              : MainAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.end,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (statusActions != null)
-                              Align(
-                                alignment: Alignment.topRight,
-                                child: Padding(
-                                  padding: const EdgeInsets.only(
-                                    bottom: AppSpacing.xs,
-                                  ),
-                                  child: statusActions,
-                                ),
-                              ),
                             Padding(
                               padding: const EdgeInsets.only(bottom: 2),
                               child: titleBlock,
@@ -454,14 +436,12 @@ class _BannerTitle extends StatelessWidget {
     required this.title,
     this.hint,
     this.onTap,
-    this.trailing,
     this.compact = false,
   });
 
   final String title;
   final String? hint;
   final VoidCallback? onTap;
-  final Widget? trailing;
   final bool compact;
 
   @override
@@ -477,78 +457,50 @@ class _BannerTitle extends StatelessWidget {
       ),
     );
     final hint = this.hint;
-    final trailing = this.trailing;
-    if ((hint == null || hint.isEmpty) && trailing == null) {
+    if (hint == null || hint.isEmpty) {
       return heading;
     }
-    Widget? overlineWidget;
-    if (hint != null && hint.isNotEmpty) {
-      final overline = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: Text(
-              hint,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w700,
-              ),
+    final overline = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            hint,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          if (onTap != null)
-            Icon(
-              AppIcons.chevronRight,
-              fill: AppIcons.filled,
-              size: 20,
-              color: theme.colorScheme.primary,
-            ),
-        ],
-      );
-      overlineWidget = onTap == null
-          ? overline
-          : AppSurfaceAction(
-              key: CatalogKeys.seriesLink,
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 34),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: 1,
-                  child: overline,
-                ),
+        ),
+        if (onTap != null)
+          Icon(
+            AppIcons.chevronRight,
+            fill: AppIcons.filled,
+            size: 20,
+            color: theme.colorScheme.primary,
+          ),
+      ],
+    );
+    final overlineWidget = onTap == null
+        ? overline
+        : AppSurfaceAction(
+            key: CatalogKeys.seriesLink,
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppRadii.sm),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 34),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                widthFactor: 1,
+                child: overline,
               ),
-            );
-    }
+            ),
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (overlineWidget != null && trailing != null)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(child: overlineWidget),
-              const SizedBox(width: AppSpacing.xs),
-              Flexible(
-                flex: 2,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  widthFactor: 1,
-                  child: trailing,
-                ),
-              ),
-            ],
-          )
-        else if (overlineWidget != null)
-          overlineWidget
-        else if (trailing != null)
-          Align(alignment: Alignment.centerRight, child: trailing),
-        const SizedBox(height: 4),
-        heading,
-      ],
+      children: [overlineWidget, const SizedBox(height: 4), heading],
     );
   }
 }
@@ -1189,7 +1141,7 @@ class _EpisodeRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onPlay;
 
-  static const double _thumbWidth = 136;
+  static const double _thumbWidth = 152;
 
   @override
   Widget build(BuildContext context) {
@@ -1209,7 +1161,7 @@ class _EpisodeRow extends StatelessWidget {
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.titleSmall?.copyWith(
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: FontWeight.w600,
         height: 1.3,
         color: current
@@ -1291,14 +1243,6 @@ class _EpisodeRow extends StatelessWidget {
                                   ),
                                 ],
                               ],
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            AppIcons.chevronRight,
-                            size: 16,
-                            color: scheme.onSurfaceVariant.withValues(
-                              alpha: .48,
                             ),
                           ),
                         ],
