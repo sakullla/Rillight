@@ -180,18 +180,14 @@ void main() {
 
   /// 鼠标单击/双击：桌面真实点击以 mouse 设备上报(tester.tap 默认 touch)。
   Future<void> mouseClick(WidgetTester tester, Offset position) async {
-    final gesture = await tester.createGesture(
-      kind: PointerDeviceKind.mouse,
-    );
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.down(position);
     await gesture.up();
     await gesture.removePointer();
   }
 
   Future<void> mouseDoubleClick(WidgetTester tester, Offset position) async {
-    final gesture = await tester.createGesture(
-      kind: PointerDeviceKind.mouse,
-    );
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.down(position);
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 100));
@@ -263,10 +259,7 @@ void main() {
         ),
       ),
     );
-    await mouseDoubleClick(
-      tester,
-      const Offset(100, 100),
-    );
+    await mouseDoubleClick(tester, const Offset(100, 100));
     await tester.pump(const Duration(milliseconds: 400));
     expect(fullscreen, [true]);
   }, variant: const TargetPlatformVariant({TargetPlatform.macOS}));
@@ -290,10 +283,7 @@ void main() {
           ),
         ),
       );
-      await mouseDoubleClick(
-        tester,
-        const Offset(100, 100),
-      );
+      await mouseDoubleClick(tester, const Offset(100, 100));
       await tester.pump(const Duration(milliseconds: 400));
       expect(fullscreen, isEmpty);
     },

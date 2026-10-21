@@ -5248,6 +5248,24 @@ abstract class AppLocalizations {
   /// **'选择影片来源'**
   String get sourceSelectionAction;
 
+  /// No description provided for @sourceSelectionShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他来源'**
+  String get sourceSelectionShort;
+
+  /// No description provided for @detailPlayedDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已看过'**
+  String get detailPlayedDone;
+
+  /// No description provided for @detailPlaybackOptions.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放选项'**
+  String get detailPlaybackOptions;
+
   /// No description provided for @sourceSelectionEmpty.
   ///
   /// In zh, this message translates to:

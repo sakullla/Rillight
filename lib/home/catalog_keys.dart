@@ -10,6 +10,7 @@ abstract final class CatalogKeys {
   static const searchSubmit = Key('catalog-search-submit');
   static const searchNoResults = Key('catalog-search-no-results');
   static const playedToggle = Key('catalog-played-toggle');
+  static const favoriteToggle = Key('catalog-favorite-toggle');
   static const resumeProgress = Key('catalog-resume-progress');
   static const back = Key('catalog-back');
   static const seriesLink = Key('catalog-series-link');

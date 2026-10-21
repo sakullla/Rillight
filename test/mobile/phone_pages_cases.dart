@@ -1619,9 +1619,12 @@ void main() {
           find.byKey(const Key('phone-detail-favorite')),
         );
         final seriesPlay = tester.getRect(play);
-        // 状态圆钮与播放钮同左边距，排在播放钮下方的圆钮组里。
-        expect(seriesFavorite.left, closeTo(seriesPoster.left, 1));
-        expect(seriesFavorite.top, greaterThan(seriesPlay.bottom));
+        // 收藏是作品级操作，固定在顶栏右上角；剧集页播放钮下方不再为两枚
+        // 低频圆钮单占一行。
+        expect(seriesFavorite.right, greaterThan(360 - 56));
+        expect(seriesFavorite.bottom, lessThan(seriesPoster.top + 8));
+        expect(seriesFavorite.top, lessThan(seriesPlay.top));
+        expect(find.byKey(const Key('phone-detail-actions')), findsNothing);
         expect(seriesPlay.width, closeTo(360 - 32, 1));
         expect(
           tester
@@ -1673,13 +1676,23 @@ void main() {
           find.byKey(const Key('phone-detail-play-start')),
         );
         final episodeNext = tester.getRect(find.byKey(CatalogKeys.nextEpisode));
-        expect(episodeFavorite.top, greaterThan(episodePlay.bottom));
+        expect(episodeFavorite.bottom, lessThan(episodePlay.top));
         expect(episodePlayed.top, greaterThan(episodePlay.bottom));
         expect(episodeRestart.top, greaterThan(episodePlay.bottom));
         expect(episodeNext.top, closeTo(episodeRestart.top, 1));
-        // 次级操作全部是图标圆钮，说明由 tooltip 承担。
+        // 观看流程钮带可见标签；收藏在顶栏，说明由 tooltip 承担。
         for (final tip in ['收藏', '标记已看', '从头播放', '下一集']) {
           expect(findAppTooltip(tip), findsOneWidget, reason: tip);
+        }
+        for (final label in ['标记已看', '从头播放', '下一集']) {
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('phone-detail-actions')),
+              matching: find.text(label),
+            ),
+            findsOneWidget,
+            reason: label,
+          );
         }
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await settle(tester);

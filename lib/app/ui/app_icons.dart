@@ -101,6 +101,10 @@ abstract final class AppIcons {
   static const IconData episodes = Symbols.format_list_bulleted_rounded;
   static const IconData series = Symbols.tv_rounded;
   static const IconData mediaSource = Symbols.video_file_rounded;
+
+  /// 地球加放大镜。到其他服务器找同一部影片只用这一个图形，和 [search] 不同，
+  /// 避免与全局搜索混淆。
+  static const IconData otherSources = Symbols.travel_explore_rounded;
   static const IconData music = Symbols.music_note_rounded;
   static const IconData musicVideo = Symbols.music_video_rounded;
   static const IconData liveTv = Symbols.live_tv_rounded;

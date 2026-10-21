@@ -436,13 +436,16 @@ class _TopBar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // 近实底 surface 带加下沿淡出:白海报上的文字与图标不再依赖
-          // 图片明暗。沉浸页多一层模糊,滚动后的详情也不再铺黑色薄层。
+          // 近实底 surface 带加缓动淡出:白海报上的文字与图标不再依赖
+          // 图片明暗。浅色首页是实心条,海报从下沿清晰开始,不铺白雾。
           Positioned(
             left: 0,
             right: 0,
             top: 0,
-            child: TopBarBackdrop(height: height, blur: !opaque),
+            child: TopBarBackdrop(
+              height: height,
+              fade: !(light && location == AppRoutes.home),
+            ),
           ),
           Container(
             decoration: BoxDecoration(),

@@ -136,6 +136,24 @@ class _TvDetailPageState extends State<TvDetailPage> {
     showAppNotice(context, next ? l.markPlayed : l.markUnplayed);
   }
 
+  Future<void> _toggleFavorite() async {
+    final c = _controller!;
+    final item = c.item;
+    if (item == null) return;
+    final next = !item.userData.favorite;
+    final ok = await c.toggleFavorite();
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
+    showAppNotice(
+      context,
+      !ok
+          ? l.phoneFavoriteFailed
+          : next
+          ? l.phoneFavoriteAdded
+          : l.phoneFavoriteRemoved,
+    );
+  }
+
   void _loadNeighbors(MediaItem item) {
     if (!item.isEpisode || _neighborsFor == item.id) return;
     _neighborsFor = item.id;
@@ -381,6 +399,21 @@ class _TvDetailPageState extends State<TvDetailPage> {
           onPressed: () => _openEpisode(_next!),
           child: Text(l.nextEpisode),
         ),
+      // 收藏、已看紧跟导航动作，三类详情页位置一致；遥控器没有悬停，
+      // 一律带字。
+      if (c.supportsFavorite)
+        TvAction(
+          key: const Key('tv-detail-favorite'),
+          pill: true,
+          leading: Icon(
+            AppIcons.favorite,
+            fill: item.userData.favorite ? AppIcons.filled : AppIcons.outline,
+          ),
+          onPressed: c.favoriteBusy ? null : _toggleFavorite,
+          child: Text(
+            item.userData.favorite ? l.phoneFavorited : l.phoneFavorite,
+          ),
+        ),
       if (!item.isSeries)
         TvAction(
           key: const Key('tv-detail-played-toggle'),
@@ -393,18 +426,20 @@ class _TvDetailPageState extends State<TvDetailPage> {
           onPressed: c.playedBusy ? null : _togglePlayed,
           child: Text(item.userData.played ? l.markUnplayed : l.markPlayed),
         ),
-      // 跨服务器选择影片来源：头部按钮行里的图标钮（D-pad 可达，聚焦反相），
-      // 说明走语义标签；打开对话框期间保持可聚焦，关闭后焦点回到这里。
+      // 跨服务器「其他来源」：电视没有悬停提示，图标钮读不出含义，
+      // 改为带字胶囊排在行尾；打开对话框期间保持可聚焦，关闭后焦点回到这里。
       if (SourceSelectionAction.availableIn(context))
         SourceSelectionAction(
           builder: (context, view) => Semantics(
             button: true,
             label: view.label,
+            excludeSemantics: true,
             child: TvAction(
               key: SourceSelectionActionView.key,
-              variant: TvActionVariant.icon,
+              pill: true,
+              leading: Icon(view.icon),
               onPressed: view.onPressed,
-              child: Icon(view.icon),
+              child: Text(view.shortLabel),
             ),
           ),
         ),

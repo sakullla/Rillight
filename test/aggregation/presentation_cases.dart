@@ -1,3 +1,4 @@
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
@@ -2613,14 +2614,23 @@ void main() {
               ? find.byType(ItemDetailPage)
               : find.byType(MobileDetailPage);
           expect(find.descendant(of: page, matching: entry), findsOneWidget);
-          expect(
-            find.ancestor(of: entry, matching: find.byType(Scrollable)),
-            findsWidgets,
-          );
-          expect(
-            find.ancestor(of: entry, matching: find.byType(Positioned)),
-            findsNothing,
-          );
+          if (environment.isDesktop || environment.isTv) {
+            expect(
+              find.ancestor(of: entry, matching: find.byType(Scrollable)),
+              findsWidgets,
+            );
+            expect(
+              find.ancestor(of: entry, matching: find.byType(Positioned)),
+              findsNothing,
+            );
+          } else {
+            // 手机端「其他来源」是作品级操作，固定在详情页自己的顶栏右上角
+            // （页面 chrome，不是叠在内容上的悬浮钮）。
+            expect(
+              find.ancestor(of: entry, matching: find.byType(PhoneTopBar)),
+              findsOneWidget,
+            );
+          }
           if (environment.isTv) {
             // D-pad reaches the entry from the header play action。入口是
             // 图标钮（无 Text 子节点），以「主焦点落在入口子树内」判定。

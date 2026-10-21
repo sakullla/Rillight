@@ -159,27 +159,40 @@ void main() {
     expect(AppShell.topBarHeight, 56);
     expect(AppShell.topFadeHeight, 36);
     expect(backdrop(tester).height, AppShell.topBarHeight);
-    expect(backdrop(tester).blur, isFalse);
+    expect(backdrop(tester).fade, isTrue);
     expect(fadeGradient(), findsOneWidget);
+    // 实体带铺满整宽:旧实现的无子 ColoredBox 在 Column 里塌成 0 宽,
+    // 顶栏透明、只剩淡出带悬在下面,看起来像一道玻璃纹。
+    final band = tester.getSize(
+      find.descendant(
+        of: barStack(),
+        matching: find.byKey(TopBarBackdrop.bandKey),
+      ),
+    );
+    expect(
+      band.width,
+      tester.view.physicalSize.width / tester.view.devicePixelRatio,
+    );
+    expect(band.height, AppShell.topBarHeight);
   });
 
   testWidgets('light home bar is solid instead of fogging the hero', (
     tester,
   ) async {
     await pump(tester, AppRoutes.home, light: true);
-    expect(backdrop(tester).blur, isFalse);
-    expect(fadeGradient(), findsOneWidget);
+    expect(backdrop(tester).fade, isFalse);
+    expect(fadeGradient(), findsNothing);
   });
 
   testWidgets('home keeps the fading top scrim', (tester) async {
     await pump(tester, AppRoutes.home);
-    expect(backdrop(tester).blur, isTrue);
+    expect(backdrop(tester).fade, isTrue);
     expect(fadeGradient(), findsOneWidget);
   });
 
   testWidgets('detail and shelf pages share the same backdrop', (tester) async {
     await pump(tester, AppRoutes.item('movie-inception'));
-    expect(backdrop(tester).blur, isTrue);
+    expect(backdrop(tester).fade, isTrue);
     expect(fadeGradient(), findsOneWidget);
   });
 

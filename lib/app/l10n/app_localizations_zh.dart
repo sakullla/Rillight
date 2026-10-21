@@ -2724,6 +2724,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sourceSelectionAction => '选择影片来源';
 
   @override
+  String get sourceSelectionShort => '其他来源';
+
+  @override
+  String get detailPlayedDone => '已看过';
+
+  @override
+  String get detailPlaybackOptions => '播放选项';
+
+  @override
   String get sourceSelectionEmpty => '暂未找到其他来源';
 
   @override

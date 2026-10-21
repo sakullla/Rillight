@@ -249,10 +249,16 @@ class SourceSelectionActionView {
     required this.icon,
     required this.loading,
     required this.onPressed,
-  });
+    String? shortLabel,
+  }) : shortLabel = shortLabel ?? label;
 
   static const Key key = Key('source-selection-open');
+
+  /// 完整说明（tooltip/读屏）。
   final String label;
+
+  /// 按钮上可见的短标签（「其他来源」）。
+  final String shortLabel;
   final IconData icon;
 
   /// True while the dialog's origin is resolving or the dialog is open.
@@ -420,7 +426,8 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
     }
     final view = SourceSelectionActionView(
       label: AppLocalizations.of(context).sourceSelectionAction,
-      icon: AppIcons.search,
+      shortLabel: AppLocalizations.of(context).sourceSelectionShort,
+      icon: AppIcons.otherSources,
       loading: _loading,
       onPressed: _show,
     );

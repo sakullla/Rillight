@@ -58,6 +58,12 @@ class ItemDetailPage extends StatefulWidget {
   /// 头部标题。年份与评分移到标题下的元信息行，与手机详情一致。
   static const titleKey = Key('detail-title');
 
+  /// 头部动作行：播放/导航带字胶囊 + 收藏/已看状态圆钮。
+  static const actionRowKey = Key('detail-action-row');
+
+  /// 头部播放选项行：片源/音轨/字幕当前值下拉与「其他来源」。
+  static const optionRowKey = Key('detail-option-row');
+
   /// 头部最小高度(不含顶栏叠加),骨架与真实头部共用同一算法。
   static double headerHeightFor(double width, double viewportHeight) {
     return _DetailHeader.heightFor(width, viewportHeight);
@@ -106,6 +112,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   MediaItem? _nextEpisode;
   bool _loading = true;
   bool _busyPlayed = false;
+  bool _busyFavorite = false;
   final _busyPlayedIds = <String>{};
   MediaServerException? _error;
   MediaServerException? _similarError;
@@ -989,6 +996,52 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     await _setItemPlayed(item, played);
   }
 
+  /// 收藏：乐观更新，写入失败回滚并提示；与手机/电视的收藏语义一致。
+  Future<void> _setFavorite(bool favorite) async {
+    final item = _item;
+    final Object client = DetailSourceScope.clientOf(context);
+    if (item == null || _busyFavorite || client is! MediaFavorites) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context);
+    final previous = item.userData.favorite;
+    setState(() {
+      _busyFavorite = true;
+      _item = item.copyWith(
+        userData: item.userData.copyWith(favorite: favorite),
+      );
+    });
+    var ok = true;
+    try {
+      await client.setFavorite(item.id, favorite: favorite);
+    } catch (_) {
+      ok = false;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _busyFavorite = false;
+      final latest = _item;
+      if (!ok && latest != null && latest.id == item.id) {
+        _item = latest.copyWith(
+          userData: latest.userData.copyWith(favorite: previous),
+        );
+      }
+    });
+    showAppNotice(
+      context,
+      !ok
+          ? l10n.phoneFavoriteFailed
+          : favorite
+          ? l10n.phoneFavoriteAdded
+          : l10n.phoneFavoriteRemoved,
+    );
+    if (ok) {
+      unawaited(CatalogScope.maybeOf(context)?.reloadHomeRows());
+    }
+  }
+
   MediaUserData _optimisticPlayed(
     MediaUserData current, {
     required bool played,
@@ -1349,6 +1402,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           onPlayedChanged: (value) {
             _setPlayed(value);
           },
+          busyFavorite: _busyFavorite,
+          onFavoriteChanged:
+              DetailSourceScope.clientOf(context) is MediaFavorites
+              ? (value) => unawaited(_setFavorite(value))
+              : null,
         ),
       ),
       if (item.isEpisode) ...[
@@ -2328,6 +2386,8 @@ class _DetailHeader extends StatelessWidget {
     required this.onPlay,
     required this.onPlayedChanged,
     this.onPlayFromStart,
+    this.busyFavorite = false,
+    this.onFavoriteChanged,
     this.topOverlap = 0,
     this.seasonCount = 0,
     this.seriesId,
@@ -2356,6 +2416,8 @@ class _DetailHeader extends StatelessWidget {
   final VoidCallback? onPlay;
   final ValueChanged<bool> onPlayedChanged;
   final VoidCallback? onPlayFromStart;
+  final bool busyFavorite;
+  final ValueChanged<bool>? onFavoriteChanged;
   final double topOverlap;
   final int seasonCount;
   final String? seriesId;
@@ -2524,6 +2586,8 @@ class _DetailHeader extends StatelessWidget {
                             onOpenPreviousEpisode: onOpenPreviousEpisode,
                             onOpenNextEpisode: onOpenNextEpisode,
                             onPlayedChanged: onPlayedChanged,
+                            busyFavorite: busyFavorite,
+                            onFavoriteChanged: onFavoriteChanged,
                             playEpisode: item.isSeries ? nextEpisode : null,
                             mediaSourceId: mediaSourceId,
                             audioStreamIndex: audioStreamIndex,
@@ -2789,20 +2853,15 @@ class _MetaRow extends StatelessWidget {
       );
     }
 
-    final listed = playEpisode;
-    final playCode = listed != null && listed.isEpisode
-        ? seasonEpisodeCode(listed) ?? episodeLabel(listed)
-        : null;
-
+    // 剧集要播哪一集已写在播放钮上，元信息行不再重复一枚集标胶囊。
     final year = item.productionYear;
     final facts = <String>[
       if (!item.isEpisode && year != null && year > 0) '$year',
       ?runtime,
       if (item.isEpisode && item.premiereDate != null)
         l10n.premiereDate(formatDateYmd(item.premiereDate!)),
+      // Emby 剧集的 ChildCount 是季数，不再误标成「N 集」。
       if (item.isSeries && seasonCount > 0) l10n.seasonCount(seasonCount),
-      if (item.childCount != null && item.isSeries)
-        l10n.episodeCount(item.childCount!),
     ];
     final rating = item.isEpisode ? null : item.communityRating;
     final actions = <Widget>[
@@ -2810,13 +2869,6 @@ class _MetaRow extends StatelessWidget {
         locateChip(
           seasonEpisodeCode(item) ?? episodeLabel(item),
           onTap: onLocateEpisode,
-        ),
-      if (item.isSeries && playCode != null)
-        locateChip(
-          playCode,
-          onTap: onLocateEpisode,
-          tooltip: l10n.locateEpisode,
-          key: CatalogKeys.playTarget,
         ),
     ];
     final factStyle = theme.textTheme.bodyMedium?.copyWith(
@@ -2923,8 +2975,17 @@ AppButtonStyle _detailGhostButtonStyle(AppColorScheme scheme) {
   );
 }
 
-/// 操作区:播放/从头播放/下一集一组,已看与片源/音轨/字幕
-/// 圆钮一组,两组之间以 [AppSpacing.md] 分隔。
+/// 操作区按用户在详情页的三个问题分成两行：
+///
+/// 1. **动作行**——「按下去会怎样」：带字主钮「播放」（写明续播/哪一集），
+///    再跟同高带字胶囊「从头播放 / 上一集 / 下一集」（动词，靠文字表意）；
+///    组尾是个人状态圆钮「收藏 / 已看」（通用图形，实心=已激活）。
+///    收藏、已看在电影/单集/剧集页都在同一相对位置，形成肌肉记忆。
+/// 2. **播放选项行**——「这次播的是什么」：片源/音轨/字幕是选择而不是动作，
+///    当前值必须看得见，所以做成「图标 + 当前值 + ˅」的安静下拉胶囊，
+///    不用再悬停逐个猜；行尾「其他来源」打开跨服务器同片查找。
+///
+/// 两行都允许窄窗折行；没有可选项时整行不画。
 class _DetailActions extends StatelessWidget {
   const _DetailActions({
     required this.item,
@@ -2941,6 +3002,8 @@ class _DetailActions extends StatelessWidget {
     this.onMediaSource,
     this.onAudio,
     this.onSubtitle,
+    this.busyFavorite = false,
+    this.onFavoriteChanged,
   });
 
   final MediaItem item;
@@ -2957,6 +3020,10 @@ class _DetailActions extends StatelessWidget {
   final ValueChanged<String>? onMediaSource;
   final ValueChanged<int>? onAudio;
   final ValueChanged<int?>? onSubtitle;
+  final bool busyFavorite;
+
+  /// 服务器支持收藏时才有；为空则不画收藏钮。
+  final ValueChanged<bool>? onFavoriteChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2970,7 +3037,7 @@ class _DetailActions extends StatelessWidget {
     String sourceLabel = '';
     for (final source in item.mediaSources) {
       if (source.id == sourceId) {
-        sourceLabel = source.presentation.compact;
+        sourceLabel = phoneSourceVersionLabel(source, item.mediaSources);
         break;
       }
     }
@@ -2992,6 +3059,7 @@ class _DetailActions extends StatelessWidget {
     }
     final ghost = _detailGhostButtonStyle(scheme);
     final played = item.userData.played;
+    final favorite = item.userData.favorite;
     final resume = onPlayFromStart != null || item.canResume;
     final listed = playEpisode;
     final playCode = listed != null && listed.isEpisode
@@ -3002,7 +3070,7 @@ class _DetailActions extends StatelessWidget {
         : (resume
               ? l10n.resumePlayEpisode(playCode)
               : l10n.playEpisode(playCode));
-    final primary = <Widget>[
+    final navigation = <Widget>[
       if (onPlay != null)
         AppButton.icon(
           key: PlayerKeys.open,
@@ -3020,12 +3088,13 @@ class _DetailActions extends StatelessWidget {
           variant: AppButtonVariant.filled,
         ),
       if (onPlayFromStart != null)
-        AppButton(
+        AppButton.icon(
           key: PlayerKeys.resumeFromStart,
           onPressed: onPlayFromStart,
           style: ghost,
           variant: AppButtonVariant.outlined,
-          child: Text(l10n.playFromStart),
+          icon: const Icon(AppIcons.replay),
+          label: Text(l10n.playFromStart),
         ),
       if (onOpenPreviousEpisode != null)
         AppButton.icon(
@@ -3046,28 +3115,51 @@ class _DetailActions extends StatelessWidget {
           variant: AppButtonVariant.outlined,
         ),
     ];
+    final status = <Widget>[
+      if (onFavoriteChanged != null)
+        Semantics(
+          toggled: favorite,
+          child: _detailToolButton(
+            context,
+            key: CatalogKeys.favoriteToggle,
+            tooltip: favorite ? l10n.phoneFavorited : l10n.phoneFavorite,
+            icon: Icon(
+              AppIcons.favorite,
+              fill: favorite ? AppIcons.filled : AppIcons.outline,
+              color: favorite ? scheme.primary : null,
+            ),
+            onPressed: busyFavorite
+                ? null
+                : () => onFavoriteChanged!(!favorite),
+          ),
+        ),
+      Semantics(
+        toggled: played,
+        child: _detailToolButton(
+          context,
+          key: CatalogKeys.playedToggle,
+          tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+          icon: Icon(
+            played
+                ? CupertinoIcons.checkmark_circle_fill
+                : CupertinoIcons.checkmark_circle,
+            color: played ? scheme.primary : null,
+          ),
+          onPressed: busyPlayed ? null : () => onPlayedChanged(!played),
+        ),
+      ),
+    ];
     final viewport = MediaQuery.sizeOf(context);
     final sourceMenuMax = AppViewport.fit(420, viewport.width - 48, viewport);
     final sourceMenuMin = AppViewport.dp(280, viewport);
-    final tools = <Widget>[
-      _detailToolButton(
-        context,
-        key: CatalogKeys.playedToggle,
-        tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
-        icon: Icon(
-          played
-              ? CupertinoIcons.checkmark_circle_fill
-              : CupertinoIcons.checkmark_circle,
-          color: played ? scheme.primary : null,
-        ),
-        onPressed: busyPlayed ? null : () => onPlayedChanged(!played),
-      ),
+    final choices = <Widget>[
       if (item.mediaSources.length > 1)
         _DetailMenuButton<String>(
           menuKey: CatalogKeys.mediaSource,
           initialValue: sourceId,
-          tooltip: '${l10n.mediaSource} · $sourceLabel',
-          icon: CupertinoIcons.film,
+          category: l10n.mediaSource,
+          value: sourceLabel,
+          icon: AppIcons.mediaSource,
           constraints: BoxConstraints(
             minWidth: sourceMenuMin < sourceMenuMax
                 ? sourceMenuMin
@@ -3087,7 +3179,8 @@ class _DetailActions extends StatelessWidget {
         _DetailMenuButton<int>(
           menuKey: CatalogKeys.detailAudio,
           initialValue: audioStreamIndex,
-          tooltip: '${l10n.audioTrack} · $audioLabel',
+          category: l10n.audioTrack,
+          value: audioLabel,
           icon: AppIcons.music,
           items: [
             for (final stream in audios)
@@ -3102,7 +3195,8 @@ class _DetailActions extends StatelessWidget {
         _DetailMenuButton<int>(
           menuKey: CatalogKeys.detailSubtitle,
           initialValue: subtitleStreamIndex ?? _subtitleOffToken,
-          tooltip: '${l10n.subtitleTrack} · $subtitleLabel',
+          category: l10n.subtitleTrack,
+          value: subtitleLabel,
           icon: AppIcons.subtitles,
           items: [
             AppMenuEntry<int>(
@@ -3118,39 +3212,61 @@ class _DetailActions extends StatelessWidget {
           onSelected: (value) =>
               onSubtitle?.call(value == _subtitleOffToken ? null : value),
         ),
-      // 跨服务器选择影片来源：与状态/轨道圆钮同族，说明走 tooltip。
+    ];
+    // 跨服务器找同一部影片：带字胶囊，图形与全局搜索区分。有轨道选项时
+    // 排在选项行行尾；没有（剧集/季页）时并回动作行行尾，不单占一行。
+    final otherSources = <Widget>[
       if (SourceSelectionAction.availableIn(context))
         SourceSelectionAction(
-          builder: (context, view) => _detailToolButton(
-            context,
+          builder: (context, view) => _DetailOptionChip(
             key: SourceSelectionActionView.key,
+            icon: view.icon,
+            value: view.shortLabel,
             tooltip: view.label,
-            icon: Icon(view.icon, size: 20),
+            semanticLabel: view.label,
+            busy: view.loading,
             onPressed: view.loading ? null : view.onPressed,
           ),
         ),
     ];
-    // 两组之间 16 留白、组内 12：导航带字胶囊（播放/从头/上下集）与
-    // 状态圆钮（已看/片源/音轨/字幕/跨服务器片源）各自成组，窄窗整组折行。
-    return Wrap(
-      spacing: AppSpacing.md,
+    final inlineOther = choices.isEmpty;
+    final options = [...choices, if (!inlineOther) ...otherSources];
+    Widget group(List<Widget> children) => Wrap(
+      spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
       crossAxisAlignment: WrapCrossAlignment.center,
+      children: children,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        if (primary.isNotEmpty)
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: primary,
+        // 组内 12、组间 16；窄窗时状态圆钮整组折到下一行。
+        Wrap(
+          key: ItemDetailPage.actionRowKey,
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (navigation.isNotEmpty) group(navigation),
+            if (status.isNotEmpty || inlineOther)
+              group([...status, if (inlineOther) ...otherSources]),
+          ],
+        ),
+        if (options.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          Semantics(
+            container: true,
+            label: l10n.detailPlaybackOptions,
+            child: Wrap(
+              key: ItemDetailPage.optionRowKey,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: options,
+            ),
           ),
-        if (tools.isNotEmpty)
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: tools,
-          ),
+        ],
       ],
     );
   }
@@ -3198,10 +3314,107 @@ Widget _detailToolButton(
   );
 }
 
-/// 海报上的圆形菜单钮。浅色纸面用 [_detailToolButton]，深色头图保持 scrim。
+/// 播放选项胶囊：「图标 + 当前值 (+ ˅)」，36 高、安静表面、发丝边。
+/// 当前值是要告诉用户的事实，所以写在按钮上；类别说明走 tooltip 与读屏。
+class _DetailOptionChip extends StatelessWidget {
+  const _DetailOptionChip({
+    super.key,
+    required this.icon,
+    required this.value,
+    required this.tooltip,
+    required this.semanticLabel,
+    required this.onPressed,
+    this.dropdown = false,
+    this.busy = false,
+  });
+
+  final IconData icon;
+  final String value;
+  final String tooltip;
+  final String semanticLabel;
+  final VoidCallback? onPressed;
+
+  /// 为 true 时行尾画 ˅，表示点开是就地下拉选择。
+  final bool dropdown;
+
+  /// 为 true 时图标位换成小菊花（来源解析中）。
+  final bool busy;
+
+  /// 当前值过长（发布串、长音轨名）时截断，完整值在 tooltip 里。
+  static const double maxValueWidth = 220;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    final muted = light
+        ? scheme.onSurfaceVariant
+        : scheme.onSurface.withValues(alpha: .72);
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      excludeSemantics: true,
+      child: AppTooltip(
+        message: tooltip,
+        child: AppButton(
+          onPressed: onPressed,
+          variant: AppButtonVariant.outlined,
+          style: AppButtonStyle(
+            foregroundColor: scheme.onSurface,
+            backgroundColor: light
+                ? scheme.surfaceContainerLowest
+                : scheme.scrim.withValues(alpha: .24),
+            side: BorderSide(
+              color: light
+                  ? scheme.outlineVariant
+                  : scheme.onSurface.withValues(alpha: .16),
+            ),
+            minimumSize: const Size(0, 36),
+            padding: EdgeInsetsDirectional.only(
+              start: AppSpacing.sm,
+              end: dropdown ? AppSpacing.xs : AppSpacing.sm,
+            ),
+            shape: const StadiumBorder(),
+            textStyle: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox.square(
+                dimension: 18,
+                child: busy
+                    ? CupertinoActivityIndicator(color: muted, radius: 7)
+                    : Icon(icon, size: 18, color: muted, fill: 1),
+              ),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: maxValueWidth),
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (dropdown) ...[
+                const SizedBox(width: 2),
+                Icon(AppIcons.chevronDown, size: 18, color: muted),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 播放选项下拉：[_DetailOptionChip] 显示当前值，点开就地弹出菜单。
 class _DetailMenuButton<T> extends StatelessWidget {
   const _DetailMenuButton({
-    required this.tooltip,
+    required this.category,
+    required this.value,
     required this.icon,
     required this.items,
     required this.onSelected,
@@ -3212,7 +3425,8 @@ class _DetailMenuButton<T> extends StatelessWidget {
 
   final T? initialValue;
   final Key? menuKey;
-  final String tooltip;
+  final String category;
+  final String value;
   final IconData icon;
   final List<AppMenuEntry<T>> items;
   final ValueChanged<T> onSelected;
@@ -3246,11 +3460,13 @@ class _DetailMenuButton<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _detailToolButton(
-      context,
+    return _DetailOptionChip(
       key: menuKey,
-      tooltip: tooltip,
-      icon: Icon(icon, fill: AppIcons.filled),
+      icon: icon,
+      value: value,
+      tooltip: '$category · $value',
+      semanticLabel: '$category，$value',
+      dropdown: true,
       onPressed: () => unawaited(_open(context)),
     );
   }

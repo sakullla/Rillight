@@ -2448,6 +2448,9 @@
     }
   },
   "sourceSelectionAction": "选择影片来源",
+  "sourceSelectionShort": "其他来源",
+  "detailPlayedDone": "已看过",
+  "detailPlaybackOptions": "播放选项",
   "sourceSelectionEmpty": "暂未找到其他来源",
   "sourceSelectionRetry": "部分来源加载失败，重试",
   "sourceSelectionMore": "继续查找",
