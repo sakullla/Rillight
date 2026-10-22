@@ -2,17 +2,19 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/playback_runtime_cases.dart' as case0;
-import '../app/browse_menu_cases.dart' as case1;
-import '../app/mobile_shell_nav_cases.dart' as case2;
-import '../app/rating_star_cases.dart' as case3;
-import '../app/selection_contrast_cases.dart' as case4;
+import '../app/app_shell_top_bar_cases.dart' as case1;
+import '../app/browse_menu_cases.dart' as case2;
+import '../app/update_check_cases.dart' as case3;
+import '../app/update_ui_cases.dart' as case4;
 import '../catalog/catalog_browse_cases.dart' as case5;
-import '../catalog/library_filter_cases.dart' as case6;
-import '../home/home_page_cases.dart' as case7;
+import '../helpers/capture_png_cases.dart' as case6;
+import '../media_image/blurred_artwork_cases.dart' as case7;
 import '../mobile/tv_server_management_cases.dart' as case8;
-import '../player/desktop_player_page_cases.dart' as case9;
-import '../tv/tv_detail_header_scale_cases.dart' as case10;
-import '../widgets/app_button_cases.dart' as case11;
+import '../player/android_seek_cancellation_cases.dart' as case9;
+import '../player/playback_image_release_cases.dart' as case10;
+import '../tv/tv_detail_cases.dart' as case11;
+import '../tv/tv_lan_pair_cases.dart' as case12;
+import '../widgets/app_button_cases.dart' as case13;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,15 +23,17 @@ void main() {
     'aggregation/playback_runtime_test.dart [part 3]',
     () => case0.mainShard(2, 3),
   );
-  group('app/browse_menu_test.dart', case1.main);
-  group('app/mobile_shell_nav_test.dart', case2.main);
-  group('app/rating_star_test.dart', case3.main);
-  group('app/selection_contrast_test.dart', case4.main);
+  group('app/app_shell_top_bar_test.dart', case1.main);
+  group('app/browse_menu_test.dart', case2.main);
+  group('app/update_check_test.dart', case3.main);
+  group('app/update_ui_test.dart', case4.main);
   group('catalog/catalog_browse_test.dart', case5.main);
-  group('catalog/library_filter_test.dart', case6.main);
-  group('home/home_page_test.dart', case7.main);
+  group('helpers/capture_png_test.dart', case6.main);
+  group('media_image/blurred_artwork_test.dart', case7.main);
   group('mobile/tv_server_management_test.dart', case8.main);
-  group('player/desktop_player_page_test.dart', case9.main);
-  group('tv/tv_detail_header_scale_test.dart', case10.main);
-  group('widgets/app_button_test.dart', case11.main);
+  group('player/android_seek_cancellation_test.dart', case9.main);
+  group('player/playback_image_release_test.dart', case10.main);
+  group('tv/tv_detail_test.dart [part 2]', () => case11.mainShard(1, 2));
+  group('tv/tv_lan_pair_test.dart [part 3]', () => case12.mainShard(2, 3));
+  group('widgets/app_button_test.dart', case13.main);
 }

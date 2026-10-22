@@ -2614,21 +2614,20 @@ void main() {
               ? find.byType(ItemDetailPage)
               : find.byType(MobileDetailPage);
           expect(find.descendant(of: page, matching: entry), findsOneWidget);
-          if (environment.isDesktop || environment.isTv) {
-            expect(
-              find.ancestor(of: entry, matching: find.byType(Scrollable)),
-              findsWidgets,
-            );
-            expect(
-              find.ancestor(of: entry, matching: find.byType(Positioned)),
-              findsNothing,
-            );
-          } else {
-            // 手机端「其他来源」是作品级操作，固定在详情页自己的顶栏右上角
-            // （页面 chrome，不是叠在内容上的悬浮钮）。
+          // 三端都在详情页自己的动作区里：手机是播放钮下方的带标签格行，
+          // 顶栏只留返回。
+          expect(
+            find.ancestor(of: entry, matching: find.byType(Scrollable)),
+            findsWidgets,
+          );
+          expect(
+            find.ancestor(of: entry, matching: find.byType(Positioned)),
+            findsNothing,
+          );
+          if (!environment.isDesktop && !environment.isTv) {
             expect(
               find.ancestor(of: entry, matching: find.byType(PhoneTopBar)),
-              findsOneWidget,
+              findsNothing,
             );
           }
           if (environment.isTv) {

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -14,6 +16,7 @@ import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
+import 'package:rillight/library/season_switcher.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// 标题下的一行事实：年份、时长、评分、季数。
@@ -638,69 +641,6 @@ class PhoneGenreChips extends StatelessWidget {
   }
 }
 
-/// 季切换：单选标签。选中项用 accentContainer 填充加 accent 描边。
-class PhoneSeasonTab extends StatelessWidget {
-  const PhoneSeasonTab({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: MobilePressFeedback(
-        enabled: onPressed != null && !selected,
-        scale: .95,
-        child: AnimatedContainer(
-          duration: AppMotion.durationOf(context, AppMotion.fast),
-          curve: AppMotion.standard,
-          decoration: selected
-              ? AppSelectionDecoration.of(scheme)
-              : BoxDecoration(
-                  color: scheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
-                  border: Border.all(color: AppEdge.of(theme.brightness)),
-                ),
-          clipBehavior: Clip.antiAlias,
-          child: AppSurfaceAction(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            onTap: onPressed,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 64, minHeight: 36),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Center(
-                  widthFactor: 1,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: selected
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurface,
-                      fontWeight: selected ? FontWeight.w600 : null,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// 剧集页正文：简介、季切换与本季概况、分集，再往下是相册、演职员与信息。
 class MobileSeriesPage extends StatelessWidget {
   const MobileSeriesPage({
@@ -730,6 +670,9 @@ class MobileSeriesPage extends StatelessWidget {
   });
 
   static const seasonSummaryKey = Key('phone-season-summary');
+
+  /// 季切换所在的一行（只有多季时出现）。
+  static const seasonListKey = Key('phone-season-list');
 
   final MediaItem item;
   final List<MediaItem> seasons;
@@ -764,12 +707,20 @@ class MobileSeriesPage extends StatelessWidget {
         for (final child in _content(context))
           if (child is _EpisodeListSlot)
             for (var index = 0; index < episodes.length; index++)
-              _episodeWidget(episodes[index], index)
+              _episodeWidget(
+                episodes[index],
+                index,
+                reserveOverview: _reserveOverview,
+              )
           else
             child,
       ],
     );
   }
+
+  /// 本季有任何一集带简介时，每行都留出两行简介的高度，分集行等高。
+  bool get _reserveOverview =>
+      episodes.any((episode) => plainOverview(episode.overview) != null);
 
   /// Embeds long episode lists in the parent's viewport, so offscreen rows are
   /// never built merely to determine the detail page's total height.
@@ -781,19 +732,28 @@ class MobileSeriesPage extends StatelessWidget {
       SliverList.list(children: content.sublist(0, split)),
       SliverList.builder(
         itemCount: episodes.length,
-        itemBuilder: (context, index) => _episodeWidget(episodes[index], index),
+        itemBuilder: (context, index) => _episodeWidget(
+          episodes[index],
+          index,
+          reserveOverview: _reserveOverview,
+        ),
       ),
       SliverList.list(children: content.sublist(split + 1)),
     ];
   }
 
-  Widget _episodeWidget(MediaItem episode, int index) => _RevealEpisode(
+  Widget _episodeWidget(
+    MediaItem episode,
+    int index, {
+    required bool reserveOverview,
+  }) => _RevealEpisode(
     key: ValueKey('episode-${episode.id}'),
     index: index,
     scrollCoordinator: scrollCoordinator,
     reveal: episode.id == focusEpisodeId,
     child: _EpisodeRow(
       episode: episode,
+      reserveOverview: reserveOverview,
       current: episode.id == (focusEpisodeId ?? playTargetId),
       onTap: () => onOpenEpisode(episode.id),
       onPlay: onPlayEpisode != null && episode.isPlayable
@@ -903,29 +863,20 @@ class MobileSeriesPage extends StatelessWidget {
             ],
           ),
         ),
+      // 共享季切换器的手机呈现：放得下时是一排单选标签，放不下时折叠为
+      // 「当前季 ˅」，点开底部单选表。标签沿用 `CatalogKeys.season` 键。
       if (showSeasons)
-        SizedBox(
-          height:
-              36 *
-              (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1, 2),
-          child: DetachedHorizontalScroll(
-            builder: (controller) => ListView.separated(
-              controller: controller,
-              key: const Key('phone-season-list'),
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              itemCount: seasons.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(width: AppSpacing.xs),
-              itemBuilder: (context, index) {
-                final season = seasons[index];
-                return PhoneSeasonTab(
-                  key: CatalogKeys.season(season.id),
-                  label: season.name,
-                  selected: season.id == seasonId,
-                  onPressed: () => onSelectSeason(season.id),
-                );
-              },
+        Padding(
+          key: seasonListKey,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SeasonSwitcher(
+              platform: SeasonSwitcherPlatform.phone,
+              seasons: seasons,
+              currentId: seasonId,
+              tabKey: CatalogKeys.season,
+              onSelected: onSelectSeason,
             ),
           ),
         ),
@@ -1146,21 +1097,42 @@ class _RevealEpisodeState extends State<_RevealEpisode> {
 /// 分集行：左侧 16:9 剧照，右侧标题与「编号 · 时长 · 播出日期」，简介通栏排在下面。
 ///
 /// 同一状态只表达一次：已看只由剧照上的勾和压暗表示；续播只由剧照底部进度条
-/// 表示；当前集只用浅底色、主色标题和剧照中央播放钮标示。
+/// 表示；当前集用浅底色、左侧主色条和剧照中央播放标记标示，不只靠颜色。
+///
+/// 同一列表里每行等高：标题最多两行、事实最多两行，上半部按两者的最大高度
+/// 与剧照高度取大者；[reserveOverview] 时简介区固定两行高度，短简介或没有
+/// 简介的集也不缩短。
 class _EpisodeRow extends StatelessWidget {
   const _EpisodeRow({
     required this.episode,
     required this.current,
     required this.onTap,
+    this.reserveOverview = false,
     this.onPlay,
   });
 
   final MediaItem episode;
   final bool current;
+  final bool reserveOverview;
   final VoidCallback onTap;
   final VoidCallback? onPlay;
 
   static const double _thumbWidth = 152;
+
+  static double _linesHeight(BuildContext context, TextStyle? style, int n) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: List.filled(n, '国').join('\n'),
+        style: DefaultTextStyle.of(context).style.merge(style),
+      ),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: n,
+    )..layout();
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1175,21 +1147,40 @@ class _EpisodeRow extends StatelessWidget {
     final premiere = episode.premiereDate;
     final facts = <String>[?code, ?runtime];
     final date = premiere == null ? null : formatDateYmd(premiere);
+    final titleStyle = theme.textTheme.titleSmall?.copyWith(
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      height: 1.3,
+      color: current
+          ? scheme.onPrimaryContainer
+          : played
+          ? scheme.onSurfaceVariant
+          : scheme.onSurface,
+    );
+    final factsStyle = theme.textTheme.labelMedium?.copyWith(
+      color: scheme.onSurfaceVariant,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final overviewStyle = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+      height: 1.45,
+    );
     final title = Text(
       episode.name,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleSmall?.copyWith(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        height: 1.3,
-        color: current
-            ? scheme.onPrimaryContainer
-            : played
-            ? scheme.onSurfaceVariant
-            : scheme.onSurface,
-      ),
+      style: titleStyle,
     );
+    // 上半部高度：剧照与「两行标题 + 两行事实」取大者，所有行一致。
+    final headHeight = math.max(
+      _thumbWidth * 9 / 16,
+      _linesHeight(context, titleStyle, 2) +
+          4 +
+          _linesHeight(context, factsStyle, 2),
+    );
+    final overviewHeight = reserveOverview
+        ? _linesHeight(context, overviewStyle, 2)
+        : null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 4, AppSpacing.sm, 4),
       child: MobilePressFeedback(
@@ -1229,56 +1220,54 @@ class _EpisodeRow extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          _EpisodeThumb(
-                            episode: episode,
-                            width: _thumbWidth,
-                            current: current,
-                            played: played,
-                            progress: progress,
-                            onPlay: onPlay,
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                title,
-                                if (facts.isNotEmpty || date != null) ...[
-                                  const SizedBox(height: 4),
-                                  _EpisodeFacts(
-                                    facts: facts,
-                                    date: date,
-                                    style: theme.textTheme.labelMedium
-                                        ?.copyWith(
-                                          color: scheme.onSurfaceVariant,
-                                          fontFeatures: const [
-                                            FontFeature.tabularFigures(),
-                                          ],
-                                        ),
-                                  ),
-                                ],
-                              ],
+                      ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: headHeight),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            _EpisodeThumb(
+                              episode: episode,
+                              width: _thumbWidth,
+                              current: current,
+                              played: played,
+                              progress: progress,
+                              onPlay: onPlay,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  title,
+                                  if (facts.isNotEmpty || date != null) ...[
+                                    const SizedBox(height: 4),
+                                    _EpisodeFacts(
+                                      facts: facts,
+                                      date: date,
+                                      style: factsStyle,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-
-                      if (overview != null)
+                      if (overview != null || overviewHeight != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 7),
-                          child: Text(
-                            overview,
-                            key: const Key('phone-episode-overview'),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              height: 1.45,
-                            ),
+                          child: SizedBox(
+                            height: overviewHeight,
+                            child: overview == null
+                                ? null
+                                : Text(
+                                    overview,
+                                    key: const Key('phone-episode-overview'),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: overviewStyle,
+                                  ),
                           ),
                         ),
                     ],

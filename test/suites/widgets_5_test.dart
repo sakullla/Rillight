@@ -2,15 +2,15 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../auth/login_widgets_cases.dart' as case1;
-import '../auth/provider_connect_entry_user_agent_cases.dart' as case2;
-import '../library/episode_thumb_cases.dart' as case3;
-import '../mobile/detail_route_identity_cases.dart' as case4;
-import '../mobile/phone_detail_redesign_cases.dart' as case5;
-import '../mobile/phone_home_first_screen_cases.dart' as case6;
-import '../mobile/phone_home_rails_cases.dart' as case7;
-import '../mobile/phone_player_cases.dart' as case8;
-import '../player/buffer_snapshot_cases.dart' as case9;
+import '../app/browsing_polish_cases.dart' as case1;
+import '../app/desktop_performance_host_cases.dart' as case2;
+import '../auth/backup_import/backup_import_flow_cases.dart' as case3;
+import '../auth/provider_connect_management_cases.dart' as case4;
+import '../library/episode_thumb_cases.dart' as case5;
+import '../mobile/phone_home_rails_cases.dart' as case6;
+import '../mobile/phone_player_cases.dart' as case7;
+import '../player/player_cache_status_cases.dart' as case8;
+import '../tv/tv_focus_cases.dart' as case9;
 import '../widgets/skeleton_cases.dart' as case10;
 import '../helpers/suite.dart';
 
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 5]',
     () => case0.mainShard(4, 6),
   );
-  group('auth/login_widgets_test.dart', case1.main);
-  group('auth/provider_connect_entry_user_agent_test.dart', case2.main);
-  group('library/episode_thumb_test.dart', case3.main);
-  group('mobile/detail_route_identity_test.dart', case4.main);
-  group('mobile/phone_detail_redesign_test.dart', case5.main);
-  group('mobile/phone_home_first_screen_test.dart', case6.main);
-  group('mobile/phone_home_rails_test.dart', case7.main);
-  group('mobile/phone_player_test.dart [part 2]', () => case8.mainShard(1, 4));
-  group('player/buffer_snapshot_test.dart', case9.main);
+  group('app/browsing_polish_test.dart', case1.main);
+  group('app/desktop_performance_host_test.dart', case2.main);
+  group('auth/backup_import/backup_import_flow_test.dart', case3.main);
+  group('auth/provider_connect_management_test.dart', case4.main);
+  group('library/episode_thumb_test.dart', case5.main);
+  group('mobile/phone_home_rails_test.dart', case6.main);
+  group('mobile/phone_player_test.dart [part 2]', () => case7.mainShard(1, 4));
+  group('player/player_cache_status_test.dart', case8.main);
+  group('tv/tv_focus_test.dart', case9.main);
   group('widgets/skeleton_test.dart', case10.main);
 }

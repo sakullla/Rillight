@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/update_verification_ui_cases.dart' as case1;
-import '../auth/connect_page_cases.dart' as case2;
-import '../library/detail_palette_cases.dart' as case3;
-import '../library/episode_list_scroll_cases.dart' as case4;
-import '../library/external_link_cases.dart' as case5;
-import '../media_image/blurred_artwork_cases.dart' as case6;
-import '../mobile/mobile_flow_cases.dart' as case7;
-import '../mobile/motion_behaviors_cases.dart' as case8;
-import '../mobile/phone_player_cases.dart' as case9;
-import '../player/desktop_player_window_host_cases.dart' as case10;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case1;
+import '../home/hero_artwork_cases.dart' as case2;
+import '../mobile/mobile_flow_cases.dart' as case3;
+import '../mobile/phone_player_cases.dart' as case4;
+import '../player/buffer_snapshot_cases.dart' as case5;
+import '../player/seek_preview_cases.dart' as case6;
+import '../player/subtitle_viewport_cases.dart' as case7;
+import '../search/aggregation_search_surface_cases.dart' as case8;
+import '../widgets/app_empty_view_cases.dart' as case9;
+import '../widgets/backdrop_scrim_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 4]',
     () => case0.mainShard(3, 6),
   );
-  group('app/update_verification_ui_test.dart', case1.main);
-  group('auth/connect_page_test.dart', case2.main);
-  group('library/detail_palette_test.dart', case3.main);
-  group('library/episode_list_scroll_test.dart', case4.main);
-  group('library/external_link_test.dart', case5.main);
-  group('media_image/blurred_artwork_test.dart', case6.main);
-  group('mobile/mobile_flow_test.dart [part 4]', () => case7.mainShard(3, 4));
-  group('mobile/motion_behaviors_test.dart', case8.main);
-  group('mobile/phone_player_test.dart [part 1]', () => case9.mainShard(0, 4));
-  group('player/desktop_player_window_host_test.dart', case10.main);
+  group('catalog/shelf_grid_scroll_rebuild_test.dart', case1.main);
+  group('home/hero_artwork_test.dart', case2.main);
+  group('mobile/mobile_flow_test.dart [part 4]', () => case3.mainShard(3, 4));
+  group('mobile/phone_player_test.dart [part 1]', () => case4.mainShard(0, 4));
+  group('player/buffer_snapshot_test.dart', case5.main);
+  group('player/seek_preview_test.dart', case6.main);
+  group('player/subtitle_viewport_test.dart', case7.main);
+  group('search/aggregation_search_surface_test.dart', case8.main);
+  group('widgets/app_empty_view_test.dart', case9.main);
+  group('widgets/backdrop_scrim_test.dart', case10.main);
 }

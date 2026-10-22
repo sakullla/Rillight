@@ -99,14 +99,7 @@ void main() {
         isFalse,
       );
       expect(find.byKey(PhoneTopBar.backKey), findsNothing);
-      expect(
-        tester
-            .widget<PhoneSeasonTab>(
-              find.widgetWithText(PhoneSeasonTab, '第 2 季'),
-            )
-            .selected,
-        isTrue,
-      );
+      expect(_seasonSelected(tester, 'season-friends-2'), isTrue);
       final poster = tester.getRect(find.byKey(PhoneItemBanner.posterKey));
       final posterImage = tester.getRect(
         find.descendant(
@@ -256,3 +249,13 @@ Future<void> _artworkFrames(WidgetTester tester) async {
     );
   }
 }
+
+/// 共享季切换器手机标签（`CatalogKeys.season(id)`）是否为选中态。
+bool _seasonSelected(WidgetTester tester, String id) => tester
+    .widget<AppButton>(
+      find.descendant(
+        of: find.byKey(CatalogKeys.season(id)),
+        matching: find.byType(AppButton),
+      ),
+    )
+    .selected;

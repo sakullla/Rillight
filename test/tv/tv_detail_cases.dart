@@ -428,7 +428,9 @@ void main() {
       final plate = disc.decoration as BoxDecoration;
       expect(plate.shape, BoxShape.circle);
       expect(plate.color!.a, greaterThan(0.7));
-      final title = find.text('S1E2 The One with the Resume');
+      // 分集卡标题是「N. 集名」，不再叠 S1E2 前缀。
+      final title = find.text('2. The One with the Resume');
+      expect(find.textContaining('S1E2 The One'), findsNothing);
       expect(
         tester.widget<Text>(title).style?.color,
         AppUiTheme.of(tester.element(title)).colorScheme.primary,
@@ -555,9 +557,15 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const Key('tv-detail-played-toggle')),
-          matching: find.text('标记未看'),
+          matching: find.text('已看'),
         ),
         findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<TvAction>(find.byKey(const Key('tv-detail-played-toggle')))
+            .active,
+        isTrue,
       );
 
       await _back(tester);
@@ -589,16 +597,19 @@ void main() {
         find.descendant(of: toggle, matching: find.text('标记已看')),
         findsOneWidget,
       );
+      expect(tester.widget<TvAction>(toggle).active, isFalse);
       await tester.tap(toggle);
       await settle(tester);
       expect(
         server.items.firstWhere((item) => item.id == 'movie-inception').played,
         isTrue,
       );
+      // 已看是开关：激活时标签写状态，按钮为 active 实底。
       expect(
-        find.descendant(of: toggle, matching: find.text('标记未看')),
+        find.descendant(of: toggle, matching: find.text('已看')),
         findsOneWidget,
       );
+      expect(tester.widget<TvAction>(toggle).active, isTrue);
       expect(
         find.byWidgetPredicate(
           (widget) => widget.runtimeType.toString() == '_Notice',
@@ -622,6 +633,138 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  cases.testWidgets(
+    'down from the action row lands on the season tabs then the episodes',
+    (tester) async {
+      final server = FakeEmbyServer();
+      server.setSeasons('series-friends', const [
+        FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+        FakeSeason(id: 'season-friends-2', name: '第 2 季', indexNumber: 2),
+      ]);
+      server.setEpisodes('series-friends', [
+        for (var index = 1; index <= 12; index++)
+          FakeEpisode(
+            id: 'episode-friends-s1e$index',
+            name: '第 $index 集 · 小小奇遇',
+            seasonId: 'season-friends-1',
+            indexNumber: index,
+            parentIndexNumber: 1,
+          ),
+        const FakeEpisode(
+          id: 'episode-friends-s2e1',
+          name: 'Season Two',
+          seasonId: 'season-friends-2',
+          indexNumber: 1,
+          parentIndexNumber: 2,
+        ),
+      ]);
+      final app = await start(tester, server);
+      await login(tester, server);
+      await openItem(tester, app, 'series-friends');
+
+      // 两季放得下：直接是两个焦点标签，没有折叠入口。
+      expect(find.byKey(const ValueKey('season-friends-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('season-friends-2')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.seasonPicker), findsNothing);
+      expect(focusedLabel(tester), startsWith('播放'));
+
+      // 按一次「下」就到季标签，不跳过这一行。
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(focusedLabel(tester), '第 1 季');
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(focusedLabel(tester), contains('小小奇遇'));
+
+      // 分集卡标题不再重复 S1E1 与「第 N 集」。
+      expect(find.textContaining('S1E1 第'), findsNothing);
+      expect(find.text('第 1 集 · 小小奇遇'), findsOneWidget);
+
+      // 分集行横向移动，焦点一直留在分集上。
+      for (var step = 0; step < 6; step++) {
+        await key(tester, LogicalKeyboardKey.arrowRight);
+        expect(focusedLabel(tester), contains('小小奇遇'), reason: 'step $step');
+      }
+      expect(focusedLabel(tester), contains('第 7 集'));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'many seasons fold into one focusable picker that opens a season list',
+    (tester) async {
+      final server = FakeEmbyServer();
+      server.setSeasons('series-friends', [
+        for (var index = 1; index <= 12; index++)
+          FakeSeason(
+            id: 'season-friends-$index',
+            name: '第 $index 季 · 很长很长的季名',
+            indexNumber: index,
+          ),
+      ]);
+      server.setEpisodes('series-friends', [
+        for (var index = 1; index <= 12; index++)
+          FakeEpisode(
+            id: 'episode-friends-s${index}e1',
+            name: 'Season $index opener',
+            seasonId: 'season-friends-$index',
+            indexNumber: 1,
+            parentIndexNumber: index,
+          ),
+      ]);
+      final app = await start(tester, server);
+      await login(tester, server);
+      await openItem(tester, app, 'series-friends');
+
+      expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+      expect(find.byKey(const ValueKey('season-friends-1')), findsNothing);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(focusedLabel(tester), contains('第 1 季'));
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.byKey(const Key('season-switcher-tv-list')), findsOneWidget);
+      // 列表里当前季自动聚焦，往下一项即第 2 季。
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.byKey(const Key('season-switcher-tv-list')), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.seasonPicker),
+          matching: find.textContaining('第 2 季'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('1. Season 2 opener'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets('favorite button shows its active state', (tester) async {
+    final server = FakeEmbyServer();
+    final app = await start(tester, server);
+    await login(tester, server);
+    await openItem(tester, app, 'movie-inception');
+
+    final favorite = find.byKey(const Key('tv-detail-favorite'));
+    expect(favorite, findsOneWidget);
+    expect(tester.widget<TvAction>(favorite).active, isFalse);
+    expect(
+      find.descendant(of: favorite, matching: find.text('收藏')),
+      findsOneWidget,
+    );
+    await tester.tap(favorite);
+    await _settle(tester);
+    expect(
+      server.items.firstWhere((item) => item.id == 'movie-inception').favorite,
+      isTrue,
+    );
+    expect(tester.widget<TvAction>(favorite).active, isTrue);
+    expect(
+      find.descendant(of: favorite, matching: find.text('已收藏')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
 
 final cases = CaseShard(2);

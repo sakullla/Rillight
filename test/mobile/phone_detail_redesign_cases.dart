@@ -10,6 +10,7 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/home/catalog_keys.dart';
 
 const _minute = 60 * 10000000;
 
@@ -52,6 +53,7 @@ MobileSeriesPage _series({
   required List<MediaItem> episodes,
   bool hasMore = false,
   int? episodeTotal,
+  ValueChanged<String> onSelectSeason = _ignore,
 }) {
   return MobileSeriesPage(
     item: const MediaItem(
@@ -70,7 +72,7 @@ MobileSeriesPage _series({
     playTargetId: 'episode-2',
     similar: const [],
     onPickEpisode: _noop,
-    onSelectSeason: _ignore,
+    onSelectSeason: onSelectSeason,
     onOpenEpisode: _ignore,
     onRetryEpisodes: _noop,
     onLoadMore: _noop,
@@ -160,7 +162,7 @@ void main() {
       // 一季时不画单独一颗季标签，也不再有季海报概况卡；
       // 集数与已看进度只是分区标题下的一行小字。
       expect(find.byKey(const Key('phone-season-list')), findsNothing);
-      expect(find.byType(PhoneSeasonTab), findsNothing);
+      expect(find.byKey(CatalogKeys.season('season-1')), findsNothing);
       final summary = find.byKey(MobileSeriesPage.seasonSummaryKey);
       expect(summary, findsOneWidget);
       expect(
@@ -254,19 +256,123 @@ void main() {
       await tester.pump();
 
       expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
-      expect(find.byType(PhoneSeasonTab), findsNWidgets(2));
-      expect(
-        tester
-            .widget<PhoneSeasonTab>(
-              find.widgetWithText(PhoneSeasonTab, '第 1 季'),
-            )
-            .selected,
-        isTrue,
-      );
+      expect(find.byKey(CatalogKeys.season('season-1')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.season('season-2')), findsOneWidget);
+      expect(_seasonSelected(tester, 'season-1'), isTrue);
       expect(find.text('第 1 季'), findsOneWidget);
       expect(find.text('40 集'), findsOneWidget);
       // 分页没载完时不猜已看比例。
       expect(find.textContaining('已看 '), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('many seasons fold into a picker that opens a bottom sheet', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final picked = <String>[];
+      await tester.pumpWidget(
+        _phone(
+          _slivers(
+            _series(
+              seasons: [
+                for (var index = 1; index <= 8; index++)
+                  MediaItem(
+                    id: 'season-$index',
+                    name: '第 $index 季',
+                    type: 'Season',
+                  ),
+              ],
+              episodes: [_episode(1), _episode(2)],
+              episodeTotal: 2,
+              onSelectSeason: picked.add,
+            ),
+          ),
+          width: 360,
+        ),
+      );
+      await tester.pump();
+
+      // 八季在 360 宽放不下一排标签：折叠为「当前季 ˅」入口。
+      expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+      expect(find.byKey(CatalogKeys.season('season-1')), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.seasonPicker),
+          matching: find.text('第 1 季'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(CatalogKeys.seasonPicker));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('season-switcher-sheet')), findsOneWidget);
+      await tester.tap(find.byKey(CatalogKeys.seasonOption('season-5')));
+      await tester.pumpAndSettle();
+      expect(picked, ['season-5']);
+      expect(find.byKey(const Key('season-switcher-sheet')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('episode rows keep one height and at most two overview lines', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(412, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const long =
+          '一段很长很长的分集简介，会在手机宽度下折成好几行，但在列表里最多只显示'
+          '两行，其余用省略号收起，行高也不随简介长短变化。再补一句让它更长一些。';
+      MediaItem episode(int index, {String? name, String? overview}) =>
+          MediaItem(
+            id: 'episode-$index',
+            name: name ?? '第 $index 集',
+            type: 'Episode',
+            seasonId: 'season-1',
+            indexNumber: index,
+            parentIndexNumber: 1,
+            overview: overview,
+            runtime: Duration(microseconds: (24 * _minute) ~/ 10),
+            premiereDate: DateTime(2024, 1, index),
+          );
+      await tester.pumpWidget(
+        _phone(
+          _slivers(
+            _series(
+              seasons: const [
+                MediaItem(id: 'season-1', name: '第 1 季', type: 'Season'),
+              ],
+              episodes: [
+                episode(1),
+                episode(2, name: '一个很长的分集标题会在手机上折成两行显示出来', overview: long),
+                episode(3, overview: '短简介。'),
+              ],
+              episodeTotal: 3,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final heights = [
+        for (var index = 1; index <= 3; index++)
+          tester
+              .getSize(find.byKey(CatalogKeys.episode('episode-$index')))
+              .height,
+      ];
+      expect(heights[1], closeTo(heights[0], .5));
+      expect(heights[2], closeTo(heights[0], .5));
+      for (final text in tester.widgetList<Text>(
+        find.byKey(const Key('phone-episode-overview')),
+      )) {
+        expect(text.maxLines, 2);
+      }
+      // 当前集（episode-2）同时有左侧主色条和播放标记，不只靠底色。
+      expect(find.byKey(const Key('phone-episode-current')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -440,3 +546,13 @@ void main() {
     );
   });
 }
+
+/// 共享季切换器手机标签（`CatalogKeys.season(id)`）是否为选中态。
+bool _seasonSelected(WidgetTester tester, String id) => tester
+    .widget<AppButton>(
+      find.descendant(
+        of: find.byKey(CatalogKeys.season(id)),
+        matching: find.byType(AppButton),
+      ),
+    )
+    .selected;

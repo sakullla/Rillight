@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/ui/ui.dart';
-import 'package:rillight/library/mobile_series_page.dart';
+import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/season_switcher.dart';
+import 'package:rillight/media_server/models.dart';
 
 import '../helpers/cupertino_test_app.dart';
 
@@ -36,22 +38,29 @@ void main() {
         CupertinoTestApp(
           theme: theme,
           home: Center(
-            child: PhoneSeasonTab(
-              label: '第一季',
-              selected: true,
-              onPressed: () {},
+            child: SeasonSwitcher(
+              platform: SeasonSwitcherPlatform.phone,
+              seasons: const [
+                MediaItem(id: 's1', name: '第一季', type: 'Season'),
+                MediaItem(id: 's2', name: '第二季', type: 'Season'),
+              ],
+              currentId: 's1',
+              onSelected: (_) {},
             ),
           ),
         ),
       );
-      final container = tester.widget<AnimatedContainer>(
-        find.byType(AnimatedContainer).first,
+      final face = tester.widget<AnimatedContainer>(
+        find.descendant(
+          of: find.byKey(CatalogKeys.seasonTab('s1')),
+          matching: find.byKey(AppButton.faceKey),
+        ),
       );
-      final decoration = container.decoration! as BoxDecoration;
+      final decoration = face.decoration! as ShapeDecoration;
       expect(decoration.color, scheme.primaryContainer);
-      final border = decoration.border! as Border;
-      expect(border.top.width, AppSelectionDecoration.borderWidth);
-      expect(border.top.color, scheme.primary);
+      final side = (decoration.shape as OutlinedBorder).side;
+      expect(side.width, AppSelectionDecoration.borderWidth);
+      expect(side.color, scheme.primary);
 
       final text = tester.widget<RichText>(
         find.descendant(of: find.text('第一季'), matching: find.byType(RichText)),

@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../auth/backup_import/backup_import_flow_cases.dart' as case1;
-import '../catalog/item_detail_cases.dart' as case2;
-import '../home/library_latest_row_cases.dart' as case3;
-import '../home/library_tiles_cases.dart' as case4;
-import '../mobile/mobile_performance_timing_cases.dart' as case5;
-import '../mobile/phone_pages_cases.dart' as case6;
-import '../mobile/tv_shell_navigation_cases.dart' as case7;
-import '../player/phone_presentation_lifecycle_cases.dart' as case8;
-import '../tv/tv_detail_cases.dart' as case9;
-import '../widgets/artwork_crop_cases.dart' as case10;
+import '../app/desktop_gestures_cases.dart' as case1;
+import '../app/update_verification_ui_cases.dart' as case2;
+import '../auth/login_widgets_cases.dart' as case3;
+import '../auth/phone_server_manager_cases.dart' as case4;
+import '../catalog/item_detail_cases.dart' as case5;
+import '../home/home_page_cases.dart' as case6;
+import '../home/shelf_hover_clip_cases.dart' as case7;
+import '../mobile/phone_pages_cases.dart' as case8;
+import '../player/desktop_player_page_cases.dart' as case9;
+import '../player/player_window_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 1]',
     () => case0.mainShard(0, 6),
   );
-  group('auth/backup_import/backup_import_flow_test.dart', case1.main);
-  group('catalog/item_detail_test.dart [part 3]', () => case2.mainShard(2, 3));
-  group('home/library_latest_row_test.dart', case3.main);
-  group('home/library_tiles_test.dart', case4.main);
-  group('mobile/mobile_performance_timing_test.dart', case5.main);
-  group('mobile/phone_pages_test.dart [part 2]', () => case6.mainShard(1, 3));
-  group('mobile/tv_shell_navigation_test.dart', case7.main);
-  group('player/phone_presentation_lifecycle_test.dart', case8.main);
-  group('tv/tv_detail_test.dart [part 2]', () => case9.mainShard(1, 2));
-  group('widgets/artwork_crop_test.dart', case10.main);
+  group('app/desktop_gestures_test.dart', case1.main);
+  group('app/update_verification_ui_test.dart', case2.main);
+  group('auth/login_widgets_test.dart', case3.main);
+  group('auth/phone_server_manager_test.dart', case4.main);
+  group('catalog/item_detail_test.dart [part 3]', () => case5.mainShard(2, 3));
+  group('home/home_page_test.dart', case6.main);
+  group('home/shelf_hover_clip_test.dart', case7.main);
+  group('mobile/phone_pages_test.dart [part 2]', () => case8.mainShard(1, 3));
+  group('player/desktop_player_page_test.dart', case9.main);
+  group('player/player_window_test.dart', case10.main);
 }

@@ -64,6 +64,8 @@ import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
+import 'package:rillight/library/season_switcher.dart';
+
 const _connectDevice = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
@@ -1597,34 +1599,41 @@ void main() {
         expect(find.byType(MobileDetailPage), findsOneWidget);
         expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
         expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
-        expect(find.byType(PhoneSeasonTab), findsNWidgets(2));
         expect(
-          tester
-              .widget<PhoneSeasonTab>(
-                find.widgetWithText(PhoneSeasonTab, '第 2 季'),
-              )
-              .selected,
-          isTrue,
+          find.byKey(CatalogKeys.season('season-friends-1')),
+          findsOneWidget,
         );
+        expect(
+          find.byKey(CatalogKeys.season('season-friends-2')),
+          findsOneWidget,
+        );
+        expect(_seasonSelected(tester, 'season-friends-2'), isTrue);
         expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
         expect(
           find.byWidgetPredicate((widget) => widget is AppDropdown),
           findsNothing,
         );
         final play = find.byKey(const Key('mobile-detail-play'));
-        final seriesPoster = tester.getRect(
-          find.byKey(PhoneItemBanner.posterKey),
-        );
         final seriesFavorite = tester.getRect(
           find.byKey(const Key('phone-detail-favorite')),
         );
         final seriesPlay = tester.getRect(play);
-        // 收藏是作品级操作，固定在顶栏右上角；剧集页播放钮下方不再为两枚
-        // 低频圆钮单占一行。
-        expect(seriesFavorite.right, greaterThan(360 - 56));
-        expect(seriesFavorite.bottom, lessThan(seriesPoster.top + 8));
-        expect(seriesFavorite.top, lessThan(seriesPlay.top));
-        expect(find.byKey(const Key('phone-detail-actions')), findsNothing);
+        // 顶栏只留返回：收藏在播放钮下方的带标签格行里，标签写明状态。
+        expect(seriesFavorite.top, greaterThan(seriesPlay.bottom));
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('phone-detail-actions')),
+            matching: find.text('收藏'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(PhoneTopBar),
+            matching: find.byKey(const Key('phone-detail-favorite')),
+          ),
+          findsNothing,
+        );
         expect(seriesPlay.width, closeTo(360 - 32, 1));
         expect(
           tester
@@ -1644,7 +1653,10 @@ void main() {
         expect(backend.position, const Duration(minutes: 5));
         await closePlayer(tester);
         expect(find.byType(MobilePlayerPage), findsNothing);
-        expect(find.widgetWithText(PhoneSeasonTab, '第 2 季'), findsOneWidget);
+        expect(
+          find.byKey(CatalogKeys.season('season-friends-2')),
+          findsOneWidget,
+        );
 
         await tester.tap(find.text('第 1 季'));
         await settle(tester);
@@ -1658,7 +1670,7 @@ void main() {
         await tester.ensureVisible(find.text('The One with the Resume').first);
         await tester.tap(find.text('The One with the Resume').first);
         await settle(tester);
-        expect(find.byType(PhoneSeasonTab), findsNothing);
+        expect(find.byType(SeasonSwitcher), findsNothing);
         expect(find.text('Halfway through season two.'), findsOneWidget);
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
         expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
@@ -1676,15 +1688,15 @@ void main() {
           find.byKey(const Key('phone-detail-play-start')),
         );
         final episodeNext = tester.getRect(find.byKey(CatalogKeys.nextEpisode));
-        expect(episodeFavorite.bottom, lessThan(episodePlay.top));
+        expect(episodeFavorite.top, greaterThan(episodePlay.bottom));
         expect(episodePlayed.top, greaterThan(episodePlay.bottom));
         expect(episodeRestart.top, greaterThan(episodePlay.bottom));
         expect(episodeNext.top, closeTo(episodeRestart.top, 1));
-        // 观看流程钮带可见标签；收藏在顶栏，说明由 tooltip 承担。
+        // 收藏与观看流程钮同在一组带标签格里，都有可见标签和 tooltip。
         for (final tip in ['收藏', '标记已看', '从头播放', '下一集']) {
           expect(findAppTooltip(tip), findsOneWidget, reason: tip);
         }
-        for (final label in ['标记已看', '从头播放', '下一集']) {
+        for (final label in ['收藏', '标记已看', '从头播放', '下一集']) {
           expect(
             find.descendant(
               of: find.byKey(const Key('phone-detail-actions')),
@@ -1699,7 +1711,10 @@ void main() {
         expect(find.text('The next night.'), findsOneWidget);
         await tester.tap(find.byKey(CatalogKeys.seriesLink));
         await settle(tester);
-        expect(find.widgetWithText(PhoneSeasonTab, '第 2 季'), findsOneWidget);
+        expect(
+          find.byKey(CatalogKeys.season('season-friends-2')),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -1790,6 +1805,97 @@ void main() {
         expect(find.text('章节'), findsNothing);
         expect(find.text('演员'), findsNothing);
         expect(find.byType(AppChoiceChip), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    cases.testWidgets(
+      'labelled action cells wrap at 360 with large text and never ellipsize',
+      (tester) async {
+        const minute = 10000000 * 60;
+        final server = FakeEmbyServer();
+        server.setEpisodes('series-friends', [
+          for (var index = 1; index <= 3; index++)
+            FakeEpisode(
+              id: 'episode-friends-s1e$index',
+              name: 'Episode $index',
+              seasonId: 'season-friends-1',
+              indexNumber: index,
+              parentIndexNumber: 1,
+              playbackPosition: Duration(
+                microseconds: (index == 2 ? minute * 5 : 0) ~/ 10,
+              ),
+              playedPercentage: index == 2 ? 20 : null,
+              runtime: Duration(microseconds: (minute * 22) ~/ 10),
+            ),
+        ]);
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final (router, _) = await start(tester, server, height: 1600);
+        await openItem(tester, router, 'episode-friends-s1e2');
+
+        final actions = find.byKey(const Key('phone-detail-actions'));
+        expect(actions, findsOneWidget);
+        final play = tester.getRect(
+          find.byKey(const Key('mobile-detail-play')),
+        );
+        final cells = [
+          const Key('phone-detail-play-start'),
+          CatalogKeys.previousEpisode,
+          CatalogKeys.nextEpisode,
+          const Key('phone-detail-favorite'),
+          CatalogKeys.playedToggle,
+        ].map((key) => tester.getRect(find.byKey(key))).toList();
+        // 五格在 200% 字号下放不进一行：整组折成两行，全部在屏内、播放钮下方。
+        final tops = cells.map((rect) => rect.top.round()).toSet();
+        expect(tops.length, 2);
+        for (final rect in cells) {
+          expect(rect.top, greaterThan(play.bottom));
+          expect(rect.left, greaterThanOrEqualTo(0));
+          expect(rect.right, lessThanOrEqualTo(360));
+        }
+        // 每格标签完整显示，不用省略号截断。
+        for (final text in tester.widgetList<Text>(
+          find.descendant(of: actions, matching: find.byType(Text)),
+        )) {
+          expect(text.overflow, isNot(TextOverflow.ellipsis));
+        }
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    cases.testWidgets(
+      'series detail keeps play in the upper half with favorite below it',
+      (tester) async {
+        final server = FakeEmbyServer();
+        final (router, _) = await start(
+          tester,
+          server,
+          width: 412,
+          height: 915,
+        );
+        await openItem(tester, router, 'series-friends');
+        final play = tester.getRect(
+          find.byKey(const Key('mobile-detail-play')),
+        );
+        final favorite = tester.getRect(
+          find.byKey(const Key('phone-detail-favorite')),
+        );
+        expect(play.bottom, lessThanOrEqualTo(915 / 2));
+        expect(favorite.top, greaterThan(play.bottom));
+        expect(favorite.bottom, lessThan(915));
+        // 顶栏只有返回：收藏不在顶栏里。
+        final bar = find.byType(PhoneTopBar);
+        expect(
+          find.descendant(
+            of: bar,
+            matching: find.byKey(const Key('phone-detail-favorite')),
+          ),
+          findsNothing,
+        );
+        expect(tester.getRect(bar).bottom, lessThan(favorite.top));
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -3954,3 +4060,13 @@ final cases = CaseShard(3);
 
 void mainShard(int part, int expectedParts) =>
     cases.register(part, main, expectedParts: expectedParts);
+
+/// 共享季切换器手机标签（`CatalogKeys.season(id)`）是否为选中态。
+bool _seasonSelected(WidgetTester tester, String id) => tester
+    .widget<AppButton>(
+      find.descendant(
+        of: find.byKey(CatalogKeys.season(id)),
+        matching: find.byType(AppButton),
+      ),
+    )
+    .selected;

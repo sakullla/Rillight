@@ -2,15 +2,15 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/artwork_mood_cases.dart' as case1;
-import '../app/content_theme_motion_cases.dart' as case2;
-import '../app/desktop_gestures_cases.dart' as case3;
-import '../auth/library_counts_cases.dart' as case4;
-import '../home/hero_playback_actions_cases.dart' as case5;
+import '../app/android_bootstrap_cases.dart' as case1;
+import '../catalog/desktop_provider_filter_cases.dart' as case2;
+import '../home/hero_playback_actions_cases.dart' as case3;
+import '../library/person_works_cases.dart' as case4;
+import '../mobile/phone_detail_redesign_cases.dart' as case5;
 import '../mobile/phone_pages_cases.dart' as case6;
 import '../player/ended_navigation_cases.dart' as case7;
 import '../player/playback_overlay_widgets_cases.dart' as case8;
-import '../tv/tv_lan_pair_cases.dart' as case9;
+import '../widgets/liquid_glass_cases.dart' as case9;
 import '../widgets/scrim_icon_button_cases.dart' as case10;
 import '../helpers/suite.dart';
 
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 2]',
     () => case0.mainShard(1, 6),
   );
-  group('app/artwork_mood_test.dart', case1.main);
-  group('app/content_theme_motion_test.dart', case2.main);
-  group('app/desktop_gestures_test.dart', case3.main);
-  group('auth/library_counts_test.dart', case4.main);
-  group('home/hero_playback_actions_test.dart', case5.main);
+  group('app/android_bootstrap_test.dart', case1.main);
+  group('catalog/desktop_provider_filter_test.dart', case2.main);
+  group('home/hero_playback_actions_test.dart', case3.main);
+  group('library/person_works_test.dart', case4.main);
+  group('mobile/phone_detail_redesign_test.dart', case5.main);
   group('mobile/phone_pages_test.dart [part 3]', () => case6.mainShard(2, 3));
   group('player/ended_navigation_test.dart', case7.main);
   group('player/playback_overlay_widgets_test.dart', case8.main);
-  group('tv/tv_lan_pair_test.dart [part 2]', () => case9.mainShard(1, 3));
+  group('widgets/liquid_glass_test.dart', case9.main);
   group('widgets/scrim_icon_button_test.dart', case10.main);
 }

@@ -342,15 +342,34 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
   }
 
-  /// 观看流程里的状态钮（已看）：与从头播放/上下集同排在播放钮下方，
-  /// 图标在上、短标签在下，状态变化时标签同步改写（标记已看→已看过）。
+  /// 播放钮下方带标签格行里的状态与作品级操作：收藏、已看、其他来源。
+  /// 图标在上、短标签在下；收藏与已看是开关，激活时实底加填充图标，
+  /// 标签同步改写（收藏→已收藏，标记已看→已看过）。不可用的项不渲染。
   List<Widget> _statusButtons(
     AppLocalizations l,
     MediaItem item,
     DetailController controller,
   ) {
+    final favorite = controller.supportsFavorite
+        ? item.userData.favorite
+        : null;
     final played = item.isSeries ? null : item.userData.played;
     return [
+      if (favorite != null)
+        Semantics(
+          key: const Key('phone-detail-favorite-semantics'),
+          toggled: favorite,
+          child: _StatusIconButton(
+            key: const Key('phone-detail-favorite'),
+            icon: AppIcons.favorite,
+            label: favorite ? l.phoneFavorited : l.phoneFavorite,
+            tooltip: favorite ? l.phoneFavorited : l.phoneFavorite,
+            highlighted: favorite,
+            onPressed: controller.favoriteBusy
+                ? null
+                : () => unawaited(_toggleFavorite()),
+          ),
+        ),
       if (played != null)
         Semantics(
           key: const Key('phone-detail-played-semantics'),
@@ -366,46 +385,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 : () => unawaited(_togglePlayed()),
           ),
         ),
-    ];
-  }
-
-  /// 顶栏右上角：关于「这部作品」而非「这次观看」的操作——跨服务器
-  /// 「其他来源」与收藏。顶栏常驻，滚到分集深处也随手可点；正文不再为
-  /// 两枚低频圆钮单占一行，剧集/季页首屏能多露出分集。
-  List<Widget> _barActions(
-    AppLocalizations l,
-    MediaItem item,
-    DetailController controller, {
-    required bool immersive,
-  }) {
-    final favorite = controller.supportsFavorite
-        ? item.userData.favorite
-        : null;
-    return [
       if (SourceSelectionAction.availableIn(context))
         SourceSelectionAction(
-          builder: (context, view) => _BarAction(
+          builder: (context, view) => _StatusIconButton(
             key: SourceSelectionActionView.key,
             icon: view.icon,
+            label: view.shortLabel,
             tooltip: view.label,
-            immersive: immersive,
             busy: view.loading,
             onPressed: view.loading ? null : view.onPressed,
-          ),
-        ),
-      if (favorite != null)
-        Semantics(
-          key: const Key('phone-detail-favorite-semantics'),
-          toggled: favorite,
-          child: _BarAction(
-            key: const Key('phone-detail-favorite'),
-            icon: AppIcons.favorite,
-            tooltip: favorite ? l.phoneFavorited : l.phoneFavorite,
-            immersive: immersive,
-            active: favorite,
-            onPressed: controller.favoriteBusy
-                ? null
-                : () => unawaited(_toggleFavorite()),
           ),
         ),
     ];
@@ -994,14 +982,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                   right: 0,
                   child: _PhoneDetailBar(
                     immersive: immersive,
-                    actions: item == null || failed
-                        ? const []
-                        : _barActions(
-                            l,
-                            item,
-                            controller,
-                            immersive: immersive,
-                          ),
                     title: _barSolid ? (item ?? handoff?.item)?.name : null,
                   ),
                 ),
@@ -1015,19 +995,13 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 }
 
 /// 电影详情和剧集页共用的浮层顶栏。返回钮就是 [PhoneTopBar]；
-/// 头图还在时背景透明，滚过画面后交给手机顶栏自己的底色和标题。
+/// 头图还在时背景透明，滚过画面后交给手机顶栏自己的底色和标题。顶栏只留
+/// 返回；收藏与其他来源在播放钮下方的带标签格行里。
 class _PhoneDetailBar extends StatelessWidget {
-  const _PhoneDetailBar({
-    required this.immersive,
-    this.title,
-    this.actions = const [],
-  });
+  const _PhoneDetailBar({required this.immersive, this.title});
 
   final bool immersive;
   final String? title;
-
-  /// 右上角作品级操作（其他来源、收藏）。
-  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -1072,9 +1046,6 @@ class _PhoneDetailBar extends StatelessWidget {
                   ),
                 ),
           title: label == null ? null : Text(label),
-          trailing: actions.isEmpty
-              ? null
-              : Row(mainAxisSize: MainAxisSize.min, children: actions),
         ),
       ],
     );
@@ -1082,9 +1053,9 @@ class _PhoneDetailBar extends StatelessWidget {
 }
 
 /// 头部主操作：播放钮（`mobile-detail-play`）通栏，续播时下面是一条进度和
-/// 「剩余 N 分钟」。再往下是一行「观看流程」带标签圆钮：已看（经 [status]
-/// 传入）、从头播放 `phone-detail-play-start`、上一集/下一集；只有可用项，
-/// 空则整行不画（剧集/季页）。收藏与其他来源在顶栏右上角。播放钮位置不受
+/// 「剩余 N 分钟」。再往下是带标签格行：从头播放 `phone-detail-play-start`、
+/// 上一集/下一集，然后是经 [status] 传入的收藏、已看与其他来源；只有可用项，
+/// 空则整行不画，窄屏放不下时整组折成两行。顶栏只留返回。播放钮位置不受
 /// 次级行影响，加载前后版式不跳，且始终落在首屏上半部。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
@@ -1112,7 +1083,7 @@ class _DetailPlayActions extends StatelessWidget {
   final VoidCallback? onPlay;
   final VoidCallback? onRestart;
 
-  /// 状态钮（已看），排在操作行最前。
+  /// 状态与作品级操作（收藏、已看、其他来源），排在观看流程钮之后。
   final List<Widget> status;
 
   /// 续播进度 0–1；为 null 时不画进度行。
@@ -1128,8 +1099,8 @@ class _DetailPlayActions extends StatelessWidget {
     final scheme = theme.colorScheme;
     final progress = this.progress;
     final progressLabel = this.progressLabel;
+    // 顺序与桌面动作组一致：从头播放、上一集、下一集，然后收藏、已看、其他来源。
     final secondary = <Widget>[
-      ...status,
       if (showRestart)
         _StatusIconButton(
           key: const Key('phone-detail-play-start'),
@@ -1154,6 +1125,7 @@ class _DetailPlayActions extends StatelessWidget {
           tooltip: l.nextEpisode,
           onPressed: onNext,
         ),
+      ...status,
     ];
     const shape = StadiumBorder();
     final playButton = AppTooltip(
@@ -1221,19 +1193,40 @@ class _DetailPlayActions extends StatelessWidget {
         ],
         if (secondary.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
-          // 每格同宽（最多 72dp，放不下时均分），图标在上、标签在下；
+          // 每格同宽（最多 76dp，放不下时均分），图标在上、标签在下；
           // 整格都是触控区，不再要求用户长按看 tooltip 才知道是什么。
+          // 均分后一格窄于标签所需时整组折行（各行格数尽量相等）。
           LayoutBuilder(
             builder: (context, constraints) {
-              final cell = math.min(
-                _StatusIconButton.maxCellWidth,
-                constraints.maxWidth / secondary.length,
+              final layout = _StatusIconButton.gridOf(
+                context,
+                width: constraints.maxWidth,
+                count: secondary.length,
               );
-              return Row(
+              return Column(
                 key: const Key('phone-detail-actions'),
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final button in secondary)
-                    SizedBox(width: cell, child: button),
+                  for (
+                    var start = 0;
+                    start < secondary.length;
+                    start += layout.perRow
+                  )
+                    Padding(
+                      padding: EdgeInsets.only(
+                        top: start == 0 ? 0 : AppSpacing.xs,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final button in secondary.sublist(
+                            start,
+                            math.min(start + layout.perRow, secondary.length),
+                          ))
+                            SizedBox(width: layout.cell, child: button),
+                        ],
+                      ),
+                    ),
                 ],
               );
             },
@@ -1244,100 +1237,10 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 顶栏右上角的作品级操作钮：44dp 触控区、36dp 圆底。压在画面上时与返回钮
-/// 同款深色 scrim 圆底 + 白图标；滚过画面后去掉圆底，跟顶栏前景色。
-/// [active]（已收藏）用同一图形的实心，脱离画面时着主色。
-class _BarAction extends StatelessWidget {
-  const _BarAction({
-    super.key,
-    required this.icon,
-    required this.tooltip,
-    required this.immersive,
-    required this.onPressed,
-    this.active = false,
-    this.busy = false,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final bool immersive;
-  final VoidCallback? onPressed;
-  final bool active;
-  final bool busy;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = phoneChromeTheme(context).colorScheme;
-    final duration = AppMotion.durationOf(context, AppMotion.fast);
-    final enabled = onPressed != null || busy;
-    final base = immersive ? AppInk.white : scheme.onSurface;
-    final color = !enabled
-        ? base.withValues(alpha: .38)
-        : active && !immersive
-        ? scheme.primary
-        : base;
-    return AppTooltip(
-      message: tooltip,
-      child: MobilePressFeedback(
-        enabled: onPressed != null,
-        scale: .9,
-        child: AppSurfaceAction(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          child: SizedBox.square(
-            dimension: PhoneTopBar.bodyHeight,
-            child: Center(
-              child: AnimatedContainer(
-                duration: duration,
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: immersive
-                      ? AppInk.scrim(AppScrim.of(context, .38))
-                      : AppInk.transparent,
-                  border: immersive
-                      ? Border.all(color: AppInk.white.withValues(alpha: .16))
-                      : null,
-                ),
-                child: Center(
-                  child: AnimatedSwitcher(
-                    duration: duration,
-                    switchInCurve: AppMotion.emphasized,
-                    transitionBuilder: (child, animation) => ScaleTransition(
-                      scale: Tween<double>(
-                        begin: .6,
-                        end: 1,
-                      ).animate(animation),
-                      child: FadeTransition(opacity: animation, child: child),
-                    ),
-                    child: busy
-                        ? CupertinoActivityIndicator(
-                            key: const ValueKey('busy'),
-                            color: color,
-                          )
-                        : Icon(
-                            icon,
-                            key: ValueKey(active),
-                            size: 22,
-                            color: color,
-                            fill: active ? AppIcons.filled : AppIcons.outline,
-                          ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// 带标签的安静圆钮：40dp 圆形，`surfaceContainerHigh` 六成底加发丝边，
 /// 图标用 `onSurfaceVariant`；激活（已收藏/已看）换 [AppSelectionDecoration]
-/// 实底与 `onPrimaryContainer` 填充图标。圆钮下方是一行短标签，
-/// 整格（圆钮 + 标签）都可点。
+/// 实底与 `onPrimaryContainer` 填充图标。圆钮下方是短标签（最多两行，不省略），
+/// 整格（圆钮 + 标签）都可点。[busy] 时圆钮里换成转圈（其他来源查询中）。
 class _StatusIconButton extends StatelessWidget {
   const _StatusIconButton({
     super.key,
@@ -1346,6 +1249,7 @@ class _StatusIconButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.highlighted = false,
+    this.busy = false,
   });
 
   final IconData icon;
@@ -1355,17 +1259,41 @@ class _StatusIconButton extends StatelessWidget {
   final String tooltip;
   final VoidCallback? onPressed;
   final bool highlighted;
+  final bool busy;
 
   static const double _size = 42;
 
   /// 一格的最大宽度；格数多时按可用宽度均分。
   static const double maxCellWidth = 76;
 
+  static const double _captionSize = 12;
+
+  /// 一格放下四字标签所需的最小宽度，随系统字号放大。
+  static double minCellWidthOf(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(_captionSize) * 4 + 12;
+
+  /// 带标签格行的排布：均分后一格不窄于 [minCellWidthOf] 就排一行；
+  /// 否则折成多行，每行格数尽量相等。格宽不超过 [maxCellWidth]，大字号下
+  /// 上限随标签所需宽度放大，标签不因格宽封顶而折行。
+  static ({int perRow, double cell}) gridOf(
+    BuildContext context, {
+    required double width,
+    required int count,
+  }) {
+    final minCell = minCellWidthOf(context);
+    final maxCell = math.max(maxCellWidth, minCell);
+    if (count <= 0) return (perRow: 1, cell: maxCell);
+    final fit = math.max(1, (width / minCell).floor());
+    final rows = (count / fit).ceil();
+    final perRow = (count / rows).ceil();
+    return (perRow: perRow, cell: math.min(maxCell, width / perRow));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final enabled = onPressed != null;
+    final enabled = onPressed != null || busy;
     final duration = AppMotion.durationOf(context, AppMotion.fast);
     final color = !enabled
         ? scheme.onSurfaceVariant.withValues(alpha: .38)
@@ -1379,13 +1307,19 @@ class _StatusIconButton extends StatelessWidget {
         scale: Tween<double>(begin: .6, end: 1).animate(animation),
         child: FadeTransition(opacity: animation, child: child),
       ),
-      child: Icon(
-        icon,
-        key: ValueKey(highlighted),
-        size: 20,
-        color: color,
-        fill: highlighted ? AppIcons.filled : AppIcons.outline,
-      ),
+      child: busy
+          ? CupertinoActivityIndicator(
+              key: const ValueKey('busy'),
+              color: color,
+              radius: 8,
+            )
+          : Icon(
+              icon,
+              key: ValueKey(highlighted),
+              size: 20,
+              color: color,
+              fill: highlighted ? AppIcons.filled : AppIcons.outline,
+            ),
     );
     final circle = AnimatedContainer(
       duration: duration,
@@ -1403,13 +1337,15 @@ class _StatusIconButton extends StatelessWidget {
             ),
       child: Center(child: animatedIcon),
     );
+    // 标签不省略：格宽按四字标签留足，超长时折成两行。
     final caption = Text(
       label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
+      maxLines: 2,
+      softWrap: true,
+      overflow: TextOverflow.clip,
       textAlign: TextAlign.center,
       style: theme.textTheme.labelSmall?.copyWith(
-        fontSize: 12,
+        fontSize: _captionSize,
         height: 1.2,
         color: !enabled
             ? scheme.onSurfaceVariant.withValues(alpha: .38)
@@ -1422,7 +1358,7 @@ class _StatusIconButton extends StatelessWidget {
     return AppTooltip(
       message: tooltip,
       child: MobilePressFeedback(
-        enabled: enabled,
+        enabled: onPressed != null,
         scale: .94,
         child: AppSurfaceAction(
           onTap: onPressed,

@@ -18,6 +18,7 @@ import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/item_format.dart';
+import 'package:rillight/library/season_switcher.dart';
 import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -39,6 +40,9 @@ class TvDetailPage extends StatefulWidget {
 }
 
 class _TvDetailPageState extends State<TvDetailPage> {
+  /// 季切换折叠为单个焦点按钮时的返回焦点 id。
+  static const _seasonPickerFocus = 'season-picker';
+
   DetailController? _controller;
   final _focus = TvReturnFocus();
   final _scrolled = ValueNotifier<double>(0);
@@ -192,6 +196,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
       listenable: c,
       builder: (context, _) {
         _focus.retain([
+          _seasonPickerFocus,
           for (final season in c.seasons) 'season:${season.id}',
           for (final episode in c.episodes) 'episode:${episode.id}',
         ]);
@@ -400,11 +405,13 @@ class _TvDetailPageState extends State<TvDetailPage> {
           child: Text(l.nextEpisode),
         ),
       // 收藏、已看紧跟导航动作，三类详情页位置一致；遥控器没有悬停，
-      // 一律带字。
+      // 一律带字。两者是开关：激活时 primaryContainer 实底加填充图标，
+      // 标签改写为状态（已收藏、已看），读屏另有 toggled。
       if (c.supportsFavorite)
         TvAction(
           key: const Key('tv-detail-favorite'),
           pill: true,
+          active: item.userData.favorite,
           leading: Icon(
             AppIcons.favorite,
             fill: item.userData.favorite ? AppIcons.filled : AppIcons.outline,
@@ -418,13 +425,14 @@ class _TvDetailPageState extends State<TvDetailPage> {
         TvAction(
           key: const Key('tv-detail-played-toggle'),
           pill: true,
+          active: item.userData.played,
           leading: Icon(
             item.userData.played
-                ? CupertinoIcons.xmark_circle
-                : CupertinoIcons.checkmark_alt,
+                ? CupertinoIcons.checkmark_circle_fill
+                : CupertinoIcons.checkmark_circle,
           ),
           onPressed: c.playedBusy ? null : _togglePlayed,
-          child: Text(item.userData.played ? l.markUnplayed : l.markPlayed),
+          child: Text(item.userData.played ? l.watchedAction : l.markPlayed),
         ),
       // 跨服务器「其他来源」：电视没有悬停提示，图标钮读不出含义，
       // 改为带字胶囊排在行尾；打开对话框期间保持可聚焦，关闭后焦点回到这里。
@@ -482,24 +490,20 @@ class _TvDetailPageState extends State<TvDetailPage> {
               ),
             ),
             SizedBox(width: AppSpacing.lg * s),
+            // 共享季切换器的 TV 呈现：放得下时是一排焦点标签，放不下时折叠为
+            // 一个焦点按钮，按下弹出可聚焦的季列表。标签沿用 `season:<id>`
+            // 焦点节点，从按钮行按「下」直接落到这里。
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                child: Row(
-                  children: [
-                    for (final season in c.seasons) ...[
-                      TvAction(
-                        key: ValueKey(season.id),
-                        variant: TvActionVariant.ghost,
-                        focusNode: _focus.nodeFor('season:${season.id}'),
-                        selected: season.id == c.seasonId,
-                        onPressed: () => c.selectSeason(season.id),
-                        child: Text(season.name),
-                      ),
-                      SizedBox(width: AppSpacing.xxs * s),
-                    ],
-                  ],
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SeasonSwitcher(
+                  platform: SeasonSwitcherPlatform.tv,
+                  seasons: c.seasons,
+                  currentId: c.seasonId,
+                  tabKey: (id) => ValueKey(id),
+                  focusNodeFor: (id) => _focus.nodeFor('season:$id'),
+                  pickerFocusNode: _focus.nodeFor(_seasonPickerFocus),
+                  onSelected: (id) => c.selectSeason(id),
                 ),
               ),
             ),
@@ -740,7 +744,9 @@ class _TvEpisodeRowState extends State<_TvEpisodeRow> {
                 current: current,
                 focusNode: widget.nodeFor(episode),
                 imageMaxWidth: metrics.imageMaxWidth,
-                title: episodeLabel(episode),
+                // 「N. 集名」；集名已以集数开头（「第 3 集 …」）时直接用集名，
+                // 不再叠一层 S1E3 前缀。
+                title: numberedEpisodeTitle(episode),
                 subtitle: meta.join(' · '),
                 badge: runtimeLabel(l, episode),
                 onPressed: () => context.push(

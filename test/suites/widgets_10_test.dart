@@ -2,17 +2,17 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/playback_runtime_cases.dart' as case0;
-import '../app/app_shell_top_bar_cases.dart' as case1;
-import '../app/browsing_polish_cases.dart' as case2;
-import '../auth/provider_connect_management_cases.dart' as case3;
-import '../catalog/filter_panel_cases.dart' as case4;
-import '../catalog/item_detail_cases.dart' as case5;
-import '../library/season_switcher_cases.dart' as case6;
+import '../app/startup_history_recovery_cases.dart' as case1;
+import '../catalog/filter_panel_cases.dart' as case2;
+import '../catalog/item_detail_cases.dart' as case3;
+import '../home/hero_logo_cases.dart' as case4;
+import '../home/library_tiles_cases.dart' as case5;
+import '../mobile/phone_home_first_screen_cases.dart' as case6;
 import '../mobile/phone_pages_cases.dart' as case7;
-import '../mobile/phone_player_interaction_cases.dart' as case8;
-import '../mobile/tv_shelf_focus_cases.dart' as case9;
-import '../player/player_window_cases.dart' as case10;
-import '../settings_page_cases.dart' as case11;
+import '../player/desktop_player_window_host_cases.dart' as case8;
+import '../player/subtitle_menu_cases.dart' as case9;
+import '../settings_page_cases.dart' as case10;
+import '../tv/tv_lan_pair_cases.dart' as case11;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,15 +21,15 @@ void main() {
     'aggregation/playback_runtime_test.dart [part 2]',
     () => case0.mainShard(1, 3),
   );
-  group('app/app_shell_top_bar_test.dart', case1.main);
-  group('app/browsing_polish_test.dart', case2.main);
-  group('auth/provider_connect_management_test.dart', case3.main);
-  group('catalog/filter_panel_test.dart', case4.main);
-  group('catalog/item_detail_test.dart [part 2]', () => case5.mainShard(1, 3));
-  group('library/season_switcher_test.dart', case6.main);
+  group('app/startup_history_recovery_test.dart', case1.main);
+  group('catalog/filter_panel_test.dart', case2.main);
+  group('catalog/item_detail_test.dart [part 2]', () => case3.mainShard(1, 3));
+  group('home/hero_logo_test.dart', case4.main);
+  group('home/library_tiles_test.dart', case5.main);
+  group('mobile/phone_home_first_screen_test.dart', case6.main);
   group('mobile/phone_pages_test.dart [part 1]', () => case7.mainShard(0, 3));
-  group('mobile/phone_player_interaction_test.dart', case8.main);
-  group('mobile/tv_shelf_focus_test.dart', case9.main);
-  group('player/player_window_test.dart', case10.main);
-  group('settings_page_test.dart', case11.main);
+  group('player/desktop_player_window_host_test.dart', case8.main);
+  group('player/subtitle_menu_test.dart', case9.main);
+  group('settings_page_test.dart', case10.main);
+  group('tv/tv_lan_pair_test.dart [part 1]', () => case11.mainShard(0, 3));
 }

@@ -48,6 +48,8 @@ import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
+import 'package:rillight/library/season_switcher.dart';
+
 const _device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
@@ -1530,7 +1532,7 @@ void main() {
       await settle(tester);
       expect(find.byType(PhoneTopBar), findsOneWidget);
       expect(find.byKey(const Key('phone-season-list')), findsNothing);
-      expect(find.byType(PhoneSeasonTab), findsNothing);
+      expect(find.byType(SeasonSwitcher), findsNothing);
       final poster = tester.getRect(find.byKey(PhoneItemBanner.posterKey));
       expect(poster.height / poster.width, closeTo(1.5, 0.02));
       expect(
@@ -1585,12 +1587,7 @@ void main() {
     await tester.ensureVisible(second);
     await tester.tap(second);
     await settle(tester);
-    expect(
-      tester
-          .widget<PhoneSeasonTab>(find.widgetWithText(PhoneSeasonTab, '第 2 季'))
-          .selected,
-      isTrue,
-    );
+    expect(_seasonSelected(tester, 'season-friends-2'), isTrue);
     expect(find.text('第二季试点'), findsOneWidget);
     expect(find.text('第一季试点'), findsNothing);
     expect(find.byKey(const Key('phone-episode-watched')), findsNothing);
@@ -2834,3 +2831,13 @@ void _useSurface(WidgetTester tester, double width, double height) {
   addTearDown(tester.view.resetPadding);
   addTearDown(tester.view.resetViewPadding);
 }
+
+/// 共享季切换器手机标签（`CatalogKeys.season(id)`）是否为选中态。
+bool _seasonSelected(WidgetTester tester, String id) => tester
+    .widget<AppButton>(
+      find.descendant(
+        of: find.byKey(CatalogKeys.season(id)),
+        matching: find.byType(AppButton),
+      ),
+    )
+    .selected;
