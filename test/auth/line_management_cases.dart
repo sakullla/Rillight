@@ -1306,4 +1306,146 @@ void main() {
     expect(find.text('自动选择 · 家庭直连'), findsOneWidget);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  // ---------- editor line rows: current/auto marker and latency ----------
+
+  /// 同一台服务器的两条线路;当前线路带测速延迟,备用线路没有测速数据。
+  Future<(AuthController, String, String, String)> editorLines(
+    WidgetTester tester, {
+    required bool automatic,
+  }) async {
+    final lan = FakeEmbyServer(
+      baseUrl: Uri.parse('http://editor-lan.test:8096'),
+    );
+    final wan = FakeEmbyServer(
+      serverId: lan.serverId,
+      serverName: lan.serverName,
+      baseUrl: Uri.parse('http://editor-wan.test:8096'),
+    );
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(() async {
+      for (final remote in [lan, wan]) {
+        await auth.connect(
+          address: remote.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+      }
+    });
+    final saved = auth.savedServers.single;
+    final activeId = saved.activeLineId!;
+    final standbyId = saved.lines.firstWhere((l) => l.id != activeId).id;
+    await tester.runAsync(
+      () => auth.saveConfiguration(
+        saved.id,
+        nickname: saved.displayName,
+        userAgent: saved.userAgent ?? '',
+        lines: [
+          for (final line in saved.lines)
+            line.id == activeId ? line.copyWith(latencyMs: 42) : line,
+        ],
+        lineSelection: automatic
+            ? const LineSelection.auto()
+            : LineSelection.fixed(activeId),
+      ),
+    );
+    expect(auth.savedServers.single.activeLineId, activeId);
+    expect(auth.savedServers.single.lineSelection.isAutomatic, automatic);
+    return (auth, saved.id, activeId, standbyId);
+  }
+
+  for (final (phone, automatic) in [(false, true), (true, false)]) {
+    testWidgets(
+      'server editor line rows show current marker and latency on ${phone ? "phone" : "desktop"} (${automatic ? "auto" : "fixed"})',
+      (tester) async {
+        tester.view.physicalSize = Size(phone ? 360 : 1200, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final (auth, id, activeId, standbyId) = await editorLines(
+          tester,
+          automatic: automatic,
+        );
+        await pumpServerSelection(tester, auth, phone: phone);
+        await openServerEditor(tester, id);
+        Finder inRow(String lineId, Finder matching) => find.descendant(
+          of: find.byKey(Key('server-editor-line-$lineId')),
+          matching: matching,
+        );
+        expect(inRow(activeId, find.text('当前')), findsOneWidget);
+        expect(
+          inRow(
+            activeId,
+            find.text(automatic ? ' · 自动选择 · 42 ms' : ' · 42 ms'),
+          ),
+          findsOneWidget,
+        );
+        expect(inRow(standbyId, find.text('当前')), findsNothing);
+        expect(inRow(standbyId, find.textContaining('自动选择')), findsNothing);
+        expect(inRow(standbyId, find.textContaining('ms')), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+  }
+
+  testWidgets(
+    'TV server header counts servers and editor lines show current and latency',
+    (tester) async {
+      isolateImageCache();
+      tester.view.physicalSize = const Size(960, 540);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final (auth, id, activeId, standbyId) = await editorLines(
+        tester,
+        automatic: true,
+      );
+      final app = RillightApp(
+        auth: auth,
+        environment: PresentationEnvironment.tv,
+        playerBindings: PlayerBindings(
+          createBackend: () => FakeVideoBackend(),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          settingsStore: MemoryPlayerSettingsStore(),
+        ),
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      });
+      await tester.pumpWidget(app);
+      await settle(tester);
+
+      await tvPress(tester, const Key('tv-nav-user'));
+      final header = find.byKey(const Key('tv-frame-header'));
+      expect(
+        find.descendant(of: header, matching: find.text('服务器')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: header, matching: find.text('1 台服务器')),
+        findsOneWidget,
+      );
+      await tvOpenEditor(tester, id);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(Key('server-editor-line-status-$activeId')),
+            )
+            .data,
+        '当前 · 自动选择 · 42 ms',
+      );
+      expect(
+        find.byKey(Key('server-editor-line-status-$standbyId')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }

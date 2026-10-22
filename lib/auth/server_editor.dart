@@ -515,10 +515,15 @@ class ServerEditorState extends State<ServerEditor> {
                       ],
                     ],
                   ),
-                  subtitle: Text(
-                    serverSafeAddress(lines[i].address),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  subtitle: _LineSubtitle(
+                    address: serverSafeAddress(lines[i].address),
+                    // 「当前」已由标题旁的标签标出,这里只补自动选择与延迟。
+                    marks: serverLineEditorMarks(
+                      l,
+                      widget.server,
+                      lines[i],
+                      current: false,
+                    ),
                   ),
                   trailing: AppMenuButton<String>(
                     key: Key('server-editor-line-more-${lines[i].id}'),
@@ -722,6 +727,28 @@ class _ServerIconChoice extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 编辑器线路行的副标题:地址放不下时省略地址尾部,自动选择与延迟等
+/// 状态标记始终完整显示。
+class _LineSubtitle extends StatelessWidget {
+  const _LineSubtitle({required this.address, required this.marks});
+  final String address;
+  final List<String> marks;
+  @override
+  Widget build(BuildContext context) {
+    if (marks.isEmpty) {
+      return Text(address, maxLines: 1, overflow: TextOverflow.ellipsis);
+    }
+    return Row(
+      children: [
+        Flexible(
+          child: Text(address, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        Text(' · ${marks.join(' · ')}', maxLines: 1),
+      ],
     );
   }
 }

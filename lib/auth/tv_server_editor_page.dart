@@ -338,6 +338,22 @@ class _TvServerEditorState extends ServerEditorState {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
+                          // 与线路选择页同一套措辞:当前线路、自动选择、延迟。
+                          for (final status in [
+                            serverLineEditorMarks(
+                              l,
+                              widget.server,
+                              line,
+                            ).join(' · '),
+                          ])
+                            if (status.isNotEmpty)
+                              Text(
+                                status,
+                                key: Key(
+                                  'server-editor-line-status-${line.id}',
+                                ),
+                                maxLines: 1,
+                              ),
                         ],
                       ),
                     ),

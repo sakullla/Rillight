@@ -283,6 +283,8 @@ class _TvServerSelectionState extends ServerSelectionPageState {
             .toList();
         content = TvServerFlowFrame(
           title: l.serversTitle,
+          // 与桌面/手机一致:标题下标出服务器数量。
+          subtitle: all.isEmpty ? null : l.loginServerCount(all.length),
           onBack: back,
           scroll: false,
           action: TvAction(

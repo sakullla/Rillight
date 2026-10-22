@@ -57,6 +57,24 @@ String serverLineSummary(
   return serverLineHostLabel(active, withPort: withPort);
 }
 
+/// 服务器编辑器线路行的状态标记:当前使用的线路([current] 为 false 时
+/// 由调用方用标签单独标出)、自动选择模式下由自动选中的线路,以及有测速
+/// 数据时的延迟。与线路选择页同一套措辞。
+List<String> serverLineEditorMarks(
+  AppLocalizations l,
+  SavedServer server,
+  ServerLine line, {
+  bool current = true,
+}) {
+  final active = server.activeLine?.id == line.id;
+  final latency = line.latencyMs;
+  return [
+    if (current && active) l.serversLineActual,
+    if (active && server.lineSelection.isAutomatic) l.serversAutomatic,
+    if (latency != null) l.serversLatency(latency),
+  ];
+}
+
 /// 线路标签的自适应排布,三端的线路入口共用:
 ///
 /// 1. [full](主机:端口)单行放得下就单行显示;

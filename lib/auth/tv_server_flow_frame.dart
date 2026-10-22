@@ -11,9 +11,13 @@ class TvServerFlowFrame extends StatelessWidget {
     required this.onBack,
     required this.child,
     this.action,
+    this.subtitle,
     this.scroll = true,
   });
   final String title;
+
+  /// 标题下的说明,例如服务器数量;只是文字,不加入焦点顺序。
+  final String? subtitle;
   final VoidCallback onBack;
   final Widget child;
   final Widget? action;
@@ -21,6 +25,7 @@ class TvServerFlowFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TvFrame(
     title: title,
+    subtitle: subtitle,
     actions: [
       ?action,
       TvAction(
