@@ -2,17 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/desktop_performance_host_cases.dart' as case1;
-import '../app/update_check_cases.dart' as case2;
-import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case3;
-import '../helpers/capture_png_cases.dart' as case4;
-import '../home/home_page_cases.dart' as case5;
-import '../home/library_tiles_cases.dart' as case6;
+import '../auth/login_widgets_cases.dart' as case1;
+import '../auth/provider_connect_entry_user_agent_cases.dart' as case2;
+import '../library/episode_thumb_cases.dart' as case3;
+import '../mobile/detail_route_identity_cases.dart' as case4;
+import '../mobile/phone_detail_redesign_cases.dart' as case5;
+import '../mobile/phone_home_first_screen_cases.dart' as case6;
 import '../mobile/phone_home_rails_cases.dart' as case7;
 import '../mobile/phone_player_cases.dart' as case8;
-import '../player/desktop_player_window_host_cases.dart' as case9;
-import '../player/playback_image_release_cases.dart' as case10;
-import '../tv/tv_top_nav_scale_cases.dart' as case11;
+import '../player/buffer_snapshot_cases.dart' as case9;
+import '../widgets/skeleton_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,15 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 5]',
     () => case0.mainShard(4, 6),
   );
-  group('app/desktop_performance_host_test.dart', case1.main);
-  group('app/update_check_test.dart', case2.main);
-  group('catalog/shelf_grid_scroll_rebuild_test.dart', case3.main);
-  group('helpers/capture_png_test.dart', case4.main);
-  group('home/home_page_test.dart', case5.main);
-  group('home/library_tiles_test.dart', case6.main);
+  group('auth/login_widgets_test.dart', case1.main);
+  group('auth/provider_connect_entry_user_agent_test.dart', case2.main);
+  group('library/episode_thumb_test.dart', case3.main);
+  group('mobile/detail_route_identity_test.dart', case4.main);
+  group('mobile/phone_detail_redesign_test.dart', case5.main);
+  group('mobile/phone_home_first_screen_test.dart', case6.main);
   group('mobile/phone_home_rails_test.dart', case7.main);
   group('mobile/phone_player_test.dart [part 2]', () => case8.mainShard(1, 4));
-  group('player/desktop_player_window_host_test.dart', case9.main);
-  group('player/playback_image_release_test.dart', case10.main);
-  group('tv/tv_top_nav_scale_test.dart', case11.main);
+  group('player/buffer_snapshot_test.dart', case9.main);
+  group('widgets/skeleton_test.dart', case10.main);
 }

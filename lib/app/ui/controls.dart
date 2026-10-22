@@ -72,6 +72,7 @@ class AppButtonStyle {
     this.shape,
     this.textStyle,
     this.boxShadow,
+    this.faceExtent,
   });
   final EdgeInsetsGeometry? padding;
   final Size? minimumSize, fixedSize;
@@ -86,6 +87,10 @@ class AppButtonStyle {
   /// 投影:仅实底主按钮(如播放 CTA)需要,从画面里浮出来。描边/纯文本按钮
   /// 保持平面,浮层投影由 [AppShadow] 提供。
   final List<BoxShadow>? boxShadow;
+
+  /// 可见按钮面的最小高度。小于触控区时按钮面在触控区内垂直居中,
+  /// 触控区仍不低于 44;内容折行变高时按钮面随之变高,上下留白不变。
+  final double? faceExtent;
 }
 
 /// Selectable read-only text with an owned controller that follows its value.
@@ -182,6 +187,10 @@ class AppButton extends StatefulWidget {
   final ValueChanged<bool>? onFocusChange;
   final Size minimumSize;
   final AppButtonStyle? style;
+
+  /// The separately painted face when [AppButtonStyle.faceExtent] is set.
+  /// Otherwise the face is the button's own container.
+  static const faceKey = Key('app-button-face');
   @override
   State<AppButton> createState() => _AppButtonState();
 }
@@ -392,6 +401,40 @@ class _AppButtonState extends State<AppButton> {
                   borderRadius: BorderRadius.circular(face.radius),
                 ))
             .copyWith(side: face.side);
+    final decoration = ShapeDecoration(
+      color: face.fill,
+      shape: shape,
+      shadows: face.shadow,
+    );
+    final faceExtent = widget.style?.faceExtent;
+    // 按钮面单独绘制时,描边不再把触控区额外撑高,同档按钮严格等高。
+    final faceInset = faceExtent == null || faceExtent >= minimumSize.height
+        ? 0.0
+        : (minimumSize.height - faceExtent) / 2;
+    final separateFace = faceExtent != null;
+    final button = ExcludeFocus(
+      child: CupertinoButton(
+        padding: widget.style?.padding ?? widget.padding,
+        minimumSize: minimumSize,
+        onPressed: widget.onPressed,
+        child: IconTheme(
+          data: IconThemeData(color: face.foreground, size: 20),
+          child: DefaultTextStyle(
+            style:
+                (widget.style?.textStyle ??
+                        (widget.variant == AppButtonVariant.filled
+                            // 实底主按钮的字压在饱和色上,需要半粗才立得住。
+                            ? theme.textTheme.labelLarge!.copyWith(
+                                fontWeight: FontWeight.w600,
+                              )
+                            : theme.textTheme.labelLarge!))
+                    .copyWith(color: face.foreground),
+            textAlign: TextAlign.center,
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
     return FocusableActionDetector(
       enabled: enabled,
       focusNode: widget.focusNode,
@@ -448,34 +491,25 @@ class _AppButtonState extends State<AppButton> {
               constraints: fixedSize == null
                   ? null
                   : BoxConstraints.tight(_fixedHitSize(fixedSize, minimumSize)),
-              decoration: ShapeDecoration(
-                color: face.fill,
-                shape: shape,
-                shadows: face.shadow,
-              ),
-              child: ExcludeFocus(
-                child: CupertinoButton(
-                  padding: widget.style?.padding ?? widget.padding,
-                  minimumSize: minimumSize,
-                  onPressed: widget.onPressed,
-                  child: IconTheme(
-                    data: IconThemeData(color: face.foreground, size: 20),
-                    child: DefaultTextStyle(
-                      style:
-                          (widget.style?.textStyle ??
-                                  (widget.variant == AppButtonVariant.filled
-                                      // 实底主按钮的字压在饱和色上,需要半粗才立得住。
-                                      ? theme.textTheme.labelLarge!.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                        )
-                                      : theme.textTheme.labelLarge!))
-                              .copyWith(color: face.foreground),
-                      textAlign: TextAlign.center,
-                      child: widget.child,
+              decoration: separateFace ? null : decoration,
+              child: !separateFace
+                  ? button
+                  : Stack(
+                      alignment: Alignment.center,
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned.fill(
+                          top: faceInset,
+                          bottom: faceInset,
+                          child: AnimatedContainer(
+                            key: AppButton.faceKey,
+                            duration: duration,
+                            decoration: decoration,
+                          ),
+                        ),
+                        button,
+                      ],
                     ),
-                  ),
-                ),
-              ),
             ),
           ),
         ),

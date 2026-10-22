@@ -202,10 +202,17 @@ class TvAction extends StatefulWidget {
     this.trailing,
     this.variant = TvActionVariant.button,
     this.expand = false,
+    this.active,
   });
   final Widget child;
   final FutureOr<void> Function()? onPressed;
   final bool autofocus, selected, emphasized;
+
+  /// 开关的当前状态(已收藏、已看),与共享次级按钮的激活态对应。
+  ///
+  /// null 表示普通按钮;true 时静止态为 primaryContainer 实底与对应前景,
+  /// 并输出 Semantics `toggled`。聚焦时仍整块反相、放大,与其它按钮一致。
+  final bool? active;
 
   /// 胶囊形态:导航、筛选与季切换。
   final bool pill;
@@ -378,6 +385,8 @@ class _TvActionState extends State<TvAction>
     final focused = _focused;
     final card = variant == TvActionVariant.card;
     final inverted = focused && !card;
+    final activeRest =
+        widget.active == true && !card && !focused && !widget.emphasized;
     final rest = scheme.onSurface;
     final Color fill;
     if (card) {
@@ -386,6 +395,8 @@ class _TvActionState extends State<TvAction>
       fill = scheme.inverseSurface;
     } else if (widget.emphasized) {
       fill = scheme.primary;
+    } else if (activeRest) {
+      fill = scheme.primaryContainer;
     } else {
       fill = switch (variant) {
         TvActionVariant.ghost =>
@@ -402,6 +413,8 @@ class _TvActionState extends State<TvAction>
         ? scheme.onInverseSurface
         : widget.emphasized && !card
         ? scheme.onPrimary
+        : activeRest
+        ? scheme.onPrimaryContainer
         : null;
     final EdgeInsets padding = switch (variant) {
       TvActionVariant.card => EdgeInsets.zero,
@@ -465,7 +478,8 @@ class _TvActionState extends State<TvAction>
         child: DefaultTextStyle.merge(
           style: (textStyle ?? const TextStyle()).copyWith(
             color: foreground ?? scheme.onSurface,
-            fontWeight: widget.selected || widget.emphasized
+            fontWeight:
+                widget.selected || widget.emphasized || widget.active == true
                 ? FontWeight.w600
                 : null,
           ),
@@ -503,6 +517,7 @@ class _TvActionState extends State<TvAction>
           enabled: widget.onPressed != null,
           focused: focused,
           selected: widget.selected,
+          toggled: widget.active,
           child: GestureDetector(
             onTap: widget.onPressed == null ? null : _activate,
             child: _TvActionScope(

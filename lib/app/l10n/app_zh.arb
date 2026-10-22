@@ -590,6 +590,19 @@
   "@seasons": {
     "description": "Heading for a series season list."
   },
+  "seasonSwitcherTitle": "选择季",
+  "@seasonSwitcherTitle": {
+    "description": "Title of the season list opened from a folded season switcher."
+  },
+  "seasonSwitcherCurrent": "切换季，当前为{name}",
+  "@seasonSwitcherCurrent": {
+    "description": "Accessibility label of a folded season switcher showing the current season.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "seasonCount": "共{count}季",
   "@seasonCount": {
     "description": "How many seasons a series has.",

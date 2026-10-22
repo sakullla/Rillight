@@ -3,6 +3,8 @@ import '../helpers/widget_harness.dart';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 
@@ -439,7 +441,334 @@ void main() {
       BorderSide(color: AppUiTheme.dark().colorScheme.primary, width: 2),
     );
   });
+
+  testWidgets('secondary actions share one pill height per platform', (
+    tester,
+  ) async {
+    for (final (theme, extent) in [
+      (AppUiTheme.dark(), 40.0),
+      (AppUiTheme.light(), 40.0),
+      (AppUiTheme.phoneDark(), 44.0),
+      (AppUiTheme.phoneLight(), 44.0),
+    ]) {
+      await _pump(
+        tester,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppActionButton(
+              key: const Key('a'),
+              icon: AppIcons.favorite,
+              label: '\u6536\u85cf',
+              active: false,
+              onPressed: () {},
+            ),
+            AppActionButton(
+              key: const Key('b'),
+              icon: AppIcons.play,
+              label: '\u4ece\u5934\u64ad\u653e',
+              onPressed: () {},
+            ),
+            AppActionButton(
+              key: const Key('c'),
+              icon: AppIcons.favorite,
+              label: '\u5df2\u6536\u85cf',
+              active: true,
+              onPressed: () {},
+            ),
+          ],
+        ),
+        theme: theme,
+      );
+      for (final key in ['a', 'b', 'c']) {
+        final face = _actionFace(tester, Key(key));
+        expect(tester.getSize(face).height, extent, reason: key);
+        // \u89e6\u63a7\u533a\u4e0d\u4f4e\u4e8e 44,\u6309\u94ae\u9762\u5728\u5176\u4e2d\u5c45\u4e2d\u3002
+        expect(
+          tester
+              .getSize(
+                find.descendant(
+                  of: find.byKey(Key(key)),
+                  matching: find.byType(AppButton),
+                ),
+              )
+              .height,
+          greaterThanOrEqualTo(44),
+        );
+        final shape =
+            _actionDecoration(tester, Key(key)).shape as RoundedRectangleBorder;
+        expect(
+          shape.borderRadius.resolve(TextDirection.ltr),
+          BorderRadius.circular(AppRadii.pill),
+        );
+        // \u5e26\u56fe\u6807\u548c\u6587\u5b57\u3002
+        expect(
+          find.descendant(
+            of: find.byKey(Key(key)),
+            matching: find.byType(Icon),
+          ),
+          findsOneWidget,
+        );
+      }
+    }
+  });
+
+  testWidgets('secondary labels wrap instead of showing an ellipsis', (
+    tester,
+  ) async {
+    const label =
+        '\u6253\u5f00\u5176\u4ed6\u670d\u52a1\u5668\u4e0a\u7684\u540c\u4e00\u90e8\u5267\u96c6\u6765\u6e90\u5e76\u5207\u6362\u64ad\u653e';
+    await _pump(
+      tester,
+      SizedBox(
+        width: 180,
+        child: Center(
+          child: AppActionButton(
+            key: const Key('long'),
+            icon: AppIcons.play,
+            label: label,
+            onPressed: () {},
+          ),
+        ),
+      ),
+    );
+    final text = tester.widget<Text>(find.text(label));
+    expect(text.overflow, isNot(TextOverflow.ellipsis));
+    expect(text.softWrap, isTrue);
+    expect(text.maxLines, 2);
+    // \u4e24\u884c\u6587\u5b57:\u6309\u94ae\u9762\u9ad8\u4e8e\u5355\u884c\u7684 40\u3002
+    expect(tester.getSize(find.text(label)).height, greaterThan(30));
+    expect(
+      tester.getSize(_actionFace(tester, const Key('long'))).height,
+      greaterThan(AppActionButton.desktopExtent),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'active secondary fills primaryContainer with a filled icon and toggles',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      for (final theme in [AppUiTheme.dark(), AppUiTheme.phoneLight()]) {
+        final colors = theme.colorScheme;
+        for (final active in [false, true]) {
+          await _pump(
+            tester,
+            AppActionButton(
+              key: const Key('toggle'),
+              icon: AppIcons.favorite,
+              label: active ? '\u5df2\u6536\u85cf' : '\u6536\u85cf',
+              active: active,
+              onPressed: () {},
+            ),
+            theme: theme,
+          );
+          final decoration = _actionDecoration(tester, const Key('toggle'));
+          final side = (decoration.shape as OutlinedBorder).side;
+          final icon = tester.widget<Icon>(
+            find.descendant(
+              of: find.byKey(const Key('toggle')),
+              matching: find.byType(Icon),
+            ),
+          );
+          if (active) {
+            expect(decoration.color, colors.primaryContainer);
+            expect(side.color, colors.primary);
+            expect(icon.fill, AppIcons.filled);
+          } else {
+            expect(decoration.color, isNot(colors.primaryContainer));
+            expect(side.color, isNot(colors.primary));
+            expect(icon.fill, AppIcons.outline);
+          }
+          expect(
+            tester.getSemantics(find.byType(AppButton)),
+            isSemantics(
+              hasToggledState: true,
+              isToggled: active,
+              isButton: true,
+            ),
+          );
+        }
+      }
+      semantics.dispose();
+    },
+    semanticsEnabled: true,
+  );
+
+  testWidgets('primary is solid accent; tertiary is text only', (tester) async {
+    final colors = AppUiTheme.dark().colorScheme;
+    await _pump(
+      tester,
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppActionButton(
+            key: const Key('primary'),
+            tier: AppActionTier.primary,
+            icon: AppIcons.play,
+            label: '\u64ad\u653e',
+            onPressed: () {},
+          ),
+          AppActionButton(
+            key: const Key('secondary'),
+            icon: AppIcons.play,
+            label: '\u4ece\u5934\u64ad\u653e',
+            onPressed: () {},
+          ),
+          AppActionButton(
+            key: const Key('tertiary'),
+            tier: AppActionTier.tertiary,
+            icon: AppIcons.play,
+            label: '\u66f4\u591a',
+            onPressed: () {},
+          ),
+        ],
+      ),
+    );
+    expect(
+      _actionDecoration(tester, const Key('primary')).color,
+      colors.primary,
+    );
+    expect(
+      tester.getSize(_actionFace(tester, const Key('primary'))).height,
+      tester.getSize(_actionFace(tester, const Key('secondary'))).height,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tertiary')),
+        matching: find.byType(Icon),
+      ),
+      findsNothing,
+    );
+    expect(find.text('\u66f4\u591a'), findsOneWidget);
+    expect(
+      _actionDecoration(tester, const Key('tertiary')).color,
+      AppInk.transparent,
+    );
+  });
+
+  testWidgets('icon-only action uses its tooltip as the semantic label', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await _pump(
+      tester,
+      AppActionButton.icon(
+        icon: AppIcons.favorite,
+        tooltip: '\u6536\u85cf',
+        active: false,
+        onPressed: () {},
+      ),
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is AppTooltip && widget.message == '\u6536\u85cf',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSemantics(find.byType(AppButton)),
+      isSemantics(label: '\u6536\u85cf', isButton: true),
+    );
+    semantics.dispose();
+  }, semanticsEnabled: true);
+
+  testWidgets('TvAction active rests on primaryContainer; focus unchanged', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final theme = AppUiTheme.tvDark().copyWith(tv: true);
+    final colors = theme.colorScheme;
+    final node = FocusNode();
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      node.dispose();
+    });
+    Future<void> pumpTv(bool? active) => _pump(
+      tester,
+      TvAction(
+        key: const Key('tv'),
+        pill: true,
+        focusNode: node,
+        active: active,
+        onPressed: () {},
+        child: const Text('\u5df2\u6536\u85cf'),
+      ),
+      theme: theme,
+    );
+    BoxDecoration tvDecoration() =>
+        tester
+                .widget<AnimatedContainer>(
+                  find.descendant(
+                    of: find.byKey(const Key('tv')),
+                    matching: find.byType(AnimatedContainer),
+                  ),
+                )
+                .decoration!
+            as BoxDecoration;
+    double tvScale() => tester
+        .widget<AnimatedScale>(
+          find.descendant(
+            of: find.byKey(const Key('tv')),
+            matching: find.byType(AnimatedScale),
+          ),
+        )
+        .scale;
+
+    await pumpTv(null);
+    final plain = tvDecoration().color;
+    expect(plain, isNot(colors.primaryContainer));
+
+    await pumpTv(true);
+    await tester.pumpAndSettle();
+    expect(tvDecoration().color, colors.primaryContainer);
+    final text = tester.widget<RichText>(
+      find.descendant(
+        of: find.byKey(const Key('tv')),
+        matching: find.byType(RichText),
+      ),
+    );
+    expect(text.text.style!.color, colors.onPrimaryContainer);
+    expect(
+      tester.getSemantics(find.text('已收藏')),
+      isSemantics(hasToggledState: true, isToggled: true),
+    );
+    expect(tvScale(), 1.0);
+
+    node.requestFocus();
+    await tester.pumpAndSettle();
+    // \u805a\u7126\u4ecd\u6574\u5757\u53cd\u76f8\u3001\u653e\u5927,\u4e0e\u672a\u6fc0\u6d3b\u7684\u6309\u94ae\u4e00\u81f4\u3002
+    expect(tvDecoration().color, colors.inverseSurface);
+    expect(tvScale(), TvAction.focusedScale);
+
+    await pumpTv(false);
+    await tester.pumpAndSettle();
+    expect(tvDecoration().color, colors.inverseSurface);
+    node.unfocus();
+    await tester.pumpAndSettle();
+    expect(tvDecoration().color, plain);
+    expect(
+      tester.getSemantics(find.text('已收藏')),
+      isSemantics(hasToggledState: true, isToggled: false),
+    );
+    semantics.dispose();
+  }, semanticsEnabled: true);
 }
+
+Finder _actionFace(WidgetTester tester, Key key) {
+  final inset = find.descendant(
+    of: find.byKey(key),
+    matching: find.byKey(AppButton.faceKey),
+  );
+  if (inset.evaluate().isNotEmpty) return inset;
+  return find
+      .descendant(of: find.byKey(key), matching: find.byType(AnimatedContainer))
+      .first;
+}
+
+ShapeDecoration _actionDecoration(WidgetTester tester, Key key) =>
+    tester.widget<AnimatedContainer>(_actionFace(tester, key)).decoration!
+        as ShapeDecoration;
 
 Future<void> _pump(WidgetTester tester, Widget child, {AppUiThemeData? theme}) {
   return tester.pumpWidget(

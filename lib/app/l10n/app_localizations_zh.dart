@@ -550,6 +550,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get seasons => '季';
 
   @override
+  String get seasonSwitcherTitle => '选择季';
+
+  @override
+  String seasonSwitcherCurrent(String name) {
+    return '切换季，当前为$name';
+  }
+
+  @override
   String seasonCount(int count) {
     return '共$count季';
   }

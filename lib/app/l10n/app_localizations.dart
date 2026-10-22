@@ -1144,6 +1144,18 @@ abstract class AppLocalizations {
   /// **'季'**
   String get seasons;
 
+  /// Title of the season list opened from a folded season switcher.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择季'**
+  String get seasonSwitcherTitle;
+
+  /// Accessibility label of a folded season switcher showing the current season.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换季，当前为{name}'**
+  String seasonSwitcherCurrent(String name);
+
   /// How many seasons a series has.
   ///
   /// In zh, this message translates to:

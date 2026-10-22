@@ -111,6 +111,7 @@ const caseModules = <String>[
   'library/external_link_cases.dart',
   'library/item_format_cases.dart',
   'library/person_works_cases.dart',
+  'library/season_switcher_cases.dart',
   'library/source_detail_route_cases.dart',
   'library/source_selection_filter_cases.dart',
   'media_image/blurred_artwork_cases.dart',

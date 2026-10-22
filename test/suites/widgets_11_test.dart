@@ -2,17 +2,17 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/playback_runtime_cases.dart' as case0;
-import '../app/appearance_cases.dart' as case1;
-import '../app/content_theme_motion_cases.dart' as case2;
-import '../catalog/catalog_browse_cases.dart' as case3;
-import '../library/album_cases.dart' as case4;
-import '../library/person_works_cases.dart' as case5;
-import '../mobile/search_cached_refresh_cases.dart' as case6;
-import '../mobile/tv_server_management_cases.dart' as case7;
-import '../tv/tv_frame_cases.dart' as case8;
-import '../tv/tv_lan_pair_cases.dart' as case9;
-import '../widgets/app_hover_card_cases.dart' as case10;
-import '../widgets/liquid_glass_cases.dart' as case11;
+import '../app/browse_menu_cases.dart' as case1;
+import '../app/mobile_shell_nav_cases.dart' as case2;
+import '../app/rating_star_cases.dart' as case3;
+import '../app/selection_contrast_cases.dart' as case4;
+import '../catalog/catalog_browse_cases.dart' as case5;
+import '../catalog/library_filter_cases.dart' as case6;
+import '../home/home_page_cases.dart' as case7;
+import '../mobile/tv_server_management_cases.dart' as case8;
+import '../player/desktop_player_page_cases.dart' as case9;
+import '../tv/tv_detail_header_scale_cases.dart' as case10;
+import '../widgets/app_button_cases.dart' as case11;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,15 +21,15 @@ void main() {
     'aggregation/playback_runtime_test.dart [part 3]',
     () => case0.mainShard(2, 3),
   );
-  group('app/appearance_test.dart', case1.main);
-  group('app/content_theme_motion_test.dart', case2.main);
-  group('catalog/catalog_browse_test.dart', case3.main);
-  group('library/album_test.dart', case4.main);
-  group('library/person_works_test.dart', case5.main);
-  group('mobile/search_cached_refresh_test.dart', case6.main);
-  group('mobile/tv_server_management_test.dart', case7.main);
-  group('tv/tv_frame_test.dart', case8.main);
-  group('tv/tv_lan_pair_test.dart [part 1]', () => case9.mainShard(0, 3));
-  group('widgets/app_hover_card_test.dart', case10.main);
-  group('widgets/liquid_glass_test.dart', case11.main);
+  group('app/browse_menu_test.dart', case1.main);
+  group('app/mobile_shell_nav_test.dart', case2.main);
+  group('app/rating_star_test.dart', case3.main);
+  group('app/selection_contrast_test.dart', case4.main);
+  group('catalog/catalog_browse_test.dart', case5.main);
+  group('catalog/library_filter_test.dart', case6.main);
+  group('home/home_page_test.dart', case7.main);
+  group('mobile/tv_server_management_test.dart', case8.main);
+  group('player/desktop_player_page_test.dart', case9.main);
+  group('tv/tv_detail_header_scale_test.dart', case10.main);
+  group('widgets/app_button_test.dart', case11.main);
 }

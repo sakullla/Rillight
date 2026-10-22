@@ -9,6 +9,7 @@ export '../theme/tokens.dart';
 export '../theme/palette.dart';
 export 'theme.dart';
 export 'controls.dart';
+export 'action_button.dart';
 export 'dialogs.dart';
 export 'artwork_palette.dart';
 export 'scroll_behavior.dart';
