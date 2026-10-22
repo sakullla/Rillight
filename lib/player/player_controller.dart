@@ -251,6 +251,10 @@ class PlayerController extends ChangeNotifier {
   final DateTime? recoveryAttemptDeadlineUtc;
   final List<String> recoveryAttemptedLineIds;
   bool _initialRecoveryConsumed = false;
+
+  /// One automatic line recovery per outage. A failed or cancelled attempt
+  /// must not start another one when the player reports the same fault again.
+  bool _holdAutomaticLineRecovery = false;
   LineSelection? _savedLineSelection;
   int _lineRevision = 0;
   PlaybackRecoveryBudget? _lineBudget;
@@ -4259,6 +4263,7 @@ class PlayerController extends ChangeNotifier {
           if (isPlaying) {
             disconnected = false;
             disconnectDetail = null;
+            _holdAutomaticLineRecovery = false;
             if (changed) onUserActivity();
           } else {
             controlsVisible = true;
@@ -4327,7 +4332,10 @@ class PlayerController extends ChangeNotifier {
           state.phase = PlaybackPhase.failed;
           _hideTimer?.cancel();
           if (_lineTransactionOpening) _invalidateHelperLineCommit();
-          if (!_lineTransactionOpening && !isRecovering) {
+          if (!_lineTransactionOpening &&
+              !isRecovering &&
+              !_holdAutomaticLineRecovery) {
+            _holdAutomaticLineRecovery = true;
             unawaited(_recoverPlaybackLines(automatic: true));
           }
         case VideoEventKind.authenticationRequired:

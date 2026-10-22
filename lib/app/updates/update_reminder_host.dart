@@ -117,6 +117,7 @@ class _UpdateReminderHostState extends State<UpdateReminderHost>
       if (!mounted) return;
       if (!_startup && widget.checkAtStartup && _controller != null) {
         _startup = true;
+        // Never awaited: release lookup must not hold the first frame.
         unawaited(_controller!.checkAtStartup());
       }
       _present();

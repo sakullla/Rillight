@@ -93,6 +93,8 @@ Future<AuthController> createProductionAuth() async {
     serverAccess: access,
   );
   controller.backupImportKeys = defaultBackupImportKeys;
-  await controller.restore();
+  // Public server info includes the version check. It must not hold the
+  // startup spinner: the shell paints from the saved list, then confirms.
+  await controller.restore(waitForNetwork: false);
   return controller;
 }

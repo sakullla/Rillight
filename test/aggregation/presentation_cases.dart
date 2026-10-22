@@ -3080,12 +3080,9 @@ void main() {
       await _settle(tester);
       await tester.tap(find.byKey(const Key('source-selection-open')));
       await _settle(tester);
-      expect(find.text('查找此集'), findsOneWidget);
-      await tester.tap(find.text('查找此集'));
-      await _settle(tester);
-      await tester.tap(find.text('已核对，按季与集对应'));
-      await _settle(tester);
-      expect(find.text('缺少目标集（非查询失败）'), findsOneWidget);
+      expect(find.text('查找此集'), findsNothing);
+      expect(find.text('已核对，按季与集对应'), findsNothing);
+      expect(find.text('这台服务器上没有这一集'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -3801,6 +3798,12 @@ void main() {
           final backend = FakeVideoBackend();
           final app = f.app(environment, backend: backend);
           await tester.pumpWidget(app);
+          await _settle(tester);
+          expect(
+            find.byKey(const Key('server-unlock-password')),
+            findsOneWidget,
+          );
+          await tester.binding.handlePopRoute();
           await _settle(tester);
           const destination = '/item/shared-id?showComparison=0';
           app.router.go(destination, extra: withExtra ? oldDetail : null);

@@ -261,6 +261,13 @@ void main() {
       );
       await tvPress(tester, const Key('server-paste-parse'));
       expect(auth.savedServers, hasLength(2));
+      expect(
+        tester
+            .widget<TvInput>(find.byKey(const Key('provider-password')))
+            .controller
+            .text,
+        'correct-horse',
+      );
       await tvPress(tester, const Key('provider-password-submit'));
       expect(auth.savedServers, hasLength(3));
       final added = auth.savedServers.singleWhere(

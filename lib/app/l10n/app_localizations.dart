@@ -358,53 +358,17 @@ abstract class AppLocalizations {
   /// **'重试此来源'**
   String get aggregationRetry;
 
-  /// No description provided for @aggregationEpisodeLookup.
-  ///
-  /// In zh, this message translates to:
-  /// **'查找此集'**
-  String get aggregationEpisodeLookup;
-
-  /// No description provided for @aggregationEpisodeMapping.
-  ///
-  /// In zh, this message translates to:
-  /// **'核对分季与分集对应'**
-  String get aggregationEpisodeMapping;
-
-  /// No description provided for @aggregationEpisodeMappingWarning.
-  ///
-  /// In zh, this message translates to:
-  /// **'仅季号和集号相同不能证明同一集。请先核对两份版本是否采用相同的分季和分集方式；不确定时不会提供可直接续播的来源。'**
-  String get aggregationEpisodeMappingWarning;
-
-  /// No description provided for @aggregationEpisodeMappingConfirm.
-  ///
-  /// In zh, this message translates to:
-  /// **'已核对，按季与集对应'**
-  String get aggregationEpisodeMappingConfirm;
-
-  /// No description provided for @aggregationEpisodeConfirmed.
-  ///
-  /// In zh, this message translates to:
-  /// **'已确认具体集（不自动跨服续播）'**
-  String get aggregationEpisodeConfirmed;
-
   /// No description provided for @aggregationMissingEpisode.
   ///
   /// In zh, this message translates to:
-  /// **'缺少目标集（非查询失败）'**
+  /// **'这台服务器上没有这一集'**
   String get aggregationMissingEpisode;
 
   /// No description provided for @aggregationEpisodeFailed.
   ///
   /// In zh, this message translates to:
-  /// **'具体集查询失败，可重试'**
+  /// **'查找这一集失败，可重试'**
   String get aggregationEpisodeFailed;
-
-  /// No description provided for @aggregationEpisodeUncertain.
-  ///
-  /// In zh, this message translates to:
-  /// **'分集对应待确认，不可直接跨服续播'**
-  String get aggregationEpisodeUncertain;
 
   /// No description provided for @deviceDetectionFailed.
   ///
@@ -4666,6 +4630,54 @@ abstract class AppLocalizations {
   /// **'检查于'**
   String get serversCheckedAt;
 
+  /// No description provided for @serversDiscoverLines.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新发现'**
+  String get serversDiscoverLines;
+
+  /// No description provided for @serversDiscoveringLines.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在查找线路…'**
+  String get serversDiscoveringLines;
+
+  /// No description provided for @serversDiscoverNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有发现新线路'**
+  String get serversDiscoverNone;
+
+  /// No description provided for @serversDiscoverNeedCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先进入这台 Emby 服务器，再刷新发现线路'**
+  String get serversDiscoverNeedCurrent;
+
+  /// No description provided for @serversDiscoverAdded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已加入 {count} 条线路'**
+  String serversDiscoverAdded(int count);
+
+  /// No description provided for @serversSpeedTest.
+  ///
+  /// In zh, this message translates to:
+  /// **'一键测速'**
+  String get serversSpeedTest;
+
+  /// No description provided for @serversSpeedTesting.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在测速…'**
+  String get serversSpeedTesting;
+
+  /// No description provided for @serversLatency.
+  ///
+  /// In zh, this message translates to:
+  /// **'{milliseconds} ms'**
+  String serversLatency(int milliseconds);
+
   /// No description provided for @serversSave.
   ///
   /// In zh, this message translates to:
@@ -4927,7 +4939,7 @@ abstract class AppLocalizations {
   /// No description provided for @serversPasteHint.
   ///
   /// In zh, this message translates to:
-  /// **'仅在你点击后读取剪贴板。确认识别结果后再登录。'**
+  /// **'把服务器信息粘贴到下面，再点「识别并预览」。\n\n可以识别这些内容：\n· 带标签的文本，例如「名称：家里」「地址：https://emby.example:8096」「用户名：alice」「密码：secret」「线路1：https://backup.example」\n· 每行一个 http 或 https 地址\n· SenPlayer、小幻影视或 Hills 的导入链接\n\n地址、名称、账号、密码和线路会直接填进登录表。\n打开这一页时才会读取剪贴板。'**
   String get serversPasteHint;
 
   /// No description provided for @serversPasteText.
@@ -4951,7 +4963,7 @@ abstract class AppLocalizations {
   /// No description provided for @serversPasteIncomplete.
   ///
   /// In zh, this message translates to:
-  /// **'请检查并补全信息。每次只添加你选择的一组。'**
+  /// **'每次只添加一组。'**
   String get serversPasteIncomplete;
 
   /// No description provided for @serversPasteUnknown.
@@ -5293,8 +5305,26 @@ abstract class AppLocalizations {
   /// No description provided for @sourceSelectionHint.
   ///
   /// In zh, this message translates to:
-  /// **'打开对应详情，不会直接播放。'**
+  /// **'点开后进入那一台服务器上的详情，可以再播放。'**
   String get sourceSelectionHint;
+
+  /// No description provided for @sourceSelectionUnreachable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台服务器暂时连不上，当前连接不受影响。'**
+  String get sourceSelectionUnreachable;
+
+  /// No description provided for @sourceSelectionFindingEpisode.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在查找这一集'**
+  String get sourceSelectionFindingEpisode;
+
+  /// No description provided for @sourceSelectionOpenEpisode.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开这一集'**
+  String get sourceSelectionOpenEpisode;
 
   /// No description provided for @sourceSelectionFound.
   ///
@@ -5818,11 +5848,11 @@ abstract class AppLocalizations {
   /// **'移除这台服务器？'**
   String get serversRemoveTitle;
 
-  /// No description provided for @serversPasteCardHint.
+  /// No description provided for @serversPasteRowHint.
   ///
   /// In zh, this message translates to:
-  /// **'复制了服务器信息？一键识别地址、账号和多条线路'**
-  String get serversPasteCardHint;
+  /// **'识别地址、账号、密码和线路'**
+  String get serversPasteRowHint;
 
   /// No description provided for @serversUnlockTitle.
   ///

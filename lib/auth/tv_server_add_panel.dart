@@ -33,7 +33,11 @@ class _TvServerAddPanelState extends ServerAddPanelState {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (step == 'paste') ...[
-            Text(l.serversPasteHint),
+            Text(
+              l.serversPasteHint,
+              style: AppUiTheme.of(context).textTheme.bodyMedium
+                  ?.copyWith(height: 1.45),
+            ),
             const SizedBox(height: 16),
             TvInput(
               key: const Key('server-paste-text'),
@@ -62,10 +66,7 @@ class _TvServerAddPanelState extends ServerAddPanelState {
                   autofocus: i == 0,
                   variant: TvActionVariant.tile,
                   trailing: const Icon(AppIcons.chevronRight),
-                  onPressed: () => setState(() {
-                    selected = preview!.groups[i];
-                    step = 'connect';
-                  }),
+                  onPressed: () => setState(() => adopt(preview!.groups[i])),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -87,16 +88,7 @@ class _TvServerAddPanelState extends ServerAddPanelState {
               ),
           ] else ...[
             if (selected != null)
-              ServerFeedback(l.serversPasteIncomplete, error: false)
-            else
-              TvAction(
-                key: const Key('server-add-paste'),
-                autofocus: true,
-                onPressed: paste,
-                leading: const Icon(AppIcons.download),
-                child: Text(l.serversPaste),
-              ),
-            const SizedBox(height: 20),
+              ServerFeedback(l.serversPasteIncomplete, error: false),
             ProviderConnectDialog(
               key: ValueKey(selected),
               auth: widget.auth,
@@ -106,6 +98,13 @@ class _TvServerAddPanelState extends ServerAddPanelState {
               onConnected: widget.onConnected,
             ),
             const SizedBox(height: 24),
+            if (selected == null)
+              TvAction(
+                key: const Key('server-add-paste'),
+                onPressed: paste,
+                leading: const Icon(AppIcons.copy),
+                child: Text(l.serversPaste),
+              ),
             TvAction(
               key: const Key('server-add-import'),
               onPressed: widget.onImport,

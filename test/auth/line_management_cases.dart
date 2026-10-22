@@ -131,11 +131,115 @@ void main() {
         await serverUiTap(tester, Key('server-line-check-$lineId'));
         expect(find.textContaining(label), findsNothing);
         expect(find.textContaining('连接正常'), findsWidgets);
+        expect(find.textContaining('ms'), findsWidgets);
+        expect(auth.savedServers.single.lines.single.latencyMs, isNotNull);
         expect(auth.savedServers.single.lines.single.checkFailureKind, isNull);
       },
       tags: ['integration'],
     );
   }
+  test('refresh reads lines from the emby_ext_domains sidecar', () async {
+    final remote = FakeEmbyServer();
+    final sidecar = FakeEmbyServer(
+      serverId: remote.serverId,
+      baseUrl: remote.baseUrl.replace(port: 52143),
+    );
+    sidecar.extendedDomains = [
+      {'name': '家里', 'url': 'http://line-home.test:8096'},
+    ];
+    final home = FakeEmbyServer(
+      serverId: remote.serverId,
+      serverName: remote.serverName,
+      baseUrl: Uri.parse('http://line-home.test:8096'),
+    );
+    final wan = FakeEmbyServer(
+      serverId: remote.serverId,
+      serverName: remote.serverName,
+      baseUrl: Uri.parse('http://line-wan.test:8096'),
+    );
+    final client = EmbyClient(
+      device: _device,
+      dio: dioForFakeEmby(_SameServerAdapter([remote, sidecar, home, wan])),
+    );
+    final auth = AuthController.memory(client: client);
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: remote.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(
+      auth.savedServers.single.lines.map((line) => line.nickname),
+      contains('家里'),
+      reason: 'login should read the sidecar before a manual refresh',
+    );
+    sidecar.extendedDomains = [
+      {'name': '家里', 'url': 'http://line-home.test:8096'},
+      {'name': '外网', 'url': 'http://line-wan.test:8096'},
+    ];
+    final added = await auth.discoverExtendedLines(
+      auth.session!.server.id,
+      force: true,
+    );
+    expect(added, 1);
+    expect(
+      auth.savedServers.single.lines.map((line) => line.nickname),
+      containsAll(['家里', '外网']),
+    );
+  });
+
+  testWidgets(
+    'refresh discovers emby_ext_domains lines and speed test shows latency',
+    (tester) async {
+      final remote = FakeEmbyServer();
+      final sidecar = FakeEmbyServer(
+        serverId: remote.serverId,
+        baseUrl: remote.baseUrl.replace(port: 52143),
+      );
+      final home = FakeEmbyServer(
+        serverId: remote.serverId,
+        serverName: remote.serverName,
+        baseUrl: Uri.parse('http://line-home.test:8096'),
+      );
+      final auth = AuthController.memory(
+        client: EmbyClient(
+          device: _device,
+          dio: dioForFakeEmby(_SameServerAdapter([remote, sidecar, home])),
+        ),
+      );
+      addTearDown(auth.dispose);
+      await tester.runAsync(
+        () => auth.connect(
+          address: remote.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      sidecar.extendedDomains = [
+        {'name': '家里', 'url': 'http://line-home.test:8096'},
+      ];
+      final id = auth.session!.server.id;
+      await pumpServerSelection(tester, auth);
+      await serverUiTap(tester, Key('server-lines-$id'));
+      expect(find.byKey(const Key('server-lines-discover')), findsOneWidget);
+      expect(find.byKey(const Key('server-lines-speed')), findsOneWidget);
+      await serverUiTap(tester, const Key('server-lines-discover'));
+      expect(find.text('家里'), findsWidgets);
+      expect(find.text('已加入 1 条线路'), findsOneWidget);
+      expect(
+        auth.savedServers.single.lines.map((line) => line.nickname),
+        contains('家里'),
+      );
+      await serverUiTap(tester, const Key('server-lines-speed'));
+      final current = auth.savedServers.single.lines.firstWhere(
+        (line) => line.nickname != '家里',
+      );
+      expect(current.latencyMs, isNotNull);
+      expect(find.textContaining('ms'), findsWidgets);
+    },
+    tags: ['integration'],
+  );
+
   // ---------- controller: add / edit / delete lines ----------
 
   FakeEmbyServer line(String host) {

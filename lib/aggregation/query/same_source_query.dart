@@ -237,6 +237,59 @@ class SameSourceQueryController extends ChangeNotifier {
     var uncertainRows = false;
     try {
       permit = permitForItem(target);
+      final wanted = {
+        for (final entry in episode.providerIds.entries)
+          if (reliableProviderId(entry.key, entry.value))
+            entry.key: entry.value,
+      };
+      if (wanted.isNotEmpty) {
+        final indexed = await permit
+            .dispatch((client) async {
+              if (client is! MediaProviderLookup) return null;
+              final lookup = client as MediaProviderLookup;
+              return lookup.queryProviderItems(
+                parentId: target.reference.itemId,
+                includeItemTypes: 'Episode',
+                providerIds: wanted,
+                limit: 8,
+                startIndex: 0,
+                fields: MediaServerClient.gridFields,
+              );
+            })
+            .timeout(query.timeout);
+        if (!owns() || !permit.isValid) return;
+        if (indexed != null && indexed.items.isNotEmpty) {
+          final lookup = locateEpisode(
+            series: _confirmedGroup(target.reference)!,
+            origin: episode,
+            targetAccount: target.reference.account,
+            available: indexed.items
+                .where((item) => item.isEpisode)
+                .map(
+                  (item) => EpisodeSource.fromMediaItem(
+                    SourceReference(
+                      account: target.reference.account,
+                      itemId: item.id,
+                    ),
+                    item,
+                    numberingScheme: verifiedNumberingScheme,
+                  ),
+                ),
+            complete: true,
+          );
+          if (lookup.status == EpisodeLookupStatus.confirmed ||
+              lookup.status == EpisodeLookupStatus.conflict ||
+              lookup.status == EpisodeLookupStatus.ambiguous) {
+            _episodes[target.reference] = EpisodeComparison(
+              target.reference,
+              SourceQueryStatus.available,
+              lookup,
+            );
+            if (owns()) notifyListeners();
+            return;
+          }
+        }
+      }
       while (true) {
         if (!owns()) return;
         final page = await permit
@@ -247,7 +300,7 @@ class SameSourceQueryController extends ChangeNotifier {
                 recursive: true,
                 startIndex: cursor,
                 limit: query.scope!.pageSize,
-                fields: MediaServerClient.itemFields,
+                fields: MediaServerClient.gridFields,
               ),
             )
             .timeout(query.timeout);

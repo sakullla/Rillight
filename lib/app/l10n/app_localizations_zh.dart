@@ -145,29 +145,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aggregationRetry => '重试此来源';
 
   @override
-  String get aggregationEpisodeLookup => '查找此集';
+  String get aggregationMissingEpisode => '这台服务器上没有这一集';
 
   @override
-  String get aggregationEpisodeMapping => '核对分季与分集对应';
-
-  @override
-  String get aggregationEpisodeMappingWarning =>
-      '仅季号和集号相同不能证明同一集。请先核对两份版本是否采用相同的分季和分集方式；不确定时不会提供可直接续播的来源。';
-
-  @override
-  String get aggregationEpisodeMappingConfirm => '已核对，按季与集对应';
-
-  @override
-  String get aggregationEpisodeConfirmed => '已确认具体集（不自动跨服续播）';
-
-  @override
-  String get aggregationMissingEpisode => '缺少目标集（非查询失败）';
-
-  @override
-  String get aggregationEpisodeFailed => '具体集查询失败，可重试';
-
-  @override
-  String get aggregationEpisodeUncertain => '分集对应待确认，不可直接跨服续播';
+  String get aggregationEpisodeFailed => '查找这一集失败，可重试';
 
   @override
   String get deviceDetectionFailed => '无法识别设备类型，请重试或以手机模式继续。';
@@ -2427,6 +2408,34 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversCheckedAt => '检查于';
 
   @override
+  String get serversDiscoverLines => '刷新发现';
+
+  @override
+  String get serversDiscoveringLines => '正在查找线路…';
+
+  @override
+  String get serversDiscoverNone => '没有发现新线路';
+
+  @override
+  String get serversDiscoverNeedCurrent => '请先进入这台 Emby 服务器，再刷新发现线路';
+
+  @override
+  String serversDiscoverAdded(int count) {
+    return '已加入 $count 条线路';
+  }
+
+  @override
+  String get serversSpeedTest => '一键测速';
+
+  @override
+  String get serversSpeedTesting => '正在测速…';
+
+  @override
+  String serversLatency(int milliseconds) {
+    return '$milliseconds ms';
+  }
+
+  @override
   String get serversSave => '保存';
 
   @override
@@ -2556,7 +2565,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversPaste => '粘贴导入';
 
   @override
-  String get serversPasteHint => '仅在你点击后读取剪贴板。确认识别结果后再登录。';
+  String get serversPasteHint =>
+      '把服务器信息粘贴到下面，再点「识别并预览」。\n\n可以识别这些内容：\n· 带标签的文本，例如「名称：家里」「地址：https://emby.example:8096」「用户名：alice」「密码：secret」「线路1：https://backup.example」\n· 每行一个 http 或 https 地址\n· SenPlayer、小幻影视或 Hills 的导入链接\n\n地址、名称、账号、密码和线路会直接填进登录表。\n打开这一页时才会读取剪贴板。';
 
   @override
   String get serversPasteText => '粘贴服务器信息';
@@ -2568,7 +2578,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversPasteGroups => '识别到多个账号，请选择要添加的一组';
 
   @override
-  String get serversPasteIncomplete => '请检查并补全信息。每次只添加你选择的一组。';
+  String get serversPasteIncomplete => '每次只添加一组。';
 
   @override
   String get serversPasteUnknown => '未识别到服务器信息，可以修改原文后重试。';
@@ -2745,7 +2755,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sourceSelectionCheckDetails => '请核对影片详情';
 
   @override
-  String get sourceSelectionHint => '打开对应详情，不会直接播放。';
+  String get sourceSelectionHint => '点开后进入那一台服务器上的详情，可以再播放。';
+
+  @override
+  String get sourceSelectionUnreachable => '这台服务器暂时连不上，当前连接不受影响。';
+
+  @override
+  String get sourceSelectionFindingEpisode => '正在查找这一集';
+
+  @override
+  String get sourceSelectionOpenEpisode => '打开这一集';
 
   @override
   String sourceSelectionFound(int count) {
@@ -3027,7 +3046,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversRemoveTitle => '移除这台服务器？';
 
   @override
-  String get serversPasteCardHint => '复制了服务器信息？一键识别地址、账号和多条线路';
+  String get serversPasteRowHint => '识别地址、账号、密码和线路';
 
   @override
   String get serversUnlockTitle => '输入进入密码';

@@ -2,71 +2,71 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/history_cases.dart' as case0;
-import '../aggregation/server_sections_cases.dart' as case1;
-import '../app/update_controller_cases.dart' as case2;
-import '../app/window_geometry_cases.dart' as case3;
-import '../auth/provider_identity_cases.dart' as case4;
-import '../auth/provider_session_ownership_cases.dart' as case5;
-import '../auth/server_access_cases.dart' as case6;
-import '../auth/server_list_store_cases.dart' as case7;
-import '../catalog/catalog_cache_cases.dart' as case8;
-import '../emby/aggregation_metadata_cases.dart' as case9;
-import '../emby/emby_device_cases.dart' as case10;
-import '../emby/emby_request_guard_cases.dart' as case11;
-import '../library/source_selection_filter_cases.dart' as case12;
-import '../player/cache/proxy_progressive_timeline_cases.dart' as case13;
-import '../player/catalog_preference_negotiation_cases.dart' as case14;
-import '../player/danmaku/dandanplay_client_cases.dart' as case15;
-import '../player/danmaku/danmaku_timeline_cases.dart' as case16;
-import '../player/hls_redirect_chain_cases.dart' as case17;
-import '../player/next_episode_prefix_authorization_cases.dart' as case18;
-import '../player/playback_http_proxy_cases.dart' as case19;
-import '../player/playback_http_proxy_recovery_cases.dart' as case20;
-import '../player/player_line_transactions_cases.dart' as case21;
-import '../player/player_process_protocol_cases.dart' as case22;
-import '../player/player_startup_cases.dart' as case23;
-import '../player/provider_scoped_preference_cases.dart' as case24;
-import '../player/response_read_ahead_cases.dart' as case25;
-import '../player/session_subtitle_files_cases.dart' as case26;
-import '../player/strm_quality_confirmation_cases.dart' as case27;
-import '../webdav/webdav_client_cases.dart' as case28;
+import '../aggregation/history_store_cases.dart' as case1;
+import '../aggregation/playback_switch_cases.dart' as case2;
+import '../aggregation/work_index_regression_cases.dart' as case3;
+import '../auth/backup_import/environment_keys_cases.dart' as case4;
+import '../auth/provider_connect_controller_cases.dart' as case5;
+import '../auth/provider_identity_cases.dart' as case6;
+import '../auth/provider_user_agent_cases.dart' as case7;
+import '../auth/server_access_cases.dart' as case8;
+import '../catalog/catalog_cache_cases.dart' as case9;
+import '../catalog/catalog_disk_store_cases.dart' as case10;
+import '../helpers/temporary_directory_cases.dart' as case11;
+import '../home/library_nav_prefs_cases.dart' as case12;
+import '../jellyfin/jellyfin_client_cases.dart' as case13;
+import '../platform/network_change_monitor_cases.dart' as case14;
+import '../player/cache/hls_proxy_timeline_cases.dart' as case15;
+import '../player/capability_record_cases.dart' as case16;
+import '../player/danmaku/dandanplay_client_cases.dart' as case17;
+import '../player/danmaku/danmaku_settings_cases.dart' as case18;
+import '../player/device_profile_cases.dart' as case19;
+import '../player/playback_http_proxy_cases.dart' as case20;
+import '../player/playback_http_proxy_recovery_cases.dart' as case21;
+import '../player/playback_recovery_coordinator_cases.dart' as case22;
+import '../player/player_host_command_cases.dart' as case23;
+import '../player/player_line_transactions_cases.dart' as case24;
+import '../player/player_runtime_options_cases.dart' as case25;
+import '../player/player_settings_cases.dart' as case26;
+import '../player/response_read_ahead_cases.dart' as case27;
+import '../webdav/webdav_backup_cases.dart' as case28;
 import '../helpers/suite.dart';
 
 void main() {
   verifySuiteManifest();
   group('aggregation/history_test.dart', case0.main);
-  group('aggregation/server_sections_test.dart', case1.main);
-  group('app/update_controller_test.dart', case2.main);
-  group('app/window_geometry_test.dart', case3.main);
-  group('auth/provider_identity_test.dart', case4.main);
-  group('auth/provider_session_ownership_test.dart', case5.main);
-  group('auth/server_access_test.dart', case6.main);
-  group('auth/server_list_store_test.dart', case7.main);
-  group('catalog/catalog_cache_test.dart', case8.main);
-  group('emby/aggregation_metadata_test.dart', case9.main);
-  group('emby/emby_device_test.dart', case10.main);
-  group('emby/emby_request_guard_test.dart', case11.main);
-  group('library/source_selection_filter_test.dart', case12.main);
-  group('player/cache/proxy_progressive_timeline_test.dart', case13.main);
-  group('player/catalog_preference_negotiation_test.dart', case14.main);
-  group('player/danmaku/dandanplay_client_test.dart', case15.main);
-  group('player/danmaku/danmaku_timeline_test.dart', case16.main);
-  group('player/hls_redirect_chain_test.dart', case17.main);
-  group('player/next_episode_prefix_authorization_test.dart', case18.main);
+  group('aggregation/history_store_test.dart', case1.main);
+  group('aggregation/playback_switch_test.dart', case2.main);
+  group('aggregation/work_index_regression_test.dart', case3.main);
+  group('auth/backup_import/environment_keys_test.dart', case4.main);
+  group('auth/provider_connect_controller_test.dart', case5.main);
+  group('auth/provider_identity_test.dart', case6.main);
+  group('auth/provider_user_agent_test.dart', case7.main);
+  group('auth/server_access_test.dart', case8.main);
+  group('catalog/catalog_cache_test.dart', case9.main);
+  group('catalog/catalog_disk_store_test.dart', case10.main);
+  group('helpers/temporary_directory_test.dart', case11.main);
+  group('home/library_nav_prefs_test.dart', case12.main);
+  group('jellyfin/jellyfin_client_test.dart', case13.main);
+  group('platform/network_change_monitor_test.dart', case14.main);
+  group('player/cache/hls_proxy_timeline_test.dart', case15.main);
+  group('player/capability_record_test.dart', case16.main);
+  group('player/danmaku/dandanplay_client_test.dart', case17.main);
+  group('player/danmaku/danmaku_settings_test.dart', case18.main);
+  group('player/device_profile_test.dart', case19.main);
   group(
     'player/playback_http_proxy_test.dart [part 4]',
-    () => case19.mainShard(3, 4),
+    () => case20.mainShard(3, 4),
   );
-  group('player/playback_http_proxy_recovery_test.dart', case20.main);
-  group('player/player_line_transactions_test.dart', case21.main);
-  group('player/player_process_protocol_test.dart', case22.main);
-  group('player/player_startup_test.dart', case23.main);
-  group('player/provider_scoped_preference_test.dart', case24.main);
+  group('player/playback_http_proxy_recovery_test.dart', case21.main);
+  group('player/playback_recovery_coordinator_test.dart', case22.main);
+  group('player/player_host_command_test.dart', case23.main);
+  group('player/player_line_transactions_test.dart', case24.main);
+  group('player/player_runtime_options_test.dart', case25.main);
+  group('player/player_settings_test.dart', case26.main);
   group(
     'player/response_read_ahead_test.dart [part 2]',
-    () => case25.mainShard(1, 3),
+    () => case27.mainShard(1, 3),
   );
-  group('player/session_subtitle_files_test.dart', case26.main);
-  group('player/strm_quality_confirmation_test.dart', case27.main);
-  group('webdav/webdav_client_test.dart', case28.main);
+  group('webdav/webdav_backup_test.dart', case28.main);
 }

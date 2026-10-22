@@ -463,6 +463,31 @@ void main() {
       expect(lookup(episode('a'), [parsed]).source, isNull);
     });
 
+    test(
+      'a shared provider id confirms the episode without a season scheme',
+      () {
+        final target = episode(
+          'b',
+          scheme: null,
+          season: 2,
+          number: 1,
+          ids: {'Tvdb': '9000784'},
+        );
+        final result = lookup(
+          episode('a', scheme: null, ids: {'Tvdb': '9000784'}),
+          [target],
+        );
+        expect(result.status, EpisodeLookupStatus.confirmed);
+        expect(result.source, same(target));
+        expect(
+          lookup(episode('a', scheme: null, ids: {'Tvdb': '9000784'}), [
+            episode('b', scheme: null, ids: {'Tvdb': '1'}),
+          ]).status,
+          EpisodeLookupStatus.conflict,
+        );
+      },
+    );
+
     test('Emby numbering alone is unknown until verified', () {
       final parsed = EpisodeSource.fromMediaItem(
         ref('a', id: 'ep'),

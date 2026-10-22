@@ -53,6 +53,35 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TvAction(
+                    key: const Key('server-lines-discover'),
+                    onPressed: idle ? discover : null,
+                    leading: const Icon(AppIcons.refresh),
+                    child: Text(
+                      discovering
+                          ? l.serversDiscoveringLines
+                          : l.serversDiscoverLines,
+                    ),
+                  ),
+                ),
+                SizedBox(width: 12 * TvDesign.scaleOf(context)),
+                Expanded(
+                  child: TvAction(
+                    key: const Key('server-lines-speed'),
+                    onPressed: idle ? checkAll : null,
+                    leading: const Icon(AppIcons.bolt),
+                    child: Text(
+                      testing ? l.serversSpeedTesting : l.serversSpeedTest,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (notice != null) ServerFeedback(notice!, error: false),
             const SizedBox(height: 20),
             TvChoiceTile(
               actionKey: const Key('server-line-auto'),
@@ -62,9 +91,7 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                   ? '${l.serversActualLine} · ${serverLineLabel(actualLine)}'
                   : l.serversAutomaticHint,
               selected: server.lineSelection.isAutomatic,
-              onPressed: busy == null
-                  ? () => select(const LineSelection.auto())
-                  : null,
+              onPressed: idle ? () => select(const LineSelection.auto()) : null,
             ),
             const SizedBox(height: 12),
             for (final line in server.lines)
@@ -79,7 +106,7 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                         subtitle:
                             '${actual == line.id ? '${l.serversActualLine} · ' : ''}${serverSafeAddress(line.address)} · ${status(l, line)}',
                         selected: server.lineSelection.fixedLineId == line.id,
-                        onPressed: busy == null
+                        onPressed: idle
                             ? () => select(LineSelection.fixed(line.id))
                             : null,
                       ),
@@ -87,7 +114,7 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                     const SizedBox(width: 20),
                     TvAction(
                       key: Key('server-line-check-${line.id}'),
-                      onPressed: busy == null ? () => check(line) : null,
+                      onPressed: idle ? () => check(line) : null,
                       leading: const Icon(AppIcons.refresh),
                       child: Text(
                         busy == line.id ? l.serversCheckingNow : l.serversCheck,

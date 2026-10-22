@@ -76,6 +76,14 @@ class _GuardedEmbyTransport implements HttpClientAdapter {
   }
 }
 
+/// One address published by the emby_ext_domains extension.
+class ExtendedServerDomain {
+  const ExtendedServerDomain(this.url, {this.name});
+
+  final Uri url;
+  final String? name;
+}
+
 class EmbyClient
     implements MediaServerClient, MediaFavorites, MediaProviderLookup {
   @override
@@ -412,22 +420,94 @@ class EmbyClient
   /// Callers keep the existing Emby mark instead of guessing a path.
   Future<Uint8List?> loadBrandingLogo() async => null;
 
-  /// Optional extension supplied by emby_ext_domains. Servers that do not
-  /// install it return an error/empty payload; callers intentionally ignore
-  /// those failures and keep the configured line set unchanged.
-  Future<List<Uri>> loadExtendedServerDomains() async {
+  /// Lines published by [emby_ext_domains](https://github.com/uhdnow/emby_ext_domains).
+  ///
+  /// The extension is a separate process. It is reachable when a reverse
+  /// proxy mounts it on the Emby host, and by default at `host:52143`
+  /// (`GET /emby/System/Ext/ServerDomains`). A missing extension or a closed
+  /// port returns an empty list.
+  Future<List<ExtendedServerDomain>> loadExtendedServerDomains({
+    bool plainSidecar = false,
+    Duration probeTimeout = const Duration(seconds: 2),
+  }) async {
     if (!hasSession) return const [];
+    final base = _baseUrl;
+    if (base == null) return const [];
+    final found = <ExtendedServerDomain>[];
+    final seen = <String>{};
+    void take(List<ExtendedServerDomain> items) {
+      for (final item in items) {
+        if (seen.add(item.url.toString())) found.add(item);
+      }
+    }
+
+    take(
+      await _readExtendedDomains(
+        joinEmbyApiPath(base, '/System/Ext/ServerDomains'),
+        probeTimeout,
+      ),
+    );
+    if (base.port != 52143) {
+      take(
+        await _readExtendedDomains(
+          joinEmbyApiPath(
+            base.replace(port: 52143, path: '', query: ''),
+            '/System/Ext/ServerDomains',
+          ),
+          probeTimeout,
+        ),
+      );
+    }
+    if (plainSidecar && base.scheme == 'https') {
+      take(
+        await _readExtendedDomains(
+          joinEmbyApiPath(
+            base.replace(scheme: 'http', port: 52143, path: '', query: ''),
+            '/System/Ext/ServerDomains',
+          ),
+          probeTimeout,
+        ),
+      );
+    }
+    return found;
+  }
+
+  Future<List<ExtendedServerDomain>> _readExtendedDomains(
+    Uri uri,
+    Duration timeout,
+  ) async {
     try {
-      final response = await _requestJson('GET', '/System/Ext/ServerDomains');
-      final raw = response['data'];
+      final response = await _dio
+          .getUri<dynamic>(
+            uri,
+            options: Options(
+              headers: _headers(token: _accessToken, userId: _userId),
+              followRedirects: false,
+              connectTimeout: timeout,
+              sendTimeout: timeout,
+              receiveTimeout: timeout,
+            ),
+          )
+          .timeout(timeout + const Duration(seconds: 1));
+      final payload = _decodeBody(response.data);
+      if (response.statusCode != 200 || payload is! Map) {
+        return const [];
+      }
+      final raw = payload['data'];
       if (raw is! List) return const [];
-      final result = <Uri>[];
+      final result = <ExtendedServerDomain>[];
       for (final item in raw) {
         if (item is! Map) continue;
         final value = item['url']?.toString().trim();
         if (value == null || value.isEmpty) continue;
         try {
-          result.add(normalizeServerAddress(value));
+          final name = item['name']?.toString().trim();
+          result.add(
+            ExtendedServerDomain(
+              normalizeServerAddress(value),
+              name: name == null || name.isEmpty ? null : name,
+            ),
+          );
         } on Object {
           // A malformed extension entry is ignored with the rest of the
           // optional extension; it must never break a successful login.
@@ -664,6 +744,7 @@ class EmbyClient
     required Map<String, String> providerIds,
     required int limit,
     required int startIndex,
+    String fields = MediaServerClient.itemFields,
   }) => _getItemPage(
     '/Users/${_requireUserId()}/Items',
     queryParameters: {
@@ -675,7 +756,7 @@ class EmbyClient
       'Recursive': 'true',
       'Limit': '$limit',
       'StartIndex': '$startIndex',
-      'Fields': itemFields,
+      'Fields': _projection(fields),
       'EnableImageTypes': imageTypes,
     },
   );

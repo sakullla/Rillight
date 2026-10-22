@@ -38,6 +38,7 @@ class PlaybackLineRecoveryPanel extends StatefulWidget {
     this.primaryFocusNode,
     this.failureKind,
     this.retryAfter,
+    this.onDismiss,
   });
   final bool recovering, tryingAlternative;
   final String? lineName, failure;
@@ -45,6 +46,7 @@ class PlaybackLineRecoveryPanel extends StatefulWidget {
   final MediaServerFailureKind? failureKind;
   final DateTime? retryAfter;
   final VoidCallback onCancel, onChooseLines, onRetry;
+  final VoidCallback? onDismiss;
 
   @override
   State<PlaybackLineRecoveryPanel> createState() =>
@@ -188,6 +190,12 @@ class _PlaybackLineRecoveryPanelState extends State<PlaybackLineRecoveryPanel> {
                 onPressed: widget.onChooseLines,
                 child: Text(l.playbackChooseLine),
               ),
+              if (!recovering && widget.onDismiss != null)
+                AppButton(
+                  key: const Key('playback-recovery-close'),
+                  onPressed: widget.onDismiss,
+                  child: Text(l.closePlayer),
+                ),
             ],
           ),
         ),
@@ -404,10 +412,12 @@ class PlayerLineStatus extends StatelessWidget {
     super.key,
     required this.controller,
     required this.onChooseLines,
+    this.onDismiss,
     this.primaryFocusNode,
   });
   final PlayerController controller;
   final VoidCallback onChooseLines;
+  final VoidCallback? onDismiss;
   final FocusNode? primaryFocusNode;
   @override
   Widget build(BuildContext context) {
@@ -446,6 +456,7 @@ class PlayerLineStatus extends StatelessWidget {
                   onCancel: c.cancelLineRecovery,
                   onChooseLines: onChooseLines,
                   onRetry: c.retryPlayback,
+                  onDismiss: onDismiss,
                 ),
         ),
       ),

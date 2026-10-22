@@ -1,47 +1,9 @@
-import 'package:rillight/app/ui/ui.dart';
-import 'package:flutter/services.dart';
-
 import '../aggregation/identity/media_identity.dart';
-import '../app/l10n/app_localizations.dart';
 
 const userConfirmedEpisodeNumbering = 'user-confirmed-season-episode';
 
-/// A user's explicit mapping assertion, not a title/duration matching rule.
-/// Null means cancelled; false preserves T4's uncertain/missing boundaries.
-Future<bool?> confirmEpisodeMapping(BuildContext context) =>
-    showAppDialog<bool>(
-      context: context,
-      useRootNavigator: false,
-      builder: (dialog) => Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
-        },
-        child: AppDialog(
-          title: Text(AppLocalizations.of(dialog).aggregationEpisodeMapping),
-          content: Text(
-            AppLocalizations.of(dialog).aggregationEpisodeMappingWarning,
-          ),
-          actions: [
-            AppButton(
-              onPressed: () => Navigator.pop(dialog, false),
-              variant: AppButtonVariant.plain,
-              child: Text(
-                AppLocalizations.of(dialog).aggregationEpisodeUncertain,
-              ),
-            ),
-            AppButton(
-              key: const Key('episode-mapping-confirm'),
-              onPressed: () => Navigator.pop(dialog, true),
-              variant: AppButtonVariant.plain,
-              child: Text(
-                AppLocalizations.of(dialog).aggregationEpisodeMappingConfirm,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
+/// Marks season and episode numbers as usable for this lookup.
+/// The detail sheet applies this itself so the user is not asked to confirm.
 EpisodeSource withConfirmedEpisodeMapping(EpisodeSource episode) =>
     EpisodeSource(
       reference: episode.reference,
@@ -51,5 +13,6 @@ EpisodeSource withConfirmedEpisodeMapping(EpisodeSource episode) =>
       endEpisode: episode.endEpisode,
       isSpecial: episode.isSpecial,
       providerIds: episode.providerIds,
+      name: episode.name,
       numberingScheme: userConfirmedEpisodeNumbering,
     );

@@ -235,7 +235,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         child: TvInput(
           key: Key(id),
           autofocus:
-              widget.initialDraft != null && id == 'provider-display-name',
+              (widget.initialDraft != null && id == 'provider-display-name') ||
+              (widget.initialDraft == null && id == 'provider-address'),
           label: label,
           controller: value,
           secret: secret,

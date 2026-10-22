@@ -1327,15 +1327,14 @@ class _AppDisclosureState extends State<AppDisclosure> {
   );
 }
 
-/// Pull-to-refresh for existing list and grid scroll trees. Keeps their scroll
-/// controller and viewport mounted while a Cupertino activity indicator runs.
+/// Pull-to-refresh for an existing scroll view. The scrollable stays mounted.
 ///
-/// The indicator is a floating disc that follows the finger, shows how far
-/// the pull is from the trigger point and spins while [onRefresh] runs.
-/// Android uses clamping physics, so the content itself does not move; the
-/// disc is the only feedback and therefore must never hide under a
-/// transparent status bar or top bar. Full-bleed pages pass [edgeOffset]
-/// (status bar plus any overlaid bar) so it appears below them.
+/// Android clamping does not move the content, so this slides the child with
+/// the finger and opens a gap under [edgeOffset]. The indicator lives in that
+/// gap: full-bleed artwork moves down instead of having a spinner painted on
+/// it. Release past [triggerDistance] holds the gap while [onRefresh] runs,
+/// then eases the page shut. Pages whose top bar floats on the content pass
+/// that covered distance as [edgeOffset].
 class AppRefresh extends StatefulWidget {
   const AppRefresh({
     super.key,
@@ -1351,54 +1350,122 @@ class AppRefresh extends StatefulWidget {
 
   /// Pull distance that triggers a refresh on release.
   static const triggerDistance = 72.0;
-  static const _maxPull = 132.0;
-  static const _discSize = 40.0;
 
-  /// Floating indicator disc, for tests and captures.
+  /// How far the page stays open under the chrome while refreshing.
+  static const _hold = 60.0;
+  static const _maxPull = 132.0;
+  static const _discSize = 36.0;
+
+  /// Indicator disc, for tests and captures.
   static const indicatorKey = Key('app-refresh-indicator');
 
   @override
   State<AppRefresh> createState() => _AppRefreshState();
 }
 
-class _AppRefreshState extends State<AppRefresh> {
+class _AppRefreshState extends State<AppRefresh>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _motion = AnimationController(vsync: this);
   double _pull = 0;
+  double _shown = 0;
+  double _from = 0;
+  double _to = 0;
+  Curve _curve = AppMotion.emphasized;
   bool _busy = false;
   bool _armed = false;
 
+  double get _rest => widget.edgeOffset + AppRefresh._hold;
+
+  double get _limit {
+    final stretched = _rest + 48;
+    return stretched > AppRefresh._maxPull ? stretched : AppRefresh._maxPull;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _motion.addListener(_onMotion);
+  }
+
+  @override
+  void dispose() {
+    _motion.dispose();
+    super.dispose();
+  }
+
+  void _onMotion() {
+    final t = _curve.transform(_motion.value);
+    final next = _motion.value == 1 ? _to : _from + (_to - _from) * t;
+    if ((next - _shown).abs() < .01) return;
+    setState(() => _shown = next);
+  }
+
   void _setPull(double value) {
-    final next = value.clamp(0.0, AppRefresh._maxPull);
+    if (_motion.isAnimating) _motion.stop();
+    final next = value.clamp(0.0, _limit);
     final armed = next >= AppRefresh.triggerDistance;
     if (armed && !_armed) HapticFeedback.selectionClick();
     setState(() {
       _pull = next;
+      _shown = next;
       _armed = armed;
     });
+  }
+
+  void _nudge(double delta) {
+    if (delta == 0) return;
+    final gain = delta > 0 && _pull >= _rest
+        ? .28
+        : delta > 0
+        ? .72
+        : 1.0;
+    _setPull(_pull + delta * gain);
+  }
+
+  void _animateTo(double target, {required bool closing}) {
+    _motion.stop();
+    final duration = AppMotion.durationOf(
+      context,
+      closing ? AppMotion.normal : AppMotion.slow,
+    );
+    if (!mounted) return;
+    if (duration == Duration.zero || (target - _shown).abs() < .5) {
+      setState(() => _shown = target);
+      return;
+    }
+    _from = _shown;
+    _to = target;
+    _curve = closing ? AppMotion.exit : AppMotion.emphasized;
+    _motion.duration = duration;
+    _motion.forward(from: 0);
   }
 
   Future<void> _refresh() async {
     if (_busy) return;
     setState(() => _busy = true);
+    final pending = widget.onRefresh();
+    _animateTo(_rest, closing: false);
     try {
-      await widget.onRefresh();
+      await pending;
     } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _pull = 0;
-          _armed = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _pull = 0;
+        _armed = false;
+      });
+      _animateTo(0, closing: true);
     }
   }
 
   bool _notify(ScrollNotification n) {
-    if (n.depth != 0 || n.metrics.axis != Axis.vertical || _busy) return false;
+    if (n.depth != 0 || n.metrics.axis != Axis.vertical || _busy) {
+      return false;
+    }
     if (n is OverscrollNotification &&
         n.dragDetails != null &&
         n.overscroll < 0) {
-      // Clamping physics: resist a little so the disc trails the finger.
-      _setPull(_pull - n.overscroll * .7);
+      _nudge(-n.overscroll);
     } else if (n is ScrollUpdateNotification &&
         n.dragDetails != null &&
         n.metrics.pixels < n.metrics.minScrollExtent) {
@@ -1411,81 +1478,101 @@ class _AppRefreshState extends State<AppRefresh> {
     } else if (n is ScrollEndNotification) {
       if (_pull >= AppRefresh.triggerDistance) {
         _refresh();
-      } else if (_pull != 0) {
+      } else if (_pull != 0 || _shown != 0) {
         setState(() {
           _pull = 0;
           _armed = false;
         });
+        _animateTo(0, closing: true);
       }
     }
     return false;
   }
 
+  double _indicatorTop(double shown) {
+    final edge = widget.edgeOffset;
+    final centered = edge + (shown - edge - AppRefresh._discSize) / 2;
+    final lowest = shown - AppRefresh._discSize;
+    if (centered < edge) return edge;
+    if (centered > lowest) return lowest;
+    return centered;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final progress = _busy
-        ? 1.0
-        : (_pull / AppRefresh.triggerDistance).clamp(0.0, 1.0);
-    // Busy: rest just below the content edge. Pulling: slide in with the
-    // finger from above the edge.
-    final travel = _busy
-        ? AppSpacing.md
-        : _pull * .55 - AppRefresh._discSize * .5;
-    final visible = _busy || _pull > 0;
-    return Stack(
-      children: [
-        NotificationListener<ScrollNotification>(
-          onNotification: _notify,
-          child: widget.child,
-        ),
-        if (visible)
-          Positioned(
-            top: widget.edgeOffset + travel,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Center(
-                child: Opacity(
-                  opacity: _busy ? 1 : (.35 + progress * .65),
-                  child: Container(
-                    key: AppRefresh.indicatorKey,
-                    width: AppRefresh._discSize,
-                    height: AppRefresh._discSize,
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: scheme.outlineVariant.withValues(alpha: .6),
-                        width: .5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppInk.black.withValues(alpha: .22),
-                          blurRadius: 14,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.center,
-                    child: _busy
-                        ? CupertinoActivityIndicator(
-                            color: scheme.primary,
-                            radius: 9,
-                          )
-                        : _RefreshDial(
-                            progress: progress,
-                            armed: _armed,
-                            color: scheme.primary,
-                            track: scheme.outlineVariant,
+    final dark = theme.brightness == Brightness.dark;
+    final shown = _shown;
+    final gap = shown - widget.edgeOffset;
+    // Draw the disc only once the opened band can hold it, so it never sits
+    // on the artwork while the page is still sliding out from under the bar.
+    final visible = gap >= AppRefresh._discSize - 4;
+    final reveal = visible ? ((gap - 20) / 24).clamp(0.0, 1.0) : 0.0;
+    final progress = (_pull / AppRefresh.triggerDistance).clamp(0.0, 1.0);
+    final disc = dark ? const Color(0xF7FFFFFF) : const Color(0xF01B1D21);
+    final ink = dark ? const Color(0xFF16181C) : const Color(0xFFF4F5F7);
+    final track = ink.withValues(alpha: .28);
+    return ColoredBox(
+      color: theme.scaffoldBackgroundColor,
+      child: ClipRect(
+        child: Stack(
+          children: [
+            Transform.translate(
+              offset: Offset(0, shown),
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _notify,
+                child: widget.child,
+              ),
+            ),
+            if (visible)
+              Positioned(
+                top: _indicatorTop(shown),
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Opacity(
+                      opacity: _busy ? 1 : .4 + reveal * .6,
+                      child: Transform.scale(
+                        scale: _busy ? 1 : .86 + reveal * .14,
+                        child: Container(
+                          key: AppRefresh.indicatorKey,
+                          width: AppRefresh._discSize,
+                          height: AppRefresh._discSize,
+                          decoration: BoxDecoration(
+                            color: disc,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppInk.black.withValues(
+                                  alpha: dark ? .28 : .16,
+                                ),
+                                blurRadius: 16,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
                           ),
+                          alignment: Alignment.center,
+                          child: _busy
+                              ? CupertinoActivityIndicator(
+                                  color: ink,
+                                  radius: 8,
+                                )
+                              : _RefreshDial(
+                                  progress: progress,
+                                  armed: _armed,
+                                  color: ink,
+                                  track: track,
+                                ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 }

@@ -67,6 +67,9 @@ Map<String, String> normalizeProviderIds(Map<String, String> input) {
 final _imdbId = RegExp(r'^tt\d+$');
 final _numericId = RegExp(r'^[1-9]\d*$');
 
+bool reliableProviderId(String provider, String value) =>
+    _reliable(provider, value);
+
 bool _reliable(String provider, String value) => switch (provider) {
   'imdb' => _imdbId.hasMatch(value),
   'tmdb' || 'tvdb' || 'tvmaze' => _numericId.hasMatch(value),
@@ -379,6 +382,7 @@ class EpisodeSource {
     this.endEpisode,
     this.isSpecial,
     this.numberingScheme,
+    this.name,
     Map<String, String> providerIds = const {},
   }) : providerIds = normalizeProviderIds(providerIds);
   factory EpisodeSource.fromMediaItem(
@@ -401,6 +405,7 @@ class EpisodeSource {
           ? null
           : item.parentIndexNumber == 0,
       numberingScheme: numberingScheme,
+      name: item.name,
       providerIds: item.providerIds,
     );
   }
@@ -414,6 +419,7 @@ class EpisodeSource {
   /// Explicitly verified mapping (e.g. aired order). Never assumed from Emby
   /// IndexNumber alone: absolute/DVD/combined episode ordering may differ.
   final String? numberingScheme;
+  final String? name;
   final Map<String, String> providerIds;
   bool get hasCoordinates =>
       season != null &&
@@ -459,6 +465,15 @@ EpisodeLookup locateEpisode({
       episode.reference.account == episode.series!.account &&
       series.contains(episode.series!) &&
       series.sources.every((s) => s.type == 'Series');
+  // Provider ids identify an episode across servers even when season numbers
+  // differ (TVDB season 2 vs TMDB absolute order). Numbering stays a fallback.
+  final byProvider = _providerEpisodeMatch(
+    origin: origin,
+    targetAccount: targetAccount,
+    available: available,
+    belongs: belongs,
+  );
+  if (byProvider != null) return byProvider;
   if (!belongs(origin) || !origin.hasCoordinates) {
     return const EpisodeLookup(EpisodeLookupStatus.uncertain);
   }
@@ -501,6 +516,51 @@ EpisodeLookup locateEpisode({
     return const EpisodeLookup(EpisodeLookupStatus.ambiguous);
   }
   if (matches.isEmpty) return const EpisodeLookup(EpisodeLookupStatus.missing);
+  return EpisodeLookup(
+    EpisodeLookupStatus.confirmed,
+    source: matches.values.single,
+  );
+}
+
+/// Null when [origin] has no reliable provider id, or none of [available]
+/// shares one. A shared id with a different value is a conflict.
+EpisodeLookup? _providerEpisodeMatch({
+  required EpisodeSource origin,
+  required SourceAccount targetAccount,
+  required Iterable<EpisodeSource> available,
+  required bool Function(EpisodeSource episode) belongs,
+}) {
+  final wanted = {
+    for (final entry in origin.providerIds.entries)
+      if (_reliable(entry.key, entry.value)) entry.key: entry.value,
+  };
+  if (wanted.isEmpty) return null;
+  final matches = <SourceReference, EpisodeSource>{};
+  var conflict = false;
+  var sawId = false;
+  for (final candidate in available) {
+    if (candidate.reference.account != targetAccount) continue;
+    if (!belongs(candidate)) continue;
+    final shared = wanted.keys
+        .where((key) => candidate.providerIds.containsKey(key))
+        .toList();
+    if (shared.isEmpty) continue;
+    sawId = true;
+    if (shared.any((key) => candidate.providerIds[key] != wanted[key])) {
+      conflict = true;
+      continue;
+    }
+    matches[candidate.reference] = candidate;
+  }
+  if (!sawId) return null;
+  if (conflict && matches.isEmpty) {
+    return const EpisodeLookup(EpisodeLookupStatus.conflict);
+  }
+  if (conflict) return const EpisodeLookup(EpisodeLookupStatus.conflict);
+  if (matches.length > 1) {
+    return const EpisodeLookup(EpisodeLookupStatus.ambiguous);
+  }
+  if (matches.isEmpty) return null;
   return EpisodeLookup(
     EpisodeLookupStatus.confirmed,
     source: matches.values.single,

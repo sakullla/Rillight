@@ -24,6 +24,13 @@ const _available = CapabilityStatus(
 const _detailFields =
     'Overview,Genres,People,MediaSources,Chapters,ProviderIds,DateCreated,ParentId';
 
+/// List and source search. MediaSources and Chapters make /Items stall.
+const _gridFields =
+    'Overview,Genres,ProviderIds,DateCreated,ParentId,ChildCount,ProductionYear,UserData,ImageTags';
+
+String _jellyfinFields(String fields) =>
+    fields == MediaServerClient.gridFields ? _gridFields : _detailFields;
+
 /// Independent Jellyfin adapter. No session is installed by a login response:
 /// the source registry remains the only authority which commits credentials.
 class JellyfinClient extends MediaServerClient
@@ -480,7 +487,7 @@ class JellyfinClient extends MediaServerClient
     'genres': genres?.join('|'),
     'years': years?.join(','),
     'personIds': personIds?.join(','),
-    'fields': _detailFields,
+    'fields': _jellyfinFields(fields),
     'enableUserData': true,
     'enableTotalRecordCount': true,
   });

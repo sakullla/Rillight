@@ -2,9 +2,12 @@ import 'configured_source.dart';
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -792,6 +795,85 @@ void main() {
     expect(auth.isLoggedIn, isFalse);
     expect(await gated.read(configuredSourceId(auth, server.serverId)), isNull);
   });
+
+  test('startup restore does not wait for server info', () async {
+    final credentials = MemoryCredentialStore();
+    final servers = MemoryServerListStore();
+    final auth = controller(credentials: credentials, servers: servers);
+    addTearDown(auth.dispose);
+    expect(
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+      isTrue,
+    );
+
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    final dio = dioForFakeEmby(adapter);
+    dio.httpClientAdapter = _HoldPublicInfo(dio.httpClientAdapter, gate);
+    final restored = AuthController(
+      client: EmbyClient(device: _device, dio: dio),
+      credentials: credentials,
+      servers: servers,
+    );
+    addTearDown(restored.dispose);
+
+    await restored
+        .restore(waitForNetwork: false)
+        .timeout(const Duration(seconds: 1));
+    final transport = dio.httpClientAdapter as _HoldPublicInfo;
+    final deadline = DateTime.now().add(const Duration(seconds: 1));
+    while (!transport.held &&
+        restored.restoring &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(
+      transport.held,
+      isTrue,
+      reason:
+          'paths=${transport.paths} restoring=${restored.restoring} '
+          'failure=${restored.failure?.kind}',
+    );
+    expect(restored.restoring, isTrue);
+    expect(restored.isLoggedIn, isFalse);
+    expect(restored.savedServers, isNotEmpty);
+    // The shell is built only after local restore returns. It must keep the
+    // loading skeleton while server info is still outstanding.
+    final catalog = CatalogController(auth: restored);
+    addTearDown(catalog.dispose);
+    expect(catalog.resume.loading, isTrue);
+    expect(catalog.resume.items, isEmpty);
+    final requestsBefore = server.requests.length;
+
+    gate.complete();
+    final ready = Completer<void>();
+    void listener() {
+      if (restored.isLoggedIn && !restored.restoring && !ready.isCompleted) {
+        ready.complete();
+      }
+    }
+
+    restored.addListener(listener);
+    listener();
+    await ready.future.timeout(const Duration(seconds: 2));
+    restored.removeListener(listener);
+    expect(restored.restoring, isFalse);
+    expect(restored.failure, isNull);
+    for (
+      var attempt = 0;
+      attempt < 50 && server.requests.length == requestsBefore;
+      attempt++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(server.requests.length, greaterThan(requestsBefore));
+  });
 }
 
 class _GatedCredentialStore implements CredentialStore {
@@ -818,4 +900,30 @@ class _GatedCredentialStore implements CredentialStore {
   Future<void> delete(String serverId) {
     return inner.delete(serverId);
   }
+}
+
+class _HoldPublicInfo implements HttpClientAdapter {
+  _HoldPublicInfo(this.inner, this.gate);
+
+  final HttpClientAdapter inner;
+  final Completer<void> gate;
+  final paths = <String>[];
+  var held = false;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    paths.add(options.uri.toString());
+    if (options.uri.path.endsWith('/System/Info/Public')) {
+      held = true;
+      await gate.future;
+    }
+    return inner.fetch(options, requestStream, cancelFuture);
+  }
+
+  @override
+  void close({bool force = false}) => inner.close(force: force);
 }

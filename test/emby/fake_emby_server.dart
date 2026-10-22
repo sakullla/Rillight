@@ -529,6 +529,10 @@ class FakeEmbyServer {
   /// 改密成功后吊销调用方 token,模拟服务器结束当前会话。
   bool revokeSessionOnChangePassword = false;
 
+  /// emby_ext_domains payload. Null answers 404, the same as a server
+  /// without the extension.
+  List<Map<String, String>>? extendedDomains;
+
   bool hangPublicInfo = false;
   bool publicInfoHtml = false;
   int? publicInfoStatus;
@@ -746,6 +750,12 @@ class FakeEmbyServer {
         'ServerName': serverName,
         'Version': version,
       });
+    }
+    if (path.endsWith('/System/Ext/ServerDomains') && method == 'GET') {
+      if (extendedDomains == null) {
+        return _json(404, {'error': 'not found'});
+      }
+      return _json(200, {'ok': true, 'data': extendedDomains});
     }
 
     if (segments.length == 2 &&

@@ -334,6 +334,8 @@ class AuthController extends ChangeNotifier {
   bool _libraryCountsLoading = false;
   int _libraryCountsSeq = 0;
   bool _disposed = false;
+  bool _restoring = false;
+  int _deferredRestoreTicket = 0;
 
   AuthSession? get session =>
       _session != null && serverAccess.allows(_session!.server.id)
@@ -345,6 +347,10 @@ class AuthController extends ChangeNotifier {
   LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
   bool get isLoggedIn => session != null;
+
+  /// True while a saved session is being confirmed off the startup path.
+  /// The shell can paint; identity and extended-line lookups stay in flight.
+  bool get restoring => _restoring;
 
   int _authorizationPresentations = 0;
   bool get presentingAuthorization => _authorizationPresentations > 0;
@@ -435,41 +441,81 @@ class AuthController extends ChangeNotifier {
     _libraryCountsLoading = false;
   }
 
-  Future<void> restore() async {
+  /// Loads the saved server list.
+  ///
+  /// [waitForNetwork] false returns after that local read. Server info,
+  /// account verification and optional extra lines continue in the background
+  /// so a slow link cannot hold the first frame.
+  Future<void> restore({bool waitForNetwork = true}) async {
     final generation = ++_activationGeneration;
+    final ticket = ++_deferredRestoreTicket;
+    _restoring = false;
     final snapshot = await servers.load();
     if (!_ownsActivation(generation)) return;
     _savedServers = snapshot.servers;
     final lastId = snapshot.lastServerId;
     _rememberedServerId = lastId;
     if (lastId == null || lastId.isEmpty) {
-      notifyListeners();
+      _publishStartupRestore();
       return;
     }
     final last = _serverById(lastId);
     if (last == null) {
-      notifyListeners();
+      _publishStartupRestore();
       return;
     }
     if (!serverAccess.allows(last.id)) {
       _prefill = last;
-      notifyListeners();
+      _publishStartupRestore();
       return;
     }
     final stored = await credentials.read(last.id);
     if (!_ownsActivation(generation)) return;
     if (stored == null || stored.accessToken.isEmpty) {
       _prefill = last;
-      notifyListeners();
+      _publishStartupRestore();
       return;
     }
-    if (last.identityPending) {
-      await switchTo(last.id);
+    final Future<void> pending = last.identityPending
+        ? switchTo(last.id)
+        : _restoreSavedSession(last, stored, generation, waitForNetwork);
+    if (waitForNetwork) {
+      await pending;
       return;
     }
+    _beginDeferredRestore(pending, ticket);
+  }
+
+  void _publishStartupRestore() {
+    _restoring = false;
+    if (!_disposed) notifyListeners();
+  }
+
+  void _beginDeferredRestore(Future<void> pending, int ticket) {
+    _restoring = true;
+    unawaited(
+      pending.whenComplete(() {
+        if (_disposed || ticket != _deferredRestoreTicket) return;
+        _restoring = false;
+        notifyListeners();
+      }),
+    );
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> _restoreSavedSession(
+    SavedServer last,
+    StoredCredentials stored,
+    int generation,
+    bool waitForNetwork,
+  ) async {
     try {
       await _activate(last, stored, generation: generation);
-      await _discoverExtendedLines(last.id);
+      // The signed-in shell can load while optional domain discovery continues.
+      if (!waitForNetwork && _ownsActivation(generation) && !_disposed) {
+        notifyListeners();
+      }
+      await discoverExtendedLines(last.id);
     } catch (error) {
       if (!_ownsActivation(generation)) return;
       _session = null;
@@ -478,7 +524,7 @@ class AuthController extends ChangeNotifier {
           ? error
           : const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
-    notifyListeners();
+    if (_ownsActivation(generation) && !_disposed) notifyListeners();
   }
 
   Future<bool> connect({
@@ -584,7 +630,7 @@ class AuthController extends ChangeNotifier {
       // emby_ext_domains is optional. Its bounded, fully swallowed discovery
       // runs after publication so an absent, blocked, or malformed extension
       // can never make a valid login fail.
-      await _discoverExtendedLines(server.id);
+      await discoverExtendedLines(server.id);
       _prefill = null;
       connectDraft = null;
       return true;
@@ -600,20 +646,29 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<void> _discoverExtendedLines(String id) async {
+  /// Asks emby_ext_domains for more lines of the signed-in Emby server.
+  ///
+  /// Returns how many new lines were saved. `-1` means this server is not the
+  /// current Emby session, so the extension token cannot be checked.
+  Future<int> discoverExtendedLines(String id, {bool force = false}) async {
     final current = _session;
-    if (current?.server.id != id ||
-        _client is! EmbyClient ||
-        !_extendedDomainChecks.add(id)) {
-      return;
-    }
+    if (current?.server.id != id || _client is! EmbyClient) return -1;
+    if (!force && !_extendedDomainChecks.add(id)) return 0;
+    _extendedDomainChecks.add(id);
+    var added = 0;
     try {
-      final addresses = await (_client as EmbyClient)
-          .loadExtendedServerDomains()
-          .timeout(const Duration(seconds: 4), onTimeout: () => const []);
-      for (final address in addresses) {
+      final domains = await (_client as EmbyClient).loadExtendedServerDomains(
+        plainSidecar: force,
+        probeTimeout: force
+            ? const Duration(seconds: 3)
+            : const Duration(seconds: 2),
+      );
+      if (_session?.server.id != id) return added;
+      for (final domain in domains) {
         try {
-          await addLine(id, address.toString());
+          if (await addLine(id, domain.url.toString(), nickname: domain.name)) {
+            added++;
+          }
         } on Object {
           // Extension entries are hints. Identity failures, duplicates and
           // unreachable domains are all silently ignored.
@@ -622,6 +677,7 @@ class AuthController extends ChangeNotifier {
     } on Object {
       // Unsupported extension endpoint: keep the configured lines untouched.
     }
+    return added;
   }
 
   Future<void> logout() async {
@@ -770,7 +826,7 @@ class AuthController extends ChangeNotifier {
         remember: !deferPublication,
       );
       await refreshServers();
-      await _discoverExtendedLines(server.id);
+      await discoverExtendedLines(server.id);
       _lineSwitchFailure = null;
       _failure = null;
       connectDraft = null;
@@ -910,7 +966,11 @@ class AuthController extends ChangeNotifier {
     await refreshServers();
   }
 
-  Future<bool> addLine(String serverId, String address) async {
+  Future<bool> addLine(
+    String serverId,
+    String address, {
+    String? nickname,
+  }) async {
     final server = _serverById(serverId);
     if (server == null) return false;
     final url = _normalizeLineAddress(address);
@@ -920,8 +980,21 @@ class AuthController extends ChangeNotifier {
         )) {
       return false;
     }
-    await _lineMutation(serverId, () => sources.setLineAddress(serverId, url));
+    await _lineMutation(
+      serverId,
+      () => sources.setLineAddress(
+        serverId,
+        url,
+        nickname: _lineNickname(nickname),
+      ),
+    );
     return true;
+  }
+
+  String? _lineNickname(String? value) {
+    final text = value?.trim();
+    if (text == null || text.isEmpty) return null;
+    return text.length <= 40 ? text : text.substring(0, 40);
   }
 
   Future<bool> updateLineAddress(

@@ -112,6 +112,7 @@ abstract interface class MediaProviderLookup {
     required Map<String, String> providerIds,
     required int limit,
     required int startIndex,
+    String fields = MediaServerClient.itemFields,
   });
 }
 

@@ -76,11 +76,15 @@ class ServerLine {
     this.checkStatus = 'unknown',
     this.checkFailureKind,
     this.checkedAt,
+    this.latencyMs,
   });
 
   final String checkStatus;
   final String? checkFailureKind;
   final DateTime? checkedAt;
+
+  /// Round trip of the last public-info probe, in milliseconds.
+  final int? latencyMs;
 
   final String? nickname;
 
@@ -102,6 +106,7 @@ class ServerLine {
     'checkStatus': checkStatus,
     if (checkFailureKind != null) 'checkFailureKind': checkFailureKind,
     'checkedAt': checkedAt?.toIso8601String(),
+    if (latencyMs != null) 'latencyMs': latencyMs,
   };
 
   factory ServerLine.fromJson(Map<String, dynamic> json) {
@@ -121,6 +126,7 @@ class ServerLine {
           _storedString(json, 'checkStatus', nullable: false) ?? 'unknown',
       checkFailureKind: _storedString(json, 'checkFailureKind'),
       checkedAt: _storedDate(json, 'checkedAt'),
+      latencyMs: json['latencyMs'] is int ? json['latencyMs'] as int : null,
     );
   }
 
@@ -131,16 +137,16 @@ class ServerLine {
     String? checkStatus,
     String? checkFailureKind,
     DateTime? checkedAt,
+    int? latencyMs,
   }) {
+    final resetProbe =
+        checkStatus != null || address != null && address != this.address;
     return ServerLine(
       id: id ?? this.id,
       address: address ?? this.address,
       nickname: nickname ?? this.nickname,
       checkFailureKind:
-          checkFailureKind ??
-          (checkStatus != null || address != null && address != this.address
-              ? null
-              : this.checkFailureKind),
+          checkFailureKind ?? (resetProbe ? null : this.checkFailureKind),
       checkStatus:
           checkStatus ??
           (address != null && address != this.address
@@ -149,6 +155,7 @@ class ServerLine {
       checkedAt:
           checkedAt ??
           (address != null && address != this.address ? null : this.checkedAt),
+      latencyMs: latencyMs ?? (resetProbe ? null : this.latencyMs),
     );
   }
 }

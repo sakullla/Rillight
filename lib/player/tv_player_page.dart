@@ -1380,6 +1380,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 : _retryFocus,
                             onChooseLines: () =>
                                 unawaited(showPlaybackLineDialog(context, c)),
+                            onDismiss: () => unawaited(_close()),
                           )
                         : c.loading
                         ? SizedBox.square(

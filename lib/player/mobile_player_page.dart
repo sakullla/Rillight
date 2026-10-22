@@ -788,6 +788,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       return PlayerLineStatus(
         controller: c,
         onChooseLines: () => unawaited(showPlaybackLineSheet(context, c)),
+        onDismiss: () => unawaited(_close()),
       );
     }
     final l = AppLocalizations.of(context);

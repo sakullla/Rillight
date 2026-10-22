@@ -693,6 +693,7 @@ class PlayerPageState extends State<PlayerPage> {
                         controller: current,
                         onChooseLines: () =>
                             unawaited(showPlaybackLineDialog(context, current)),
+                        onDismiss: () => unawaited(current.close()),
                       ),
                     if (!current.playbackEnded && current.error == null)
                       _ControlsBar(

@@ -64,6 +64,13 @@ class ServerAddPanelState extends State<ServerAddPanel> {
     }
   }
 
+  /// Keeps the recognized server, including a password found in the text.
+  void adopt(ServerPasteDraft draft) {
+    selected = draft;
+    step = 'connect';
+    error = null;
+  }
+
   void parse() {
     final result = ServerPastePreview.parse(raw.text);
     setState(() {
@@ -75,9 +82,7 @@ class ServerAddPanelState extends State<ServerAddPanel> {
         selected = null;
         error = null;
       } else {
-        selected = result.groups.single;
-        step = 'connect';
-        error = null;
+        adopt(result.groups.single);
       }
     });
   }
@@ -87,10 +92,14 @@ class ServerAddPanelState extends State<ServerAddPanel> {
     final l = AppLocalizations.of(context);
     Widget body;
     if (step == 'paste') {
+      final theme = AppUiTheme.of(context);
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(l.serversPasteHint),
+          Text(
+            l.serversPasteHint,
+            style: theme.textTheme.bodyMedium?.copyWith(height: 1.45),
+          ),
           const SizedBox(height: 16),
           AppTextField(
             key: const Key('server-paste-text'),
@@ -142,10 +151,7 @@ class ServerAddPanelState extends State<ServerAddPanel> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   chevron: true,
-                  onTap: () => setState(() {
-                    selected = preview!.groups[i];
-                    step = 'connect';
-                  }),
+                  onTap: () => setState(() => adopt(preview!.groups[i])),
                 ),
             ],
           ),
@@ -158,65 +164,8 @@ class ServerAddPanelState extends State<ServerAddPanel> {
           if (selected != null) ...[
             ServerFeedback(l.serversPasteIncomplete, error: false),
             const SizedBox(height: 8),
-          ] else ...[
-            Builder(
-              builder: (context) {
-                final theme = AppUiTheme.of(context);
-                final colors = theme.colorScheme;
-                return Container(
-                  key: const ValueKey('server-paste-card'),
-                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(ServerUi.cardRadius),
-                    color: colors.surfaceContainer,
-                    border: Border.all(color: colors.outlineVariant, width: .8),
-                  ),
-                  child: Row(
-                    children: [
-                      const ServerRowIcon(AppIcons.copy, size: 40),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l.serversPaste,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              l.serversPasteCardHint,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      AppButton(
-                        key: const Key('server-add-paste'),
-                        onPressed: paste,
-                        variant: AppButtonVariant.filled,
-                        minimumSize: const Size(44, 38),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 7,
-                        ),
-                        child: Text(l.serversPaste),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 22),
+          ] else
             ServerGroupHeader(title: l.serversSelectType),
-          ],
           ProviderConnectDialog(
             key: ValueKey(selected),
             auth: widget.auth,
@@ -230,6 +179,18 @@ class ServerAddPanelState extends State<ServerAddPanel> {
             title: l.serversMoreOptions,
             margin: EdgeInsets.zero,
             children: [
+              if (selected == null)
+                ServerRow(
+                  key: const Key('server-add-paste'),
+                  onTap: paste,
+                  leading: const ServerRowIcon(
+                    AppIcons.copy,
+                    tone: ServerTone.neutral,
+                  ),
+                  title: Text(l.serversPaste),
+                  subtitle: Text(l.serversPasteRowHint),
+                  chevron: true,
+                ),
               ServerRow(
                 key: const Key('server-add-import'),
                 onTap: widget.onImport,

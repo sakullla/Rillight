@@ -63,6 +63,12 @@ class CatalogController extends ChangeNotifier {
     _sessionKey = _currentSessionKey;
     _syncCacheSession();
     auth.addListener(_onAuthChanged);
+    // A protected server ends startup with no session. Leave the rows idle
+    // so the shell can ask for the password instead of spinning forever.
+    if (!auth.isLoggedIn && !auth.restoring) {
+      resume = nextUp = latestMovies = latestSeries = const CatalogRowState();
+      librariesLoading = false;
+    }
   }
 
   final AuthController auth;

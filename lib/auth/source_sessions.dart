@@ -238,10 +238,18 @@ enum ManualCheckStatus {
 }
 
 class ManualCheckResult {
-  const ManualCheckResult(this.status, this.checkedAt, {this.failureKind});
+  const ManualCheckResult(
+    this.status,
+    this.checkedAt, {
+    this.failureKind,
+    this.latencyMs,
+  });
   final MediaServerFailureKind? failureKind;
   final ManualCheckStatus status;
   final DateTime checkedAt;
+
+  /// Milliseconds to receive public server info. Null when that probe failed.
+  final int? latencyMs;
 }
 
 typedef SourceClientFactory = MediaServerClient Function();
@@ -1590,26 +1598,31 @@ class SourceSessionRegistry {
         ),
       );
 
-  Future<void> setLineAddress(String id, String address, {String? lineId}) =>
-      _editLines(id, (server) {
-        final uri = normalizeServerAddress(address).toString();
-        if (lineId != null && !server.lines.any((l) => l.id == lineId)) {
-          throw StateError('Unknown line');
-        }
-        return server.copyWith(
-          lines: [
-            for (final line in server.lines)
-              line.id == lineId
-                  ? line.copyWith(
-                      address: uri,
-                      checkStatus: 'unknown',
-                      checkedAt: null,
-                    )
-                  : line,
-            if (lineId == null) ServerLine(id: generateLineId(), address: uri),
-          ],
-        );
-      });
+  Future<void> setLineAddress(
+    String id,
+    String address, {
+    String? lineId,
+    String? nickname,
+  }) => _editLines(id, (server) {
+    final uri = normalizeServerAddress(address).toString();
+    if (lineId != null && !server.lines.any((l) => l.id == lineId)) {
+      throw StateError('Unknown line');
+    }
+    return server.copyWith(
+      lines: [
+        for (final line in server.lines)
+          line.id == lineId
+              ? line.copyWith(
+                  address: uri,
+                  checkStatus: 'unknown',
+                  checkedAt: null,
+                )
+              : line,
+        if (lineId == null)
+          ServerLine(id: generateLineId(), address: uri, nickname: nickname),
+      ],
+    );
+  });
 
   Future<void> removeLine(String id, String lineId) => _editLines(id, (server) {
     if (!server.lines.any((l) => l.id == lineId)) {
@@ -2317,9 +2330,12 @@ class SourceSessionRegistry {
 
     var status = ManualCheckStatus.unknown;
     MediaServerFailureKind? failureKind;
+    int? latencyMs;
     try {
       status = await (() async {
+        final watch = Stopwatch()..start();
         final info = await client.getPublicInfo(Uri.parse(line.address));
+        latencyMs = watch.elapsedMilliseconds;
         guard();
         if (server.expectedServerId != null &&
             info.id != server.expectedServerId) {
@@ -2373,6 +2389,7 @@ class SourceSessionRegistry {
       status,
       DateTime.now(),
       failureKind: failureKind,
+      latencyMs: latencyMs,
     );
     await _update(id, (current) {
       _requireCurrent(server, scope, generation);
@@ -2391,6 +2408,7 @@ class SourceSessionRegistry {
                       checkStatus: status.name,
                       checkFailureKind: failureKind?.name,
                       checkedAt: result.checkedAt,
+                      latencyMs: latencyMs,
                     )
                   : l,
             )

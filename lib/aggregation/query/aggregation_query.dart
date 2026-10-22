@@ -587,6 +587,14 @@ class AggregationQueryController extends ChangeNotifier {
       if (!_owns(state, revision, attempt)) return;
       permit = permitFor(account, libraryId: state.key.libraryId);
       state.permit = permit;
+      // Series and episode lists do not need MediaSources or Chapters.
+      // Those fields make /Items large enough to stall a slow link.
+      final light =
+          scope.sameWork != null &&
+          (scope.types.isEmpty || !scope.types.contains('Movie'));
+      final fields = light
+          ? MediaServerClient.gridFields
+          : MediaServerClient.itemFields;
       final page = await permit
           .dispatch(
             (client) =>
@@ -600,6 +608,7 @@ class AggregationQueryController extends ChangeNotifier {
                     providerIds: scope.sameWork!.reliableProviderIds,
                     limit: scope.pageSize,
                     startIndex: state.cursor,
+                    fields: fields,
                   )
                 : scope.mode == QueryMode.nextUp
                 ? client.queryNextUp(
@@ -634,7 +643,7 @@ class AggregationQueryController extends ChangeNotifier {
                       if (scope.played != null)
                         scope.played! ? 'IsPlayed' : 'IsUnplayed',
                     ],
-                    fields: MediaServerClient.itemFields,
+                    fields: fields,
                   ),
           )
           .timeout(timeout);

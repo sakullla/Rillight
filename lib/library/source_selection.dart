@@ -501,6 +501,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   String? _subtitle;
   String? _audio;
   final ScrollController _scroll = ScrollController();
+  final Set<SourceReference> _lookupStarted = {};
 
   bool get _sheetResolving => widget.phoneSheet && !_resolved;
 
@@ -508,6 +509,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   void initState() {
     super.initState();
     _resolved = !widget.phoneSheet;
+    controller.addListener(_matchCurrentEpisode);
+    _matchCurrentEpisode();
     if (widget.phoneSheet) unawaited(_resolveAndStart());
   }
 
@@ -552,6 +555,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         widget.controller.start(origin: item, scope: QueryScope(pageSize: 24)),
       );
       if (mounted) setState(() => _resolved = true);
+      _matchCurrentEpisode();
     } catch (_) {
       if (mounted && stillHere()) {
         showAppNotice(
@@ -588,9 +592,25 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
 
   @override
   void dispose() {
+    controller.removeListener(_matchCurrentEpisode);
     _pendingEntry?.cancel();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 已经打开某一集时，对确认过的剧集直接找这一集。
+  /// 外部编号优先；没有编号时按季号和集号给出可打开的一集，不再先弹核对窗。
+  void _matchCurrentEpisode() {
+    final current = episode;
+    if (current == null) return;
+    for (final comparison in controller.comparisons) {
+      if (!comparison.decision.confirmed || !comparison.source.item.isSeries) {
+        continue;
+      }
+      final reference = comparison.source.reference;
+      if (!_lookupStarted.add(reference)) continue;
+      unawaited(_lookupEpisode(comparison.source));
+    }
   }
 
   Future<void> _verifyTarget(String password) async {
@@ -615,7 +635,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         setState(
           () => _error = runtime.registry.access.retryAt(target.id) != null
               ? AppLocalizations.of(context).serversPasswordWrong
-              : AppLocalizations.of(context).serversConnectionFailed,
+              : AppLocalizations.of(context).sourceSelectionUnreachable,
         );
         return;
       }
@@ -630,7 +650,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       entry?.cancel();
       if (mounted) {
         setState(
-          () => _error = AppLocalizations.of(context).serversConnectionFailed,
+          () =>
+              _error = AppLocalizations.of(context).sourceSelectionUnreachable,
         );
       }
     } finally {
@@ -702,7 +723,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       entry?.cancel();
       if (mounted) {
         setState(
-          () => _error = AppLocalizations.of(context).serversConnectionFailed,
+          () =>
+              _error = AppLocalizations.of(context).sourceSelectionUnreachable,
         );
       }
     } finally {
@@ -710,21 +732,93 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     }
   }
 
-  Future<void> _lookupEpisode(BuildContext context, QueryItem target) async {
-    if (_busy) return;
-    final verified = await confirmEpisodeMapping(context);
-    if (!context.mounted) return;
-    if (controller.origin == null) {
-      Navigator.of(context).pop();
-      return;
+  Future<void> _lookupEpisode(QueryItem target) async {
+    final current = episode;
+    if (current == null || controller.origin == null) return;
+    try {
+      await controller.lookupEpisode(
+        target: target,
+        episode: withConfirmedEpisodeMapping(current),
+        verifiedNumberingScheme: userConfirmedEpisodeNumbering,
+      );
+    } on StateError {
+      // The series stopped being a confirmed match while the request was queued.
     }
-    if (verified == null) return;
-    final e = episode!;
-    final mapped = verified ? withConfirmedEpisodeMapping(e) : e;
-    await controller.lookupEpisode(
-      target: target,
-      episode: mapped,
-      verifiedNumberingScheme: verified ? userConfirmedEpisodeNumbering : null,
+  }
+
+  Widget? _episodeLookupAction(
+    AppLocalizations l,
+    SourceComparison comparison,
+  ) {
+    final current = episode;
+    if (current == null ||
+        !comparison.decision.confirmed ||
+        !comparison.source.item.isSeries) {
+      return null;
+    }
+    final result = controller.episodes
+        .where((item) => item.target == comparison.source.reference)
+        .firstOrNull;
+    if (result == null || result.status == SourceQueryStatus.loading) {
+      return Text(
+        l.sourceSelectionFindingEpisode,
+        style: TextStyle(
+          color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+    final found = result.lookup.source;
+    if (result.lookup.status == EpisodeLookupStatus.confirmed &&
+        found != null) {
+      final where = found.season != null && found.episode != null
+          ? '第${found.season}季第${found.episode}集'
+          : null;
+      return AppButton(
+        onPressed: _busy
+            ? null
+            : () => _openFoundEpisode(comparison.source, found),
+        variant: AppButtonVariant.tinted,
+        child: Text(
+          where == null
+              ? l.sourceSelectionOpenEpisode
+              : '${l.sourceSelectionOpenEpisode} · $where',
+        ),
+      );
+    }
+    if (result.lookup.status == EpisodeLookupStatus.missing) {
+      return Text(
+        l.aggregationMissingEpisode,
+        style: TextStyle(
+          color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+    if (result.lookup.status == EpisodeLookupStatus.queryFailed) {
+      return AppButton(
+        onPressed: _busy ? null : () => _lookupEpisode(comparison.source),
+        variant: AppButtonVariant.tinted,
+        child: Text(l.aggregationEpisodeFailed),
+      );
+    }
+    return null;
+  }
+
+  void _openFoundEpisode(QueryItem series, EpisodeSource found) {
+    _openTarget(
+      QueryItem(
+        found.reference,
+        series.libraryId,
+        MediaItem(
+          id: found.reference.itemId,
+          name:
+              found.name ??
+              AppLocalizations.of(context).sourceSelectionOpenEpisode,
+          type: 'Episode',
+          seriesId: series.reference.itemId,
+          parentIndexNumber: found.season,
+          indexNumber: found.episode,
+        ),
+      ),
     );
   }
 
@@ -1195,18 +1289,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                     badges[_versionKey(comparison, i)],
                 ],
                 onOpen: _busy ? null : () => _openTarget(comparison.source),
-                lookup:
-                    episode != null &&
-                        comparison.decision.confirmed &&
-                        comparison.source.item.isSeries
-                    ? AppButton(
-                        onPressed: _busy
-                            ? null
-                            : () => _lookupEpisode(context, comparison.source),
-                        variant: AppButtonVariant.tinted,
-                        child: Text(l.aggregationEpisodeLookup),
-                      )
-                    : null,
+                lookup: _episodeLookupAction(l, comparison),
               ),
             if (failed)
               Padding(
@@ -1247,44 +1330,6 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                   ),
                   child: Text(l.sourceSelectionMore),
                 ),
-              ),
-            for (final result in controller.episodes)
-              _EpisodeStatusRow(
-                label: _episodeStatusLabel(l, result.lookup.status),
-                retryLabel: l.aggregationRetry,
-                onRetry: result.lookup.status == EpisodeLookupStatus.queryFailed
-                    ? () => _lookupEpisode(
-                        context,
-                        controller.comparisons
-                            .firstWhere(
-                              (comparison) =>
-                                  comparison.source.reference == result.target,
-                            )
-                            .source,
-                      )
-                    : null,
-                onOpen: result.lookup.source == null
-                    ? null
-                    : () {
-                        final target = controller.comparisons
-                            .firstWhere(
-                              (comparison) =>
-                                  comparison.source.reference == result.target,
-                            )
-                            .source;
-                        final ref = result.lookup.source!.reference;
-                        _openTarget(
-                          QueryItem(
-                            ref,
-                            target.libraryId,
-                            MediaItem(
-                              id: ref.itemId,
-                              name: l.aggregationEpisodeConfirmed,
-                              type: 'Episode',
-                            ),
-                          ),
-                        );
-                      },
               ),
           ],
         ),
@@ -1770,17 +1815,6 @@ String? _watchedLabel(AppLocalizations l10n, DateTime? date) {
   return null;
 }
 
-String _episodeStatusLabel(AppLocalizations l10n, EpisodeLookupStatus status) {
-  return switch (status) {
-    EpisodeLookupStatus.missing => l10n.aggregationMissingEpisode,
-    EpisodeLookupStatus.queryFailed => l10n.aggregationEpisodeFailed,
-    EpisodeLookupStatus.confirmed => l10n.aggregationEpisodeConfirmed,
-    EpisodeLookupStatus.uncertain ||
-    EpisodeLookupStatus.conflict ||
-    EpisodeLookupStatus.ambiguous => l10n.aggregationEpisodeUncertain,
-  };
-}
-
 String _serverInitial(String name) {
   final trimmed = name.trim();
   if (trimmed.isEmpty) return '?';
@@ -2142,63 +2176,6 @@ class _SpecChip extends StatelessWidget {
             color: emphasize ? scheme.onPrimary : scheme.onSurface,
             fontWeight: emphasize ? FontWeight.w600 : FontWeight.w500,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EpisodeStatusRow extends StatelessWidget {
-  const _EpisodeStatusRow({
-    required this.label,
-    required this.retryLabel,
-    required this.onRetry,
-    required this.onOpen,
-  });
-
-  final String label;
-  final String retryLabel;
-  final VoidCallback? onRetry;
-  final VoidCallback? onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          border: Border.all(
-            color: AppEdge.of(scheme.brightness, strong: true),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AppSurfaceAction(
-              onTap: onOpen,
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(label, style: theme.textTheme.bodyMedium),
-              ),
-            ),
-            if (onRetry != null)
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 8, 8),
-                  child: AppButton(
-                    onPressed: onRetry,
-                    variant: AppButtonVariant.plain,
-                    child: Text(retryLabel),
-                  ),
-                ),
-              ),
-          ],
         ),
       ),
     );

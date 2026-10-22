@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/server_content_entry.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -23,6 +24,7 @@ class _CatalogShellState extends State<CatalogShell> {
   late final LibraryNavController _nav = LibraryNavController();
   PlayerWindowHost? _playerHost;
   PlayerOpenRequest? _playerRequest;
+  bool _askedProtectedEntry = false;
 
   // WebSocket 增强通道:登录会话(服务器/线路/令牌)变化时重连,
   // 登出/销毁时断开。仅为可选通知推送,失败静默降级。
@@ -36,12 +38,36 @@ class _CatalogShellState extends State<CatalogShell> {
     widget.auth.addListener(_syncNavServer);
     widget.auth.addListener(_syncSocket);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.auth.isLoggedIn) {
+      if (!mounted) return;
+      if (widget.auth.isLoggedIn) {
         _catalog.reload();
         _syncNavServer();
         _syncSocket();
+      } else {
+        _askProtectedEntry();
       }
     });
+  }
+
+  /// The last server can be locked locally. Ask for that password once the
+  /// shell is up; a slow server check must not be required first.
+  void _askProtectedEntry() {
+    if (_askedProtectedEntry ||
+        !mounted ||
+        widget.auth.isLoggedIn ||
+        widget.auth.restoring) {
+      return;
+    }
+    final server = widget.auth.prefill;
+    if (server == null) return;
+    final access = widget.auth.serverAccess;
+    if (access.allows(server.id) ||
+        !access.isProtected(server.id) ||
+        access.isUnavailable(server.id)) {
+      return;
+    }
+    _askedProtectedEntry = true;
+    unawaited(enterServerContent(context, widget.auth, server.id));
   }
 
   void _syncSocket() {

@@ -119,7 +119,10 @@ class _Client extends EmbyClient {
   /// Widget tests await restore without pumping, so a real socket plus the
   /// four-second discovery timeout never elapses.
   @override
-  Future<List<Uri>> loadExtendedServerDomains() async => const [];
+  Future<List<ExtendedServerDomain>> loadExtendedServerDomains({
+    bool plainSidecar = false,
+    Duration probeTimeout = const Duration(seconds: 2),
+  }) async => const [];
 
   @override
   Future<List<MediaItem>> getViews() async => [await getItem('library')];

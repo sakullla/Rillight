@@ -2966,16 +2966,26 @@ void main() {
           await gesture.moveBy(const Offset(0, 30));
           await tester.pump(const Duration(milliseconds: 16));
         }
-        // 下拉过程中指示器可见，并落在透明顶栏之下，不被状态栏/顶栏遮住。
+        // 页面跟着下移，指示器落在顶栏和头图之间，不盖在海报上。
         final indicator = find.byKey(AppRefresh.indicatorKey);
+        final hero = find.byKey(PhoneHero.bannerKey);
         expect(indicator, findsOneWidget);
         expect(
           tester.getTopLeft(indicator).dy,
           greaterThanOrEqualTo(PhoneTopBar.bodyHeight),
         );
+        expect(
+          tester.getBottomLeft(indicator).dy,
+          lessThanOrEqualTo(tester.getTopLeft(hero).dy + 0.5),
+        );
         await gesture.up();
         await tester.pump();
         expect(indicator, findsOneWidget);
+        expect(tester.getTopLeft(hero).dy, greaterThan(PhoneTopBar.bodyHeight));
+        expect(
+          tester.getBottomLeft(indicator).dy,
+          lessThanOrEqualTo(tester.getTopLeft(hero).dy + 0.5),
+        );
         await _homeSettle(tester);
         expect(
           server.requests

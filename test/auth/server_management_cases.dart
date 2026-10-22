@@ -730,23 +730,22 @@ void main() {
       await auth.restore();
       await pumpServerSelection(tester, auth);
       await serverUiTap(tester, const Key('server-add'));
-      // 粘贴入口卡是中性表面实底,不再是 primary 透明度渐变。
-      final pasteCard = find.byKey(const ValueKey('server-paste-card'));
-      final pasteScheme = ui.AppUiTheme.of(tester.element(pasteCard))
-          .colorScheme;
-      final pasteBox =
-          tester.widget<Container>(pasteCard).decoration! as BoxDecoration;
-      expect(pasteBox.gradient, isNull);
-      expect(pasteBox.color, pasteScheme.surfaceContainer);
-      expect(pasteBox.borderRadius, BorderRadius.circular(ui.AppRadii.lg));
+      final paste = find.byKey(const Key('server-add-paste'));
+      final password = find.byKey(const Key('provider-password'));
+      expect(
+        tester.getTopLeft(paste).dy,
+        greaterThan(tester.getTopLeft(password).dy),
+      );
       await serverUiTap(tester, const Key('server-add-paste'));
+      expect(find.textContaining('密码和线路会直接填进登录表'), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('server-paste-text')),
-        '名称：第一台\n地址：https://first.test\n用户：alice\n密码：private-one\n名称：第二台\n地址：https://second.test\n用户：bob',
+        '名称：第一台\n地址：https://first.test\n用户：alice\n密码：private-one\n名称：第二台\n地址：https://second.test\n用户：bob\n密码：private-two',
       );
       await serverUiTap(tester, const Key('server-paste-parse'));
       expect(find.byKey(const Key('provider-username')), findsNothing);
       expect(find.byKey(const Key('server-paste-group-0')), findsOneWidget);
+      expect(find.text('private-one'), findsNothing);
       await serverUiTap(tester, const Key('server-paste-group-1'));
       expect(
         tester
@@ -767,7 +766,7 @@ void main() {
             .widget<ui.AppTextField>(find.byKey(const Key('provider-password')))
             .controller!
             .text,
-        isEmpty,
+        'private-two',
       );
       await tester.enterText(
         find.byKey(const Key('provider-password')),

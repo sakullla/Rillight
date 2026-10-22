@@ -26,10 +26,13 @@ class ServerLineSelector extends StatefulWidget {
 }
 
 class ServerLineSelectorState extends State<ServerLineSelector> {
-  String? busy, error;
+  String? busy, error, notice;
+  bool discovering = false, testing = false;
   final Map<String, ManualCheckResult> checks = {};
   final Set<String> checking = {};
   int revision = 0;
+
+  bool get idle => busy == null && !discovering && !testing;
   @override
   void dispose() {
     revision++;
@@ -72,11 +75,60 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     }
   }
 
+  Future<void> discover() async {
+    if (!idle) return;
+    final l = AppLocalizations.of(context);
+    setState(() {
+      discovering = true;
+      error = null;
+      notice = null;
+    });
+    try {
+      final added = await widget.auth.discoverExtendedLines(
+        widget.serverId,
+        force: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        notice = added < 0
+            ? l.serversDiscoverNeedCurrent
+            : added == 0
+            ? l.serversDiscoverNone
+            : l.serversDiscoverAdded(added);
+      });
+    } catch (failure) {
+      if (mounted) setState(() => error = serverOperationFailure(l, failure));
+    } finally {
+      if (mounted) setState(() => discovering = false);
+    }
+  }
+
+  Future<void> checkAll() async {
+    if (!idle) return;
+    final lines = List<ServerLine>.of(
+      widget.auth.sources.server(widget.serverId).lines,
+    );
+    setState(() {
+      testing = true;
+      error = null;
+      notice = null;
+    });
+    try {
+      for (final line in lines) {
+        if (!mounted) return;
+        await check(line);
+      }
+    } finally {
+      if (mounted) setState(() => testing = false);
+    }
+  }
+
   Future<void> check(ServerLine line) async {
     final l = AppLocalizations.of(context);
     setState(() {
       busy = line.id;
       checking.add(line.id);
+      error = null;
     });
     try {
       checks[line.id] = await widget.auth.sources.check(
@@ -114,7 +166,11 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
             'unknown' => l.serversCheckUnknown,
             _ => l.serversCheckFailed,
           };
-    return '$label · ${l.serversCheckedAt} ${at.month}/${at.day} ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+    final when =
+        '$label · ${l.serversCheckedAt} ${at.month}/${at.day} ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+    final latency = result?.latencyMs ?? line.latencyMs;
+    if (latency == null) return when;
+    return '${l.serversLatency(latency)} · $when';
   }
 
   @override
@@ -142,6 +198,33 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
               subtitle:
                   '${server.username} · ${l.serversLineCount(server.lines.length)}',
             ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    key: const Key('server-lines-discover'),
+                    onPressed: idle ? discover : null,
+                    child: Text(
+                      discovering
+                          ? l.serversDiscoveringLines
+                          : l.serversDiscoverLines,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: AppButton(
+                    key: const Key('server-lines-speed'),
+                    onPressed: idle ? checkAll : null,
+                    child: Text(
+                      testing ? l.serversSpeedTesting : l.serversSpeedTest,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (notice != null) ServerFeedback(notice!, error: false),
             const SizedBox(height: 22),
             ServerGroup(
               title: l.serversLineAutoSection,
@@ -149,9 +232,7 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
                 ServerRow(
                   key: const Key('server-line-auto'),
                   selected: automatic,
-                  onTap: busy == null
-                      ? () => select(const LineSelection.auto())
-                      : null,
+                  onTap: idle ? () => select(const LineSelection.auto()) : null,
                   leading: ServerRowIcon(
                     AppIcons.bolt,
                     tone: automatic ? ServerTone.current : ServerTone.neutral,
@@ -204,11 +285,11 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
                     busy: busy == line.id,
                     expanded: false,
                     status: status(l, line),
-                    onSelect: busy == null
+                    onSelect: idle
                         ? () => select(LineSelection.fixed(line.id))
                         : null,
                     onDetails: () {},
-                    onCheck: busy == null ? () => check(line) : null,
+                    onCheck: idle ? () => check(line) : null,
                     checking: busy == line.id && checking.contains(line.id),
                   ),
               ],

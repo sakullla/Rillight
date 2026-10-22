@@ -293,6 +293,7 @@ extension PlayerLineTransactions on PlayerController {
   }
 
   void cancelLineRecovery() {
+    _holdAutomaticLineRecovery = true;
     _finishLineConfirmation(const PlaybackRecoveryCancelled());
     ++_lineRevision;
     _lineRollback?.call();
@@ -585,6 +586,7 @@ extension PlayerLineTransactions on PlayerController {
     }
     final existing = _lineRecovery;
     if (existing != null) return existing;
+    _holdAutomaticLineRecovery = true;
     final failure = loadFailure;
     if (automatic &&
         failure != null &&
