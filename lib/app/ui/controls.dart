@@ -1528,8 +1528,8 @@ class _AppRefreshState extends State<AppRefresh>
     final visible = gap >= AppRefresh._discSize - 4;
     final reveal = visible ? ((gap - 20) / 24).clamp(0.0, 1.0) : 0.0;
     final progress = (_pull / AppRefresh.triggerDistance).clamp(0.0, 1.0);
-    final disc = dark ? const Color(0xF7FFFFFF) : const Color(0xF01B1D21);
-    final ink = dark ? const Color(0xFF16181C) : const Color(0xFFF4F5F7);
+    final disc = AppRefreshChrome.disc(theme.brightness);
+    final ink = AppRefreshChrome.ink(theme.brightness);
     final track = ink.withValues(alpha: .28);
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,

@@ -1271,6 +1271,14 @@ void main() {
       final catalog = _ScriptedCatalog(auth);
       addTearDown(catalog.dispose);
       addTearDown(auth.dispose);
+      // 未登录的目录以空闲态启动。骨架断言需要显式的加载中行。
+      catalog.edit((page) {
+        page.resume = const CatalogRowState(loading: true);
+        page.nextUp = const CatalogRowState(loading: true);
+        page.latestMovies = const CatalogRowState(loading: true);
+        page.latestSeries = const CatalogRowState(loading: true);
+        page.librariesLoading = true;
+      });
       Future<void> pumpTab(Widget child) {
         return tester.pumpWidget(
           CupertinoTestApp(

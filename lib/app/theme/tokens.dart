@@ -391,3 +391,17 @@ abstract final class AppShadow {
           ),
         ];
 }
+
+/// 下拉刷新圆盘。深色用近白盘配墨色指针，浅色用近墨盘配纸色指针。
+abstract final class AppRefreshChrome {
+  static const Color discDark = Color(0xF7FFFFFF);
+  static const Color discLight = Color(0xF01B1D21);
+  static const Color inkDark = Color(0xFF16181C);
+  static const Color inkLight = Color(0xFFF4F5F7);
+
+  static Color disc(Brightness brightness) =>
+      brightness == Brightness.dark ? discDark : discLight;
+
+  static Color ink(Brightness brightness) =>
+      brightness == Brightness.dark ? inkDark : inkLight;
+}
