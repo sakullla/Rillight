@@ -1466,13 +1466,14 @@ class _AppRefreshState extends State<AppRefresh>
     try {
       await pending;
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _pull = 0;
-        _armed = false;
-      });
-      _animateTo(0, closing: true);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _pull = 0;
+          _armed = false;
+        });
+        _animateTo(0, closing: true);
+      }
     }
   }
 

@@ -44,7 +44,7 @@ class _RestoreCountingAuth extends AuthController {
   int restoreCalls = 0;
 
   @override
-  Future<void> restore() async {
+  Future<void> restore({bool waitForNetwork = true}) async {
     restoreCalls++;
   }
 }
