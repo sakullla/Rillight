@@ -14,43 +14,57 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// 分集网格的几何：列数、卡宽与固定的卡高。
+/// 分集行网格的几何：列数、行宽、缩略图尺寸与固定的行高。
 ///
-/// 卡高由剧照高度加标题、日期和两行简介的实际行高算出，同一季每张卡等高，
-/// 网格不必构建屏外的卡片就能定位到任意一集。
+/// 每集是一条等高横排行：左侧 16:9 缩略图，右侧标题、时长/首播与两行简介。
+/// 行高取缩略图与文字列（按实际字体与字号测量）中较高者，同一季每行等高，
+/// 网格不必构建屏外的行就能定位到任意一集。
 class EpisodeGridMetrics {
   const EpisodeGridMetrics({
     required this.columns,
     required this.cardWidth,
+    required this.thumbWidth,
     required this.thumbHeight,
     required this.extent,
   });
 
-  /// 卡片之间的横向/纵向间距。
+  /// 行之间的横向/纵向间距。
   static const double crossSpacing = AppSpacing.md;
-  static const double mainSpacing = AppSpacing.sm;
+  static const double mainSpacing = AppSpacing.xs;
 
-  /// 卡片内边距：悬停/当前集底色比剧照外扩一圈。
+  /// 行内边距：悬停/当前集底色比缩略图外扩一圈。
   static const double inset = AppSpacing.xs;
+
+  /// 缩略图与文字列之间的间距。
+  static const double textGap = AppSpacing.sm;
+
+  /// 最多并排的列数。
+  static const int maxColumns = 3;
 
   final int columns;
   final double cardWidth;
+  final double thumbWidth;
   final double thumbHeight;
   final double extent;
 
-  /// 最窄卡宽（1080p 设计值），宽屏随阅读缩放一起变大。
+  /// 最窄行宽（1080p 设计值），宽屏随阅读缩放一起变大；可用宽度够放两行
+  /// 时并为两列。
   static double minCardWidthFor(Size viewport) =>
-      272 * AppViewport.readingScaleOf(viewport);
+      560 * AppViewport.readingScaleOf(viewport);
 
-  static EpisodeGridMetrics of(BuildContext context, double available) {
-    final viewport = MediaQuery.sizeOf(context);
-    final min = minCardWidthFor(viewport);
-    var columns = ((available + crossSpacing) / (min + crossSpacing)).floor();
-    if (columns < 1) columns = 1;
-    if (columns > 6) columns = 6;
-    final cardWidth = (available - crossSpacing * (columns - 1)) / columns;
-    final thumbWidth = cardWidth - inset * 2;
-    final thumbHeight = thumbWidth * 9 / 16;
+  /// 缩略图宽度的设计值（1080p），随阅读缩放放大。
+  static double thumbDesignWidthFor(Size viewport) =>
+      192 * AppViewport.readingScaleOf(viewport);
+
+  /// 给定行宽时的缩略图宽：设计值，但窄行里不超过内容宽的四成。
+  static double thumbWidthIn(double cardWidth, Size viewport) {
+    final design = thumbDesignWidthFor(viewport);
+    final cap = (cardWidth - inset * 2) * .4;
+    return cap < design ? (cap < 0 ? 0 : cap) : design;
+  }
+
+  /// 文字列（标题 + 时长/首播 + 两行简介）的实际排版高度。
+  static double textHeightOf(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     double lines(TextStyle? style, int count) {
@@ -68,18 +82,30 @@ class EpisodeGridMetrics {
       return height;
     }
 
-    final text =
-        AppSpacing.xs +
-        lines(_EpisodeCardStyles.title(theme), 1) +
+    return lines(_EpisodeCardStyles.title(theme), 1) +
         2 +
         lines(_EpisodeCardStyles.meta(theme), 1) +
         AppSpacing.xxs +
         lines(_EpisodeCardStyles.overview(theme), 2);
+  }
+
+  static EpisodeGridMetrics of(BuildContext context, double available) {
+    final viewport = MediaQuery.sizeOf(context);
+    final min = minCardWidthFor(viewport);
+    var columns = ((available + crossSpacing) / (min + crossSpacing)).floor();
+    if (columns < 1) columns = 1;
+    if (columns > maxColumns) columns = maxColumns;
+    final cardWidth = (available - crossSpacing * (columns - 1)) / columns;
+    final thumbWidth = thumbWidthIn(cardWidth, viewport);
+    final thumbHeight = thumbWidth * 9 / 16;
+    final text = textHeightOf(context);
+    final body = text > thumbHeight ? text : thumbHeight;
     return EpisodeGridMetrics(
       columns: columns,
       cardWidth: cardWidth,
+      thumbWidth: thumbWidth,
       thumbHeight: thumbHeight,
-      extent: (inset * 2 + thumbHeight + text).ceilToDouble() + 1,
+      extent: (inset * 2 + body).ceilToDouble() + 1,
     );
   }
 }
@@ -94,13 +120,13 @@ abstract final class _EpisodeCardStyles {
       ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.5);
 }
 
-/// 分集分区:响应式卡片网格(16:9 剧照 + 「N. 标题」+ 播出日期 + 两行简介),
-/// 头部为「剧集」+ 季切换/选集 + 「更多」。宽窗口一行四五集,一季一眼扫完,
-/// 不再是一条条横贯整屏、播放钮远在行尾的长行。
+/// 分集分区:等高横排行网格(左侧 16:9 缩略图,右侧「N. 标题」、时长/首播与
+/// 两行简介),可用宽度够时两列。头部左侧是「剧集」、统计与季切换器
+/// ([seasonSwitcher]),右侧是 [headerAction](选集)与「更多」。
 ///
-/// 剧照承载全部状态与快捷操作:悬停浮出中央播放钮,右上角是
-/// 已看切换(已看时常驻实心勾,未看时悬停/聚焦才出现),底部是时长与续播进度。
-/// 点卡片其余区域进入集详情,右键菜单同样可播放/标已看。
+/// 缩略图承载状态与快捷操作:悬停浮出中央播放钮,右上角是已看切换(已看时
+/// 常驻实心勾,未看时悬停/聚焦才出现),左上角是当前集播放标记,底部是续播
+/// 进度。点行其余区域进入集详情,右键菜单同样可播放/标已看。
 /// [error] 非空且没有剧集时,分区换成说明与重试。已有剧集时 [loadMoreError]
 /// 留在网格上方,条目保持可见;[hasMore] 时网格末尾提供「加载更多」。
 /// 作为 sliver 放入父级 [CustomScrollView]，分集只在视口附近构建。
@@ -123,6 +149,7 @@ class EpisodeList extends StatefulWidget {
     required this.busyPlayedIds,
     required this.onMore,
     this.summary,
+    this.seasonSwitcher,
     this.loadMoreError,
     this.onRetryLoadMore,
   });
@@ -145,8 +172,11 @@ class EpisodeList extends StatefulWidget {
   final Set<String> busyPlayedIds;
   final VoidCallback? onMore;
 
-  /// 标题下的一行小字(集数、已看进度);为空时不占行。
+  /// 标题旁的小字(集数、已看进度);为空时不画。
   final String? summary;
+
+  /// 与标题、统计同在左侧一组的季切换器;季标签放不下时它自己折叠为下拉。
+  final Widget? seasonSwitcher;
 
   @override
   State<EpisodeList> createState() => _EpisodeListState();
@@ -197,7 +227,7 @@ class _EpisodeListState extends State<EpisodeList> {
   void _seek(int target, int generation, int attempt) {
     if (!mounted || generation != _seekGeneration || attempt >= 24) return;
     if (target >= widget.episodes.length) return;
-    final columns = _metrics?.columns ?? 4;
+    final columns = _metrics?.columns ?? 2;
     if (widget.revealToken == 0 && target < columns) {
       return;
     }
@@ -258,10 +288,10 @@ class _EpisodeListState extends State<EpisodeList> {
               children: [
                 Row(
                   children: [
+                    // 标题、统计与季切换器同在左侧一组;季切换器拿剩余宽度,
+                    // 季标签放不下时折叠为「当前季 ˅」。
                     Expanded(
-                      child: Wrap(
-                        spacing: AppSpacing.sm,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                      child: Row(
                         children: [
                           Text(
                             l10n.episodesRow,
@@ -269,63 +299,66 @@ class _EpisodeListState extends State<EpisodeList> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          if (summary != null && summary.isNotEmpty)
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.onSurface.withValues(
-                                  alpha: .07,
+                          if (summary != null && summary.isNotEmpty) ...[
+                            const SizedBox(width: AppSpacing.sm),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 240),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.onSurface.withValues(
+                                    alpha: .07,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadii.pill,
+                                  ),
                                 ),
-                                borderRadius: BorderRadius.circular(
-                                  AppRadii.pill,
-                                ),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 3,
-                                ),
-                                child: Text(
-                                  summary,
-                                  key: const Key('episode-list-summary'),
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 3,
+                                  ),
+                                  child: Text(
+                                    summary,
+                                    key: const Key('episode-list-summary'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: theme
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                          fontWeight: FontWeight.w600,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
                                   ),
                                 ),
                               ),
                             ),
+                          ],
+                          if (widget.seasonSwitcher != null) ...[
+                            const SizedBox(width: AppSpacing.md),
+                            Flexible(
+                              child: Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                widthFactor: 1,
+                                child: widget.seasonSwitcher,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
+                    const SizedBox(width: AppSpacing.sm),
                     widget.headerAction,
                     if (widget.onMore != null && error == null) ...[
-                      const SizedBox(width: AppSpacing.xs),
-                      AppButton(
+                      const SizedBox(width: AppSpacing.xxs),
+                      AppActionButton(
                         key: CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes),
+                        tier: AppActionTier.tertiary,
                         onPressed: widget.onMore,
-                        style: AppButtonStyle(
-                          foregroundColor: theme.colorScheme.onSurfaceVariant,
-                          minimumSize: const Size(0, 38),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          textStyle: theme.textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        variant: AppButtonVariant.plain,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(l10n.more),
-                            const SizedBox(width: 2),
-                            const Icon(CupertinoIcons.chevron_right, size: 14),
-                          ],
-                        ),
+                        label: l10n.more,
                       ),
                     ],
                   ],
@@ -338,7 +371,7 @@ class _EpisodeListState extends State<EpisodeList> {
                 else if (widget.loading && empty)
                   const Padding(
                     padding: EdgeInsets.only(top: AppSpacing.sm),
-                    child: EpisodeListSkeleton(),
+                    child: EpisodeListSkeleton(rows: 2),
                   ),
                 if (loadMoreError != null && !empty)
                   Row(
@@ -365,7 +398,7 @@ class _EpisodeListState extends State<EpisodeList> {
           ),
         ),
         SliverPadding(
-          // 卡片内边距让剧照与页面边距对齐，悬停底色外扩到边距里。
+          // 行内边距让缩略图与页面边距对齐，悬停底色外扩到边距里。
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.page - EpisodeGridMetrics.inset,
           ),
@@ -432,12 +465,12 @@ class _EpisodeListState extends State<EpisodeList> {
   }
 }
 
-/// 分集卡:16:9 剧照在上,「N. 标题」、播出日期与两行简介在下。
+/// 分集行:左侧 16:9 缩略图,右侧「N. 标题」、时长/首播与两行简介。
 ///
-/// 当前集:剧照主色描边 + 主色标题;已看:标题转次要色,剧照右上角实心勾。
-/// 点卡片进集详情;剧照中央的圆钮直接开播([CatalogKeys.episodePlay]);右上角
-/// [CatalogKeys.episodePlayed] 切换已看。卡片在网格里等高,由
-/// [EpisodeGridMetrics] 给出;单独使用时按内容收缩。
+/// 当前集:淡染底 + 加粗标题 + 缩略图左上角播放标记;已看:标题转次要色,
+/// 缩略图右上角实心勾。点行进集详情;缩略图中央的圆钮直接开播
+/// ([CatalogKeys.episodePlay]);右上角 [CatalogKeys.episodePlayed] 切换已看。
+/// 行在网格里等高,由 [EpisodeGridMetrics] 给出;单独使用时按内容收缩。
 class EpisodeRow extends StatefulWidget {
   const EpisodeRow({
     super.key,
@@ -456,10 +489,9 @@ class EpisodeRow extends StatefulWidget {
   final VoidCallback onPlay;
   final VoidCallback onTogglePlayed;
 
-  /// 网格最窄的剧照宽，骨架与旧调用方沿用。
+  /// 缩略图宽度的设计值，随阅读缩放放大。
   static double thumbWidthFor(Size viewport) =>
-      EpisodeGridMetrics.minCardWidthFor(viewport) -
-      EpisodeGridMetrics.inset * 2;
+      EpisodeGridMetrics.thumbDesignWidthFor(viewport);
 
   @override
   State<EpisodeRow> createState() => _EpisodeRowState();
@@ -554,58 +586,72 @@ class _EpisodeRowState extends State<EpisodeRow> {
           },
           child: Padding(
             padding: const EdgeInsets.all(EpisodeGridMetrics.inset),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: _EpisodeThumb(
-                    item: item,
-                    runtime: runtime,
-                    hovered: revealed,
-                    selected: selected,
-                    playLabel: playLabel,
-                    onPlay: widget.onPlay,
-                    played: played,
-                    busyPlayed: widget.busyPlayed,
-                    onTogglePlayed: widget.onTogglePlayed,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _EpisodeCardStyles.title(theme)?.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : null,
-                    color: played && !selected
-                        ? scheme.onSurfaceVariant
-                        : scheme.onSurface,
-                  ),
-                ),
-
-                if (premiere != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    formatDateYmd(premiere),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _EpisodeCardStyles.meta(theme)?.copyWith(
-                      fontFeatures: const [FontFeature.tabularFigures()],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final thumbWidth = EpisodeGridMetrics.thumbWidthIn(
+                  constraints.maxWidth + EpisodeGridMetrics.inset * 2,
+                  MediaQuery.sizeOf(context),
+                );
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: thumbWidth,
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: _EpisodeThumb(
+                          item: item,
+                          hovered: revealed,
+                          selected: selected,
+                          playLabel: playLabel,
+                          onPlay: widget.onPlay,
+                          played: played,
+                          busyPlayed: widget.busyPlayed,
+                          onTogglePlayed: widget.onTogglePlayed,
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-                if (overview != null && overview.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    overview,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: _EpisodeCardStyles.overview(theme),
-                  ),
-                ],
-              ],
+                    const SizedBox(width: EpisodeGridMetrics.textGap),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _EpisodeCardStyles.title(theme)?.copyWith(
+                              fontWeight: selected ? FontWeight.w700 : null,
+                              color: played && !selected
+                                  ? scheme.onSurfaceVariant
+                                  : scheme.onSurface,
+                            ),
+                          ),
+                          if (runtime != null || premiere != null) ...[
+                            const SizedBox(height: 2),
+                            _EpisodeMetaLine(
+                              runtime: runtime,
+                              premiere: premiere == null
+                                  ? null
+                                  : formatDateYmd(premiere),
+                            ),
+                          ],
+                          if (overview != null && overview.isNotEmpty) ...[
+                            const SizedBox(height: AppSpacing.xxs),
+                            Text(
+                              overview,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: _EpisodeCardStyles.overview(theme),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -614,14 +660,45 @@ class _EpisodeRowState extends State<EpisodeRow> {
   }
 }
 
+/// 时长与首播日期一行;两段各自是独立文字,日期过长时省略。
+class _EpisodeMetaLine extends StatelessWidget {
+  const _EpisodeMetaLine({this.runtime, this.premiere});
+
+  final String? runtime;
+  final String? premiere;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _EpisodeCardStyles.meta(AppUiTheme.of(context))
+        ?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    final runtime = this.runtime;
+    final premiere = this.premiere;
+    return Row(
+      children: [
+        if (runtime != null) Text(runtime, maxLines: 1, style: style),
+        if (runtime != null && premiere != null)
+          Text(' · ', maxLines: 1, style: style),
+        if (premiere != null)
+          Flexible(
+            child: Text(
+              premiere,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 enum _EpisodeRowMenuAction { play, togglePlayed }
 
-/// 分集剧照:右下时长胶囊、底部续播进度、右上已看切换;悬停时压暗并浮出
-/// 中央播放钮,点它直接开播(点卡片其余区域,包括剧照,进集详情)。
+/// 分集缩略图:左上当前集标记、底部续播进度、右上已看切换;悬停时压暗并
+/// 浮出中央播放钮,点它直接开播(点行其余区域,包括缩略图,进集详情)。
 class _EpisodeThumb extends StatelessWidget {
   const _EpisodeThumb({
     required this.item,
-    required this.runtime,
     required this.hovered,
     required this.selected,
     required this.playLabel,
@@ -632,7 +709,6 @@ class _EpisodeThumb extends StatelessWidget {
   });
 
   final MediaItem item;
-  final String? runtime;
   final bool hovered;
   final bool selected;
   final String playLabel;
@@ -647,7 +723,6 @@ class _EpisodeThumb extends StatelessWidget {
     final scheme = AppUiTheme.of(context).colorScheme;
     final resumable = item.canResume;
     final fade = AppMotion.durationOf(context, AppMotion.normal);
-    final runtime = this.runtime;
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = constraints.maxHeight;
@@ -692,21 +767,12 @@ class _EpisodeThumb extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (runtime != null)
-                  Positioned(
-                    right: 6,
-                    bottom: resumable ? 9 : 6,
-                    child: EpisodeThumbBadge(label: runtime),
-                  ),
+                // 当前集不只靠底色:缩略图左上角常驻播放标记。
                 if (selected)
-                  Center(
-                    child: IgnorePointer(
-                      child: AnimatedOpacity(
-                        opacity: hovered ? 0 : 1,
-                        duration: fade,
-                        child: const EpisodeCurrentMark(size: 22),
-                      ),
-                    ),
+                  const Positioned(
+                    top: 6,
+                    left: 6,
+                    child: IgnorePointer(child: EpisodeCurrentMark(size: 12)),
                   ),
                 // 只有中央的圆钮开播；卡片其余位置（含剧照）进入集详情。
                 Center(
@@ -898,7 +964,7 @@ class EpisodeWatchedBadge extends StatelessWidget {
   }
 }
 
-/// 分集网格加载骨架:与 [EpisodeRow] 同几何的一行卡片占位。
+/// 分集网格加载骨架:与 [EpisodeRow] 同几何的横排行占位。
 class EpisodeListSkeleton extends StatelessWidget {
   const EpisodeListSkeleton({super.key, this.rows = 1});
 
@@ -913,11 +979,18 @@ class EpisodeListSkeleton extends StatelessWidget {
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
         final metrics = EpisodeGridMetrics.of(context, available);
+        final textWidth =
+            metrics.cardWidth -
+            metrics.thumbWidth -
+            EpisodeGridMetrics.inset * 2 -
+            EpisodeGridMetrics.textGap;
         return Column(
           children: [
             for (var row = 0; row < rows; row++)
               Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                padding: const EdgeInsets.only(
+                  bottom: EpisodeGridMetrics.mainSpacing,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -926,24 +999,40 @@ class EpisodeListSkeleton extends StatelessWidget {
                         const SizedBox(width: EpisodeGridMetrics.crossSpacing),
                       SizedBox(
                         width: metrics.cardWidth,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SkeletonBlock(
-                              width: metrics.cardWidth,
-                              height: metrics.cardWidth * 9 / 16,
-                            ),
-                            const SizedBox(height: AppSpacing.xs),
-                            SkeletonBlock(
-                              width: metrics.cardWidth * .7,
-                              height: AppSpacing.md,
-                            ),
-                            const SizedBox(height: AppSpacing.xs),
-                            SkeletonBlock(
-                              width: metrics.cardWidth * .4,
-                              height: AppSpacing.sm,
-                            ),
-                          ],
+                        height: metrics.extent,
+                        child: Padding(
+                          padding: const EdgeInsets.all(
+                            EpisodeGridMetrics.inset,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SkeletonBlock(
+                                width: metrics.thumbWidth,
+                                height: metrics.thumbHeight,
+                              ),
+                              const SizedBox(width: EpisodeGridMetrics.textGap),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SkeletonBlock(
+                                    width: textWidth * .6,
+                                    height: AppSpacing.md,
+                                  ),
+                                  const SizedBox(height: AppSpacing.xs),
+                                  SkeletonBlock(
+                                    width: textWidth * .35,
+                                    height: AppSpacing.sm,
+                                  ),
+                                  const SizedBox(height: AppSpacing.xs),
+                                  SkeletonBlock(
+                                    width: textWidth * .9,
+                                    height: AppSpacing.sm,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],

@@ -147,7 +147,14 @@ class AppActionButton extends StatelessWidget {
     );
     final showIcons = tier != AppActionTier.tertiary;
     final leading = showIcons && icon != null
-        ? Icon(icon, size: 18, fill: on ? AppIcons.filled : AppIcons.outline)
+        ? Icon(
+            icon,
+            size: 18,
+            // 主操作图标始终实心，与实底按钮同重。
+            fill: on || tier == AppActionTier.primary
+                ? AppIcons.filled
+                : AppIcons.outline,
+          )
         : null;
     final trailing = showIcons && trailingIcon != null
         ? Icon(trailingIcon, size: 14)

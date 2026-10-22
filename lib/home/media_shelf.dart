@@ -49,6 +49,9 @@ class MediaShelf extends StatefulWidget {
     this.headerAction,
     this.focusItemId,
     this.scrollPageOnFocus = true,
+    this.fitWholeCards = false,
+    this.cardBuilder,
+    this.bottomSpacing = AppSpacing.xxl,
   });
 
   final String shelfId;
@@ -76,6 +79,18 @@ class MediaShelf extends StatefulWidget {
   /// 本季分集已经在详情页里，点集只该滚这一行，不该把下面的演职员和相册带跑。
   final bool scrollPageOnFocus;
 
+  /// 宽卡行按可用宽度取整数张卡:卡宽在默认档上下伸缩,使一页正好容纳
+  /// 整数张卡;翻页、定位与滚动停稳都对齐到整卡,首尾不露半张。
+  final bool fitWholeCards;
+
+  /// 需要知道实际卡宽的自定义卡片([fitWholeCards] 时卡宽随行宽变化)。
+  /// 优先于 [itemBuilder]。
+  final Widget Function(BuildContext context, MediaItem item, double width)?
+  cardBuilder;
+
+  /// 行下方到下一分区的间距。
+  final double bottomSpacing;
+
   /// 内容超出时,静止右缘至少切进下一张卡片的宽度。
   static const double peek = AppSpacing.page;
 
@@ -88,6 +103,21 @@ class MediaShelf extends StatefulWidget {
     final image = wideCardWidthFor(screenWidth) * 9 / 16;
     final labels = wideLabelExtentFor(context, customCard: false);
     return title + AppSpacing.sm + (image + labels) * hoverScale;
+  }
+
+  /// [fitWholeCards] 行的几何:页边距之间放下整数张卡,张数取最接近默认卡宽
+  /// [nominal] 的值,卡宽随之伸缩。
+  static ({int count, double width}) wholeCardLayout({
+    required double maxWidth,
+    required double nominal,
+  }) {
+    final span = maxWidth - AppSpacing.page * 2;
+    if (!span.isFinite || span <= 0 || nominal <= 0) {
+      return (count: 1, width: nominal);
+    }
+    var count = ((span + cardGap) / (nominal + cardGap)).round();
+    if (count < 1) count = 1;
+    return (count: count, width: (span - cardGap * (count - 1)) / count);
   }
 
   /// 未超出时返回 [maxWidth]。超出时把静止可见宽度收到下一张卡片内部。
@@ -210,20 +240,33 @@ class _MediaShelfState extends State<MediaShelf> {
   bool _canScrollLeft = false;
   bool _canScrollRight = false;
 
-  double get _rowHeight {
+  /// 上一次布局的卡宽与一页张数;[MediaShelf.fitWholeCards] 时随行宽变化。
+  double? _cardWidth;
+  int _pageCards = 1;
+
+  bool get _whole => widget.fitWholeCards && widget.wide;
+
+  bool get _customCard =>
+      widget.cardBuilder != null || widget.itemBuilder != null;
+
+  double _defaultCardWidth() {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    return widget.wide
+        ? MediaShelf.wideCardWidthFor(screenWidth)
+        : MediaShelf.posterWidthFor(screenWidth);
+  }
+
+  double _rowHeightFor(double cardWidth) {
     if (widget.extent != null) {
       return widget.extent!;
     }
-    final screenWidth = MediaQuery.sizeOf(context).width;
     final cardHeight = widget.wide
-        ? MediaShelf.wideCardWidthFor(screenWidth) * 9 / 16 +
-              MediaShelf.wideLabelExtentFor(
-                context,
-                customCard: widget.itemBuilder != null,
-              )
-        : MediaShelf.posterWidthFor(screenWidth) * 1.5 +
-              MediaShelf.posterLabelExtentFor(context);
-    return (cardHeight * MediaShelf.hoverScale).ceilToDouble();
+        ? cardWidth * 9 / 16 +
+              MediaShelf.wideLabelExtentFor(context, customCard: _customCard)
+        : cardWidth * 1.5 + MediaShelf.posterLabelExtentFor(context);
+    // 整卡行的分集卡不做悬停放大,不必为放大留余量。
+    final scale = _whole && _customCard ? 1.0 : MediaShelf.hoverScale;
+    return (cardHeight * scale).ceilToDouble();
   }
 
   @override
@@ -267,18 +310,26 @@ class _MediaShelfState extends State<MediaShelf> {
     if (index < 0) {
       return;
     }
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final cardWidth = widget.wide
-        ? MediaShelf.wideCardWidthFor(screenWidth)
-        : MediaShelf.posterWidthFor(screenWidth);
+    final cardWidth = _cardWidth ?? _defaultCardWidth();
     final pitch = cardWidth + MediaShelf.cardGap;
     final position = _controller.position;
     if (!position.hasContentDimensions || !position.hasViewportDimension) {
       return;
     }
-    final cardStart = AppSpacing.page + index * pitch;
-    final target = (cardStart - (position.viewportDimension - cardWidth) / 2)
-        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    final double target;
+    if (_whole) {
+      // 整卡行:滚到目标所在的那一页,页首对齐整卡。
+      target = ((index ~/ _pageCards) * _pageCards * pitch).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+    } else {
+      final cardStart = AppSpacing.page + index * pitch;
+      target = (cardStart - (position.viewportDimension - cardWidth) / 2).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+    }
     if ((target - position.pixels).abs() > 0.5) {
       _controller.jumpTo(target);
     }
@@ -348,12 +399,47 @@ class _MediaShelfState extends State<MediaShelf> {
     if (!position.hasContentDimensions || !position.hasViewportDimension) {
       return;
     }
-    final delta = position.viewportDimension * 0.9 * direction;
+    final double target;
+    if (_whole) {
+      final pitch = (_cardWidth ?? _defaultCardWidth()) + MediaShelf.cardGap;
+      final page = (position.pixels / pitch).round() + direction * _pageCards;
+      target = (page * pitch).clamp(0.0, position.maxScrollExtent);
+    } else {
+      final delta = position.viewportDimension * 0.9 * direction;
+      target = (position.pixels + delta).clamp(0.0, position.maxScrollExtent);
+    }
     _controller.animateTo(
-      (position.pixels + delta).clamp(0.0, position.maxScrollExtent),
+      target,
       duration: AppMotion.durationOf(context, AppMotion.normal),
       curve: Curves.easeOut,
     );
+  }
+
+  /// 整卡行在拖动、滚轮或焦点滚动停下后对齐到最近的整卡,不停在半张卡上。
+  bool _snapToWholeCard(ScrollEndNotification notification) {
+    if (!_whole || notification.depth != 0) return false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.hasClients) return;
+      final position = _controller.position;
+      if (!position.hasContentDimensions ||
+          position.isScrollingNotifier.value) {
+        return;
+      }
+      final pitch = (_cardWidth ?? _defaultCardWidth()) + MediaShelf.cardGap;
+      if (pitch <= 0) return;
+      final target = ((position.pixels / pitch).round() * pitch).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((target - position.pixels).abs() > 0.5) {
+        _controller.animateTo(
+          target,
+          duration: AppMotion.durationOf(context, AppMotion.fast),
+          curve: AppMotion.standard,
+        );
+      }
+    });
+    return false;
   }
 
   @override
@@ -362,8 +448,8 @@ class _MediaShelfState extends State<MediaShelf> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     return Padding(
       key: widget.rowKey,
-      // 分区之间留 32(AppSpacing.xxl)。
-      padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+      // 分区之间默认留 32(AppSpacing.xxl)。
+      padding: EdgeInsets.only(bottom: widget.bottomSpacing),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -462,15 +548,24 @@ class _MediaShelfState extends State<MediaShelf> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                final cardWidth = widget.wide
-                    ? MediaShelf.wideCardWidthFor(screenWidth)
-                    : MediaShelf.posterWidthFor(screenWidth);
-                final viewWidth = MediaShelf.restingViewportWidth(
-                  maxWidth: constraints.maxWidth,
-                  cardWidth: cardWidth,
-                  itemCount: widget.items.length,
-                );
-                final rowHeight = _rowHeight;
+                var cardWidth = _defaultCardWidth();
+                if (_whole) {
+                  final layout = MediaShelf.wholeCardLayout(
+                    maxWidth: constraints.maxWidth,
+                    nominal: cardWidth,
+                  );
+                  cardWidth = layout.width;
+                  _pageCards = layout.count;
+                }
+                _cardWidth = cardWidth;
+                final viewWidth = _whole
+                    ? constraints.maxWidth
+                    : MediaShelf.restingViewportWidth(
+                        maxWidth: constraints.maxWidth,
+                        cardWidth: cardWidth,
+                        itemCount: widget.items.length,
+                      );
+                final rowHeight = _rowHeightFor(cardWidth);
                 final hoverInset = widget.wide
                     ? 0.0
                     : rowHeight * (1 - 1 / MediaShelf.hoverScale) / 2;
@@ -484,82 +579,96 @@ class _MediaShelfState extends State<MediaShelf> {
                           _updateScrollButtons();
                           return false;
                         },
-                        child: FocusTraversalGroup(
-                          policy: ReadingOrderTraversalPolicy(),
-                          child: ScrollConfiguration(
-                            behavior: const _ShelfScrollBehavior(),
-                            child: Listener(
-                              onPointerSignal: _onVerticalWheelToParent,
-                              child: MediaImageScrollListener(
-                                child: ListView.separated(
-                                  key: PageStorageKey(
-                                    'shelf-${widget.shelfId}',
-                                  ),
-                                  controller: _controller,
-                                  scrollCacheExtent:
-                                      const ScrollCacheExtent.viewport(0.5),
-                                  // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
+                        child: NotificationListener<ScrollEndNotification>(
+                          onNotification: _snapToWholeCard,
+                          child: FocusTraversalGroup(
+                            policy: ReadingOrderTraversalPolicy(),
+                            child: ScrollConfiguration(
+                              behavior: const _ShelfScrollBehavior(),
+                              child: Listener(
+                                onPointerSignal: _onVerticalWheelToParent,
+                                // 整卡行把视口收进页边距:相邻页的卡片在边距里被裁掉,
+                                // 不会从右缘露出一条。
+                                child: Padding(
                                   padding: EdgeInsets.symmetric(
-                                    horizontal:
-                                        AppSpacing.page -
-                                        MediaShelf.hoverGutter,
-                                    vertical: hoverInset,
+                                    horizontal: _whole
+                                        ? AppSpacing.page -
+                                              MediaShelf.hoverGutter
+                                        : 0,
                                   ),
-                                  scrollDirection: Axis.horizontal,
-                                  itemBuilder: (context, index) {
-                                    final item = widget.items[index];
-                                    final child =
-                                        widget.itemBuilder?.call(
-                                          context,
-                                          item,
-                                        ) ??
-                                        PosterCard(
-                                          item: item,
-                                          showProgress: widget.showProgress,
-                                          wide: widget.wide,
-                                          width: widget.wide
-                                              ? MediaShelf.wideCardWidthFor(
-                                                  screenWidth,
-                                                )
-                                              : MediaShelf.posterWidthFor(
-                                                  screenWidth,
-                                                ),
-                                          onTap: () => widget.onTap(item),
-                                          onRemoveFromResume:
-                                              widget.onRemoveFromResume !=
-                                                      null &&
-                                                  item.canResume
-                                              ? widget.onRemoveFromResume
-                                              : null,
-                                        );
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: MediaShelf.hoverGutter,
+                                  child: MediaImageScrollListener(
+                                    child: ListView.separated(
+                                      key: PageStorageKey(
+                                        'shelf-${widget.shelfId}',
                                       ),
-                                      child: Align(
-                                        alignment: Alignment.topCenter,
-                                        child: Listener(
-                                          onPointerSignal:
-                                              _onVerticalWheelToParent,
-                                          child: Shortcuts(
-                                            shortcuts: _kShelfArrowShortcuts,
-                                            child: _EnsureVisibleOnFocus(
-                                              scrollPage:
-                                                  widget.scrollPageOnFocus,
-                                              child: child,
+                                      controller: _controller,
+                                      scrollCacheExtent:
+                                          const ScrollCacheExtent.viewport(0.5),
+                                      // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: _whole
+                                            ? 0
+                                            : AppSpacing.page -
+                                                  MediaShelf.hoverGutter,
+                                        vertical: hoverInset,
+                                      ),
+                                      scrollDirection: Axis.horizontal,
+                                      itemBuilder: (context, index) {
+                                        final item = widget.items[index];
+                                        final child =
+                                            widget.cardBuilder?.call(
+                                              context,
+                                              item,
+                                              cardWidth,
+                                            ) ??
+                                            widget.itemBuilder?.call(
+                                              context,
+                                              item,
+                                            ) ??
+                                            PosterCard(
+                                              item: item,
+                                              showProgress: widget.showProgress,
+                                              wide: widget.wide,
+                                              width: cardWidth,
+                                              onTap: () => widget.onTap(item),
+                                              onRemoveFromResume:
+                                                  widget.onRemoveFromResume !=
+                                                          null &&
+                                                      item.canResume
+                                                  ? widget.onRemoveFromResume
+                                                  : null,
+                                            );
+                                        return Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: MediaShelf.hoverGutter,
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.topCenter,
+                                            child: Listener(
+                                              onPointerSignal:
+                                                  _onVerticalWheelToParent,
+                                              child: Shortcuts(
+                                                shortcuts:
+                                                    _kShelfArrowShortcuts,
+                                                child: _EnsureVisibleOnFocus(
+                                                  scrollPage:
+                                                      widget.scrollPageOnFocus,
+                                                  child: child,
+                                                ),
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  separatorBuilder: (context, index) =>
-                                      const SizedBox(
-                                        width:
-                                            MediaShelf.cardGap -
-                                            2 * MediaShelf.hoverGutter,
-                                      ),
-                                  itemCount: widget.items.length,
+                                        );
+                                      },
+                                      separatorBuilder: (context, index) =>
+                                          const SizedBox(
+                                            width:
+                                                MediaShelf.cardGap -
+                                                2 * MediaShelf.hoverGutter,
+                                          ),
+                                      itemCount: widget.items.length,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),

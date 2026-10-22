@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import '../helpers/synthetic_source_fixture.dart';
+import '../helpers/top_bar_hit.dart';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -29,8 +30,11 @@ import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
+import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -48,6 +52,9 @@ const _season1 = 'season-friends-1';
 /// StartIndex 大于 0 的分集窗口返回 500,用来验收继续加载失败。
 class _FailingWindowServer extends FakeEmbyServer {
   bool failEpisodeWindowsAfterStart = false;
+
+  /// 该季的分集请求一律返回 500,用来验收切季失败。
+  String? failEpisodesOf;
   Completer<void>? holdSeasons, holdEpisodes, holdSimilar, holdResume;
   final episodeHolds = <String, Completer<void>>{};
 
@@ -67,6 +74,17 @@ class _FailingWindowServer extends FakeEmbyServer {
       }
     }
     if (options.uri.path.endsWith('/Similar')) await holdSimilar?.future;
+    if (failEpisodesOf != null &&
+        query['IncludeItemTypes'] == 'Episode' &&
+        query['ParentId'] == failEpisodesOf) {
+      return ResponseBody.fromString(
+        'season-episodes-failed',
+        500,
+        headers: {
+          Headers.contentTypeHeader: ['text/plain'],
+        },
+      );
+    }
     if (failEpisodeWindowsAfterStart &&
         options.uri.path.endsWith('/Items') &&
         options.uri.queryParameters['IncludeItemTypes'] == 'Episode') {
@@ -291,7 +309,10 @@ void main() {
       for (var i = 0; i < 8; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
-      expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+      // 两季放得下:直接是两个可点的季标签,不折叠成下拉。
+      expect(find.byKey(CatalogKeys.seasonTab(_season1)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.seasonTab('season-extra')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.seasonPicker), findsNothing);
       expect(
         tester.widget<EpisodeList>(find.byType(EpisodeList)).episodes,
         isEmpty,
@@ -339,11 +360,9 @@ void main() {
       for (var i = 0; i < 12; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
-      await tester.ensureVisible(find.byKey(CatalogKeys.seasonPicker));
-      await tester.tap(find.byKey(CatalogKeys.seasonPicker));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-      await tester.tap(find.text('第 2 季').last);
+      final secondTab = find.byKey(CatalogKeys.seasonTab('season-second'));
+      await tester.ensureVisible(secondTab);
+      await tester.tap(secondTab);
       for (var i = 0; i < 12; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
@@ -363,6 +382,341 @@ void main() {
             .map((e) => e.id),
         ['second-episode'],
       );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'desktop actions are one labelled group with a single primary',
+    (tester) async {
+      final app = await pumpApp(tester, viewSize: const Size(1440, 900));
+      await openItem(tester, app, 'movie-inception');
+      final header = find.byKey(ItemDetailPage.headerKey);
+      final actionRow = find.byKey(ItemDetailPage.actionRowKey);
+      final buttons = tester
+          .widgetList<ui.AppActionButton>(
+            find.descendant(
+              of: actionRow,
+              matching: find.byType(ui.AppActionButton),
+            ),
+          )
+          .toList();
+      // 只有播放是 primary,且排在第一位;其余都是带字的次级按钮。
+      expect(
+        buttons.where((b) => b.tier == ui.AppActionTier.primary),
+        hasLength(1),
+      );
+      expect(buttons.first.key, PlayerKeys.open);
+      for (final button in buttons.skip(1)) {
+        expect(button.tier, ui.AppActionTier.secondary);
+        expect(button.label, isNotEmpty);
+      }
+      expect(
+        find.descendant(of: header, matching: find.byType(ScrimIconButton)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.favoriteToggle),
+          matching: find.text('收藏'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.playedToggle),
+          matching: find.text('标记已看'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<ui.AppActionButton>(find.byKey(CatalogKeys.favoriteToggle))
+            .active,
+        isFalse,
+      );
+
+      // 收藏激活后换成「已收藏」并以 active 呈现。
+      await ensureVisibleBelowTopBar(
+        tester,
+        find.byKey(CatalogKeys.favoriteToggle),
+      );
+      await tapBelowTopBar(tester, find.byKey(CatalogKeys.favoriteToggle));
+      await settle(tester);
+      expect(
+        tester
+            .widget<ui.AppActionButton>(find.byKey(CatalogKeys.favoriteToggle))
+            .active,
+        isTrue,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.favoriteToggle),
+          matching: find.text('已收藏'),
+        ),
+        findsOneWidget,
+      );
+
+      // 字幕在播放设置行可选,媒体信息不再重复列出;单一音轨与视频照常显示。
+      expect(
+        find.descendant(
+          of: find.byKey(ItemDetailPage.optionRowKey),
+          matching: find.byKey(CatalogKeys.detailSubtitle),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(CatalogKeys.detailAudio), findsNothing);
+      final streams = find.byKey(EpisodeMediaStreamsSection.sectionKey);
+      await tester.ensureVisible(streams);
+      await settle(tester);
+      expect(
+        find.descendant(of: streams, matching: find.text('中文')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: streams, matching: find.text('字幕')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: streams, matching: find.text('音轨')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: streams, matching: find.text('视频')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'narrow desktop wraps the action group in at most two lines',
+    (tester) async {
+      final app = await pumpApp(tester, viewSize: const Size(1024, 768));
+      await openItem(tester, app, 'episode-friends-s1e2');
+      final actionRow = find.byKey(ItemDetailPage.actionRowKey);
+      final rects = [
+        for (final element
+            in find
+                .descendant(
+                  of: actionRow,
+                  matching: find.byType(ui.AppActionButton),
+                )
+                .evaluate())
+          tester.getRect(find.byWidget(element.widget)),
+      ];
+      expect(rects.length, greaterThanOrEqualTo(4));
+      final lines = {for (final rect in rects) rect.top.round()};
+      expect(lines.length, lessThanOrEqualTo(2));
+      final play = tester.getRect(find.byKey(PlayerKeys.open));
+      for (final rect in rects) {
+        expect(play.top, lessThanOrEqualTo(rect.top + .5));
+        if ((rect.top - play.top).abs() < 1) {
+          expect(play.left, lessThanOrEqualTo(rect.left + .5));
+        }
+      }
+      // 同一行的次级按钮等高。
+      final heights = {for (final rect in rects) rect.height.round()};
+      expect(heights.length, 1);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'season episodes shelf pages whole cards and sits close to media info',
+    (tester) async {
+      server.setEpisodes(_series, [
+        for (var i = 1; i <= 14; i++)
+          FakeEpisode(
+            id: 'shelf-e$i',
+            name: '第 $i 集',
+            seasonId: _season1,
+            indexNumber: i,
+            mediaStreams: const [
+              FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+              FakeMediaStream(
+                index: 1,
+                type: 'Audio',
+                codec: 'aac',
+                displayTitle: '国语',
+                isDefault: true,
+              ),
+            ],
+          ),
+      ]);
+      const width = 1440.0;
+      final app = await pumpApp(tester, viewSize: const Size(width, 900));
+      await openItem(tester, app, 'shelf-e2');
+      final shelf = find.byWidgetPredicate(
+        (w) => w is MediaShelf && w.shelfId == 'season-episodes',
+      );
+      expect(shelf, findsOneWidget);
+
+      void expectWholeCards() {
+        var visible = 0;
+        for (final element
+            in find
+                .descendant(of: shelf, matching: find.byType(EpisodeThumbCard))
+                .evaluate()) {
+          final box = element.renderObject! as RenderBox;
+          final rect = box.localToGlobal(Offset.zero) & box.size;
+          // 视口收在页边距之内,边距外的卡片被裁掉。
+          if (rect.right <= AppSpacing.page ||
+              rect.left >= width - AppSpacing.page) {
+            continue;
+          }
+          visible++;
+          expect(rect.left, greaterThanOrEqualTo(AppSpacing.page - .5));
+          expect(rect.right, lessThanOrEqualTo(width - AppSpacing.page + .5));
+        }
+        expect(visible, greaterThan(1));
+      }
+
+      expectWholeCards();
+      final right = find.byKey(CatalogKeys.shelfScrollRight('season-episodes'));
+      expect(right, findsOneWidget);
+      await tester.tap(right);
+      await settle(tester);
+      expectWholeCards();
+
+      // 货架与媒体信息之间不留大块空白。
+      final cards = find.descendant(
+        of: shelf,
+        matching: find.byType(EpisodeThumbCard),
+      );
+      final shelfBottom = tester.getRect(cards.first).bottom;
+      final media = find.text('媒体信息');
+      await tester.ensureVisible(media);
+      await settle(tester);
+      final gap =
+          tester.getRect(media).top - tester.getRect(cards.first).bottom;
+      expect(shelfBottom, isNonZero);
+      expect(gap, lessThan(56));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'season detail shows more than six whole episodes in two columns',
+    (tester) async {
+      server.setEpisodes(_series, [
+        for (var i = 1; i <= 26; i++)
+          FakeEpisode(
+            id: 'grid-e$i',
+            name: '第 $i 集',
+            seasonId: _season1,
+            indexNumber: i,
+            overview: '一段足够长的分集简介，用来占满两行文字。' * 3,
+            runtime: const Duration(minutes: 24),
+          ),
+      ]);
+      const view = Size(1440, 1000);
+      final app = await pumpApp(tester, viewSize: view);
+      app.router.go(AppRoutes.item(_series, seasonId: _season1));
+      await tester.pumpWidget(app);
+      await settle(tester);
+      final rows = [
+        for (final row in tester.widgetList<EpisodeRow>(
+          find.byType(EpisodeRow),
+        ))
+          tester.getRect(find.byKey(ValueKey('episode-row-${row.item.id}'))),
+      ];
+      final whole = rows
+          .where((rect) => rect.top >= 0 && rect.bottom <= view.height)
+          .toList();
+      expect(whole.length, greaterThan(6));
+      expect({for (final rect in rows) rect.left.round()}, hasLength(2));
+      expect({for (final rect in rows) rect.height.round()}, hasLength(1));
+      // 剧集标题、统计与季切换器在左侧同一组;选集与更多在右侧。
+      final title = tester.getRect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.episodesRow),
+          matching: find.text('剧集'),
+        ),
+      );
+      final summary = tester.getRect(
+        find.byKey(const Key('episode-list-summary')),
+      );
+      final locate = tester.getRect(find.byKey(CatalogKeys.locateEpisode));
+      expect(summary.left, greaterThan(title.right));
+      expect(locate.left, greaterThan(view.width / 2));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'many seasons fold into a picker; switching shows a skeleton then retry',
+    (tester) async {
+      server.setSeasons(_series, [
+        for (var i = 1; i <= 8; i++)
+          FakeSeason(
+            id: i == 1 ? _season1 : 'season-$i',
+            name: '第 $i 季 · 很长的季名称用来撑开',
+            indexNumber: i,
+          ),
+      ]);
+      server.setEpisodes(_series, [
+        FakeEpisode(id: 'first', name: 'First', seasonId: _season1),
+        for (var i = 2; i <= 8; i++)
+          FakeEpisode(id: 'ep-s$i', name: 'Season $i', seasonId: 'season-$i'),
+      ]);
+      final app = await pumpApp(tester, viewSize: const Size(1024, 768));
+      app.router.go(AppRoutes.item(_series, seasonId: _season1));
+      await tester.pumpWidget(app);
+      await settle(tester);
+      final picker = find.byKey(CatalogKeys.seasonPicker);
+      expect(picker, findsOneWidget);
+      expect(find.byKey(CatalogKeys.seasonTab(_season1)), findsNothing);
+
+      // 切季加载中:列表区是骨架,头部(季切换)保留。
+      final gate = server.episodeHolds['season-5'] = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      await tester.ensureVisible(picker);
+      await tester.tap(picker);
+      await settle(tester);
+      await tester.tap(find.byKey(CatalogKeys.seasonOption('season-5')));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      final row = find.byKey(CatalogKeys.episodesRow);
+      expect(
+        find.descendant(of: row, matching: find.byType(EpisodeListSkeleton)),
+        findsOneWidget,
+      );
+      expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+      gate.complete();
+      await settle(tester);
+      expect(_loadedEpisodeIds(tester), ['ep-s5']);
+
+      // 切季失败:列表区显示错误与重试,头部保留;重试成功后恢复。
+      server.failEpisodesOf = 'season-3';
+      await tester.ensureVisible(picker);
+      await tester.tap(picker);
+      await settle(tester);
+      await tester.tap(find.byKey(CatalogKeys.seasonOption('season-3')));
+      await settle(tester);
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.textContaining('season-episodes-failed'),
+        ),
+        findsOneWidget,
+      );
+      final retry = find.descendant(of: row, matching: find.text('重试'));
+      expect(retry, findsOneWidget);
+      expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+      server.failEpisodesOf = null;
+      await tester.ensureVisible(retry);
+      await tester.tap(retry);
+      await settle(tester);
+      expect(_loadedEpisodeIds(tester), ['ep-s3']);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

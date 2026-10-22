@@ -13,7 +13,7 @@ import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
 void main() {
-  testWidgets('episode cards stay compact enough to scan a season', (
+  testWidgets('episode rows lay the thumbnail beside a two-line overview', (
     tester,
   ) async {
     final item = MediaItem(
@@ -39,7 +39,7 @@ void main() {
           child: Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
-              width: 300,
+              width: 600,
               child: EpisodeRow(
                 item: item,
                 selected: false,
@@ -70,13 +70,21 @@ void main() {
       ),
     );
 
-    // 剧照在上，播放落在剧照上，标题与两行简介在下。
-    expect(row.height, lessThan(300));
-    // 播放圆钮居中压在剧照上，标题在剧照下面。
-    final thumbHeight = (row.width - 16) * 9 / 16;
-    expect(play.center.dx, closeTo(row.center.dx, 1));
-    expect(play.center.dy, closeTo(row.top + 8 + thumbHeight / 2, 1));
-    expect(play.width, lessThan(row.width / 2));
+    final thumb = tester.getRect(
+      find.descendant(
+        of: find.byType(EpisodeRow),
+        matching: find.byType(AspectRatio),
+      ),
+    );
+    // 横排行:左侧 16:9 缩略图,右侧标题、时长与两行简介;行高约等于缩略图。
+    expect(thumb.left, closeTo(row.left + 8, 1));
+    expect(thumb.width, closeTo(192, 1));
+    expect(thumb.height, closeTo(192 * 9 / 16, 1));
+    expect(row.height, lessThan(thumb.height + 24));
+    // 播放圆钮居中压在缩略图上,标题在缩略图右侧。
+    expect(play.center.dx, closeTo(thumb.center.dx, 1));
+    expect(play.center.dy, closeTo(thumb.center.dy, 1));
+    expect(play.width, lessThan(thumb.width / 2));
     final playIcon = tester.widget<Icon>(
       find.descendant(
         of: find.byKey(CatalogKeys.episodePlay('e1')),
@@ -84,11 +92,19 @@ void main() {
       ),
     );
     expect(playIcon.fill, AppIcons.filled);
+    final title = tester.getRect(find.text('1. 勇者的相遇'));
+    expect(title.left, greaterThan(thumb.right));
+    expect(title.top, closeTo(thumb.top, 1));
+    expect(find.text('23分钟'), findsOneWidget);
     expect(
-      tester.getRect(find.text('1. 勇者的相遇')).top,
-      greaterThan(row.top + 8 + thumbHeight),
+      tester.getRect(find.text('23分钟')).top,
+      greaterThan(title.bottom - 1),
     );
     expect(overview.maxLines, 2);
+    expect(
+      tester.getRect(find.textContaining('很长的本集简介')).bottom,
+      lessThanOrEqualTo(row.bottom),
+    );
     expect(find.text('1. 勇者的相遇'), findsOneWidget);
     final cardContainer = tester.widget<Container>(
       find
@@ -259,73 +275,84 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('current episode stays marked without a side rail', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      CupertinoTestApp(
-        locale: const Locale('zh'),
-        localizationsDelegates: [
-          ...[
-            AppLocalizations.delegate,
-            ...GlobalCupertinoLocalizations.delegates,
+  testWidgets(
+    'current episode keeps a play mark beside its tint, no side rail',
+    (tester) async {
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          locale: const Locale('zh'),
+          localizationsDelegates: [
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            ui.GlobalCupertinoLocalizations.delegate,
           ],
-          ui.GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: CupertinoPageScaffold(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: SizedBox(
-              width: 320,
-              child: EpisodeRow(
-                item: MediaItem(
-                  id: 'e39',
-                  name: '终圆房',
-                  type: 'Episode',
-                  indexNumber: 39,
-                  overview: '圣上宠信宦官。',
-                  premiereDate: DateTime(2026, 10, 1),
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: CupertinoPageScaffold(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 320,
+                child: EpisodeRow(
+                  item: MediaItem(
+                    id: 'e39',
+                    name: '终圆房',
+                    type: 'Episode',
+                    indexNumber: 39,
+                    overview: '圣上宠信宦官。',
+                    premiereDate: DateTime(2026, 10, 1),
+                  ),
+                  selected: true,
+                  busyPlayed: false,
+                  onTap: () {},
+                  onPlay: () {},
+                  onTogglePlayed: () {},
                 ),
-                selected: true,
-                busyPlayed: false,
-                onTap: () {},
-                onPlay: () {},
-                onTogglePlayed: () {},
               ),
             ),
           ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: AppUiTheme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
-        builder: (context, child) => ui.AppUiTheme(
-          data: AppUiTheme.of(context).brightness == Brightness.dark
-              ? ui.AppUiTheme.dark()
-              : ui.AppUiTheme.light(),
-          child: child ?? const SizedBox.shrink(),
+      );
+      await tester.pump();
+
+      expect(find.byType(EpisodeCurrentMark), findsOneWidget);
+      // 标记在缩略图左上角常驻,不靠悬停或底色。
+      final thumb = tester.getRect(
+        find.descendant(
+          of: find.byType(EpisodeRow),
+          matching: find.byType(AspectRatio),
         ),
-      ),
-    );
-    await tester.pump();
+      );
+      final mark = tester.getRect(find.byType(EpisodeCurrentMark));
+      expect(mark.left - thumb.left, lessThan(12));
+      expect(mark.top - thumb.top, lessThan(12));
+      final title = tester.widget<Text>(find.text('39. 终圆房'));
+      expect(title.style?.fontWeight, FontWeight.w700);
 
-    expect(find.byType(EpisodeCurrentMark), findsOneWidget);
-    final title = tester.widget<Text>(find.text('39. 终圆房'));
-    expect(title.style?.fontWeight, FontWeight.w700);
-
-    final rails = <RenderBox>[];
-    void visit(Element element) {
-      final object = element.renderObject;
-      if (object is RenderBox && object.hasSize) {
-        final size = object.size;
-        if (size.width > 0 && size.width <= 4 && size.height > 24) {
-          rails.add(object);
+      final rails = <RenderBox>[];
+      void visit(Element element) {
+        final object = element.renderObject;
+        if (object is RenderBox && object.hasSize) {
+          final size = object.size;
+          if (size.width > 0 && size.width <= 4 && size.height > 24) {
+            rails.add(object);
+          }
         }
+        element.visitChildren(visit);
       }
-      element.visitChildren(visit);
-    }
 
-    visit(tester.element(find.byType(EpisodeRow)));
-    expect(rails, isEmpty);
-    expect(tester.takeException(), isNull);
-  });
+      visit(tester.element(find.byType(EpisodeRow)));
+      expect(rails, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   test(
     'series reading scale stays flat through 1080p and trails the panel scale',
@@ -343,12 +370,13 @@ void main() {
         AppViewport.readingScaleOf(const Size(3840, 2160)),
         lessThan(AppViewport.scaleOf(const Size(3840, 2160))),
       );
-      // 网格最窄卡 272（剧照再减两侧 8 的内边距），随阅读缩放放大。
-      expect(EpisodeRow.thumbWidthFor(const Size(1920, 1080)), 256);
+      // 横排行的缩略图设计宽 192，最窄行 560，都随阅读缩放放大。
+      expect(EpisodeRow.thumbWidthFor(const Size(1920, 1080)), 192);
       expect(
         EpisodeRow.thumbWidthFor(const Size(3840, 2160)),
-        closeTo(272 * 1.65 - 16, 0.1),
+        closeTo(192 * 1.65, 0.1),
       );
+      expect(EpisodeGridMetrics.minCardWidthFor(const Size(1920, 1080)), 560);
     },
   );
 
@@ -413,9 +441,9 @@ void main() {
     final uhd = await titleHeight(const Size(3840, 2160));
     expect(uhd, greaterThan(hd * 1.4));
     expect(uhd, lessThan(hd * 2));
-    // 4K 下卡宽与字号同比放大，卡片仍是一张剧照加三四行字的比例。
+    // 4K 下行宽与字号同比放大，行仍是一张缩略图高的横条。
     final card = tester.getSize(find.byType(EpisodeRow));
-    expect(card.height, lessThan(card.width * 1.1));
+    expect(card.height, lessThan(card.width * .3));
     expect(tester.takeException(), isNull);
   });
 

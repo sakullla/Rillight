@@ -33,6 +33,7 @@ import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/season_switcher.dart';
 import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -1304,8 +1305,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final runtime = runtimeLabel(l10n, item);
     final showSimilar = _similar.isNotEmpty || _similarError != null;
     final playTarget = _playTarget(item);
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final wideCardWidth = MediaShelf.wideCardWidthFor(screenWidth);
     final season = _seasons.where((s) => s.id == _seasonId).firstOrNull;
     final artwork = item.isSeries && _applySeasonArtwork && season != null
         ? seasonArtworkItem(season, item)
@@ -1410,13 +1409,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
       ),
       if (item.isEpisode) ...[
-        // 本季分集横排:当前集高亮并自动滚入视野,点击直接切集。
+        // 本季分集横排:一页正好放下整数张卡,当前集所在页自动滚入视野,
+        // 点击直接切集。下一分区自带上边距,货架下方只留小间隔。
         if (_episodes.isNotEmpty)
           MediaShelf(
             shelfId: 'season-episodes',
             title: l10n.seasonEpisodes,
             items: _episodes,
             wide: true,
+            fitWholeCards: true,
+            bottomSpacing: AppSpacing.xs,
             focusItemId: item.id,
             scrollPageOnFocus: false,
             onTap: (episode) => _showItem(episode.id),
@@ -1430,13 +1432,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       title: l10n.seasonEpisodes,
                     ),
                   ),
-            itemBuilder: (context, episode) {
+            cardBuilder: (context, episode, width) {
               // The merge inserts/replaces the exact current item.
               // Do not highlight every distinct version of its number.
               final isCurrent = episode.id == item.id;
               return EpisodeThumbCard(
                 item: episode,
-                width: wideCardWidth,
+                width: width,
                 selected: isCurrent,
                 onTap: () => _showItem(episode.id),
               );
@@ -1471,10 +1473,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           onRetryLoadMore: _retryEpisodeContinuation,
           onLoadMore: () => unawaited(_loadMoreEpisodes()),
           summary: episodeSummary,
+          seasonSwitcher: _seasons.length > 1
+              ? SeasonSwitcher(
+                  seasons: _seasons,
+                  currentId: _seasonId,
+                  onSelected: (id) => unawaited(_selectSeason(id)),
+                )
+              : null,
           headerAction: _EpisodeShelfActions(
-            seasons: _seasons,
-            seasonId: _seasonId,
-            onSelectSeason: _selectSeason,
             onLocate: _seasonId == null ? null : _openEpisodePicker,
           ),
           onTap: (episode) => _openEpisodeDetails(episode.id),
@@ -1497,27 +1503,38 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       ],
       // 演职员、相册、媒体信息与外链对三种条目同序排列。
       EpisodePeopleSection(people: people),
-      Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.page,
-          vertical: AppSpacing.sm,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            DetailAlbumStrip(
-              item: item,
-              album: album,
-              thumbnailWidth: (MediaQuery.sizeOf(context).width / 4).clamp(
-                240.0,
-                360.0,
+      // 没有剧照时不画相册分区，也不留它的上下边距。
+      if (album != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.page,
+            vertical: AppSpacing.sm,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DetailAlbumStrip(
+                item: item,
+                album: album,
+                thumbnailWidth: (MediaQuery.sizeOf(context).width / 4).clamp(
+                  240.0,
+                  360.0,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       if (!item.isSeries)
-        EpisodeMediaStreamsSection(source: _sourceById(item, _mediaSourceId)),
+        // 播放设置行已经能选的音轨/字幕不在媒体信息里重复列出。
+        EpisodeMediaStreamsSection(
+          source: _sourceById(item, _mediaSourceId),
+          selectableElsewhere: {
+            if (_audioSelectable(_audioChoices(item, _mediaSourceId)))
+              MediaStreamKind.audio,
+            if (_subtitleSelectable(_subtitleChoices(item, _mediaSourceId)))
+              MediaStreamKind.subtitle,
+          },
+        ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
         child: DetailExternalLinks(links: item.externalUrls, title: item.name),
@@ -1957,65 +1974,20 @@ class _ChapterThumbState extends State<_ChapterThumb> {
   }
 }
 
+/// 剧集区标题行右侧:「选集」(按集号跳转)。季切换在左侧,与标题同组。
 class _EpisodeShelfActions extends StatelessWidget {
-  const _EpisodeShelfActions({
-    required this.seasons,
-    required this.seasonId,
-    required this.onSelectSeason,
-    this.onLocate,
-  });
+  const _EpisodeShelfActions({this.onLocate});
 
-  final List<MediaItem> seasons;
-  final String? seasonId;
-  final ValueChanged<String> onSelectSeason;
   final VoidCallback? onLocate;
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final light = scheme.brightness == Brightness.light;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (seasons.length > 1)
-          _SeasonJump(
-            seasons: seasons,
-            seasonId: seasonId,
-            onSelected: onSelectSeason,
-          ),
-        if (seasons.length > 1 && onLocate != null)
-          const SizedBox(width: AppSpacing.xs),
-        if (onLocate != null)
-          AppButton.icon(
-            key: CatalogKeys.locateEpisode,
-            onPressed: onLocate,
-            icon: Icon(
-              AppIcons.episodes,
-              fill: AppIcons.filled,
-              size: 17,
-              color: scheme.primary,
-            ),
-            label: Text(l10n.pickEpisode),
-            style: AppButtonStyle(
-              foregroundColor: scheme.onSurface,
-              backgroundColor: light
-                  ? scheme.surfaceContainerLowest
-                  : scheme.surfaceContainerHigh,
-              side: BorderSide(
-                color: AppEdge.of(scheme.brightness, strong: true),
-              ),
-              minimumSize: const Size(0, 38),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              shape: const StadiumBorder(),
-              textStyle: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            variant: AppButtonVariant.outlined,
-          ),
-      ],
+    if (onLocate == null) return const SizedBox.shrink();
+    return AppActionButton(
+      key: CatalogKeys.locateEpisode,
+      onPressed: onLocate,
+      icon: AppIcons.episodes,
+      label: AppLocalizations.of(context).pickEpisode,
     );
   }
 }
@@ -2267,78 +2239,6 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                     ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SeasonJump extends StatelessWidget {
-  const _SeasonJump({
-    required this.seasons,
-    required this.seasonId,
-    required this.onSelected,
-  });
-
-  final List<MediaItem> seasons;
-  final String? seasonId;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final light = scheme.brightness == Brightness.light;
-    MediaItem current = seasons.first;
-    for (final season in seasons) {
-      if (season.id == seasonId) {
-        current = season;
-        break;
-      }
-    }
-    return AppMenuButton<String>(
-      key: CatalogKeys.seasonPicker,
-      tooltip: AppLocalizations.of(context).seasons,
-      selected: seasonId,
-      onSelected: onSelected,
-      padding: EdgeInsets.zero,
-      items: [
-        for (final season in seasons)
-          AppMenuEntry(value: season.id, child: Text(season.name)),
-      ],
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: light
-              ? scheme.surfaceContainerLowest
-              : scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          border: Border.all(
-            color: AppEdge.of(scheme.brightness, strong: true),
-          ),
-        ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 38),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  current.name,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Icon(
-                  CupertinoIcons.chevron_down,
-                  size: 14,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );
@@ -3075,38 +2975,16 @@ ItemMediaSource? _headerSource(MediaItem item, String? id) {
 /// PopupMenuButton 把 null 当成取消,字幕关闭用哨兵值再映回 null。
 const _subtitleOffToken = -1;
 
-AppButtonStyle _detailGhostButtonStyle(AppColorScheme scheme) {
-  final light = scheme.brightness == Brightness.light;
-  return AppButtonStyle(
-    foregroundColor: scheme.onSurface,
-    backgroundColor: light
-        ? scheme.surfaceContainerLowest.withValues(alpha: 0.88)
-        : scheme.surfaceContainerHigh.withValues(alpha: 0.56),
-    side: BorderSide(
-      color: light
-          ? scheme.outlineVariant
-          : scheme.onSurface.withValues(alpha: 0.22),
-    ),
-    minimumSize: const Size(0, 46),
-    shape: const StadiumBorder(),
-    padding: const EdgeInsets.symmetric(
-      horizontal: AppSpacing.lg,
-      vertical: AppSpacing.sm,
-    ),
-  );
-}
-
-/// 操作区按用户在详情页的三个问题分成两行：
+/// 操作区两行：
 ///
-/// 1. **动作行**——「按下去会怎样」：带字主钮「播放」（写明续播/哪一集），
-///    再跟同高带字胶囊「从头播放 / 上一集 / 下一集」（动词，靠文字表意）；
-///    组尾是个人状态圆钮「收藏 / 已看」（通用图形，实心=已激活）。
-///    收藏、已看在电影/单集/剧集页都在同一相对位置，形成肌肉记忆。
-/// 2. **播放选项行**——「这次播的是什么」：片源/音轨/字幕是选择而不是动作，
-///    当前值必须看得见，所以做成「图标 + 当前值 + ˅」的安静下拉胶囊，
-///    不用再悬停逐个猜；行尾「其他来源」打开跨服务器同片查找。
-///
-/// 两行都允许窄窗折行；没有可选项时整行不画。
+/// 1. **动作组**（[ItemDetailPage.actionRowKey]）——「按下去会怎样」：唯一的
+///    primary「播放」（写明续播/哪一集）固定在第一位，其后全部是同高的带字
+///    次级按钮：「从头播放 / 上一集 / 下一集 / 收藏 / 已看 / 其他来源」。
+///    收藏与已看是开关，激活时为实底加填充图标并输出 Semantics toggled。
+///    不可用的项不渲染，也不留空位；窄窗口整组折行（1024 下最多两行）。
+/// 2. **播放设置行**（[ItemDetailPage.optionRowKey]）——「这次播的是什么」：
+///    只放真正可选的版本、音轨、字幕，做成「图标 + 类别 | 当前值 ˅」的安静
+///    下拉胶囊。没有可选项时整行不画。媒体信息分区不再重复列出这里能选的轨道。
 class _DetailActions extends StatelessWidget {
   const _DetailActions({
     required this.item,
@@ -3149,7 +3027,6 @@ class _DetailActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = AppUiTheme.of(context).colorScheme;
     final audios = _audioChoices(item, mediaSourceId);
     final subtitles = _subtitleChoices(item, mediaSourceId);
     final sourceId =
@@ -3178,7 +3055,6 @@ class _DetailActions extends StatelessWidget {
         }
       }
     }
-    final ghost = _detailGhostButtonStyle(scheme);
     final played = item.userData.played;
     final favorite = item.userData.favorite;
     final resume = onPlayFromStart != null || item.canResume;
@@ -3191,87 +3067,66 @@ class _DetailActions extends StatelessWidget {
         : (resume
               ? l10n.resumePlayEpisode(playCode)
               : l10n.playEpisode(playCode));
-    final navigation = <Widget>[
+    final actions = <Widget>[
       if (onPlay != null)
-        AppButton.icon(
+        AppActionButton(
           key: PlayerKeys.open,
+          tier: AppActionTier.primary,
           onPressed: onPlay,
-          style: AppButtonStyle(
-            minimumSize: const Size(0, 46),
-            shape: const StadiumBorder(),
-            boxShadow: AppShadow.emphasis(scheme.brightness),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 26,
-              vertical: AppSpacing.sm,
-            ),
-          ),
-          icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 22),
-          label: Text(playLabel),
-          variant: AppButtonVariant.filled,
+          icon: AppIcons.play,
+          label: playLabel,
         ),
       if (onPlayFromStart != null)
-        AppButton.icon(
+        AppActionButton(
           key: PlayerKeys.resumeFromStart,
           onPressed: onPlayFromStart,
-          style: ghost,
-          variant: AppButtonVariant.outlined,
-          icon: const Icon(AppIcons.replay),
-          label: Text(l10n.playFromStart),
+          icon: AppIcons.replay,
+          label: l10n.playFromStart,
         ),
       if (onOpenPreviousEpisode != null)
-        AppButton.icon(
+        AppActionButton(
           key: CatalogKeys.previousEpisode,
           onPressed: onOpenPreviousEpisode,
-          style: ghost,
-          icon: const Icon(AppIcons.skipPrevious, fill: AppIcons.filled),
-          label: Text(l10n.previousEpisode),
-          variant: AppButtonVariant.outlined,
+          icon: AppIcons.skipPrevious,
+          label: l10n.previousEpisode,
         ),
       if (onOpenNextEpisode != null)
-        AppButton.icon(
+        AppActionButton(
           key: CatalogKeys.nextEpisode,
           onPressed: onOpenNextEpisode,
-          style: ghost,
-          icon: const Icon(AppIcons.skipNext, fill: AppIcons.filled),
-          label: Text(l10n.nextEpisode),
-          variant: AppButtonVariant.outlined,
+          icon: AppIcons.skipNext,
+          label: l10n.nextEpisode,
         ),
-    ];
-    final status = <Widget>[
       if (onFavoriteChanged != null)
-        Semantics(
-          toggled: favorite,
-          child: _detailToolButton(
-            context,
-            key: CatalogKeys.favoriteToggle,
-            tooltip: favorite ? l10n.phoneFavorited : l10n.phoneFavorite,
-            active: favorite,
-            icon: Icon(
-              AppIcons.favorite,
-              fill: favorite ? AppIcons.filled : AppIcons.outline,
-              color: favorite ? scheme.primary : null,
-            ),
-            onPressed: busyFavorite
-                ? null
-                : () => onFavoriteChanged!(!favorite),
-          ),
+        AppActionButton(
+          key: CatalogKeys.favoriteToggle,
+          active: favorite,
+          icon: AppIcons.favorite,
+          label: favorite ? l10n.phoneFavorited : l10n.phoneFavorite,
+          onPressed: busyFavorite ? null : () => onFavoriteChanged!(!favorite),
         ),
-      Semantics(
-        toggled: played,
-        child: _detailToolButton(
-          context,
-          key: CatalogKeys.playedToggle,
-          tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
-          active: played,
-          icon: Icon(
-            played
-                ? CupertinoIcons.checkmark_circle_fill
-                : CupertinoIcons.checkmark_circle,
-            color: played ? scheme.primary : null,
-          ),
-          onPressed: busyPlayed ? null : () => onPlayedChanged(!played),
-        ),
+      AppActionButton(
+        key: CatalogKeys.playedToggle,
+        active: played,
+        icon: played
+            ? CupertinoIcons.checkmark_circle_fill
+            : CupertinoIcons.checkmark_circle,
+        label: played ? l10n.watchedAction : l10n.markPlayed,
+        tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+        onPressed: busyPlayed ? null : () => onPlayedChanged(!played),
       ),
+      // 跨服务器找同一部影片：与其他次级动作同组，不再单占选项行。
+      if (SourceSelectionAction.availableIn(context))
+        SourceSelectionAction(
+          builder: (context, view) => AppActionButton(
+            key: SourceSelectionActionView.key,
+            icon: view.icon,
+            label: view.shortLabel,
+            tooltip: view.label,
+            semanticLabel: view.label,
+            onPressed: view.loading ? null : view.onPressed,
+          ),
+        ),
     ];
     final viewport = MediaQuery.sizeOf(context);
     final sourceMenuMax = AppViewport.fit(420, viewport.width - 48, viewport);
@@ -3299,7 +3154,7 @@ class _DetailActions extends StatelessWidget {
           ],
           onSelected: (value) => onMediaSource?.call(value),
         ),
-      if (audios.length > 1)
+      if (_audioSelectable(audios))
         _DetailMenuButton<int>(
           menuKey: CatalogKeys.detailAudio,
           initialValue: audioStreamIndex,
@@ -3315,7 +3170,7 @@ class _DetailActions extends StatelessWidget {
           ],
           onSelected: (value) => onAudio?.call(value),
         ),
-      if (subtitles.isNotEmpty)
+      if (_subtitleSelectable(subtitles))
         _DetailMenuButton<int>(
           menuKey: CatalogKeys.detailSubtitle,
           initialValue: subtitleStreamIndex ?? _subtitleOffToken,
@@ -3337,47 +3192,18 @@ class _DetailActions extends StatelessWidget {
               onSubtitle?.call(value == _subtitleOffToken ? null : value),
         ),
     ];
-    // 跨服务器找同一部影片：带字胶囊，图形与全局搜索区分。有轨道选项时
-    // 排在选项行行尾；没有（剧集/季页）时并回动作行行尾，不单占一行。
-    final otherSources = <Widget>[
-      if (SourceSelectionAction.availableIn(context))
-        SourceSelectionAction(
-          builder: (context, view) => _DetailOptionChip(
-            key: SourceSelectionActionView.key,
-            icon: view.icon,
-            value: view.shortLabel,
-            tooltip: view.label,
-            semanticLabel: view.label,
-            busy: view.loading,
-            onPressed: view.loading ? null : view.onPressed,
-          ),
-        ),
-    ];
-    final inlineOther = choices.isEmpty;
-    final options = [...choices, if (!inlineOther) ...otherSources];
-    Widget group(List<Widget> children) => Wrap(
-      spacing: AppSpacing.sm,
-      runSpacing: AppSpacing.sm,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: children,
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 组内 12、组间 16；窄窗时状态圆钮整组折到下一行。
         Wrap(
           key: ItemDetailPage.actionRowKey,
-          spacing: AppSpacing.md,
+          spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,
           crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            if (navigation.isNotEmpty) group(navigation),
-            if (status.isNotEmpty || inlineOther)
-              group([...status, if (inlineOther) ...otherSources]),
-          ],
+          children: actions,
         ),
-        if (options.isNotEmpty) ...[
+        if (choices.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           Semantics(
             container: true,
@@ -3387,7 +3213,7 @@ class _DetailActions extends StatelessWidget {
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: options,
+              children: choices,
             ),
           ),
         ],
@@ -3396,56 +3222,15 @@ class _DetailActions extends StatelessWidget {
   }
 }
 
-/// 详情操作圆钮。浅色详情头已经是纸面，用纸色圆钮；深色头图仍用黑色 scrim，
-/// 白图标在任意剧照上都读得清。激活态（已收藏/已看）带有主色容器光环。
-Widget _detailToolButton(
-  BuildContext context, {
-  Key? key,
-  required String tooltip,
-  required Widget icon,
-  required VoidCallback? onPressed,
-  bool active = false,
-}) {
-  final scheme = AppUiTheme.of(context).colorScheme;
-  final light = scheme.brightness == Brightness.light;
-  if (!light && !active) {
-    return ScrimIconButton(
-      key: key,
-      size: ScrimIconButtonSize.large,
-      tooltip: tooltip,
-      icon: icon,
-      onPressed: onPressed,
-    );
-  }
-  return AppIconButton(
-    key: key,
-    tooltip: tooltip,
-    onPressed: onPressed,
-    icon: icon,
-    size: ScrimIconButtonSize.large.iconSize,
-    padding: EdgeInsets.zero,
-    constraints: BoxConstraints.tightFor(
-      width: ScrimIconButtonSize.large.dimension,
-      height: ScrimIconButtonSize.large.dimension,
-    ),
-    style: AppButtonStyle(
-      backgroundColor: active
-          ? scheme.primaryContainer
-          : scheme.surfaceContainerLowest,
-      foregroundColor: active ? scheme.onPrimaryContainer : scheme.onSurface,
-      disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
-      side: BorderSide(
-        color: active ? scheme.primary : scheme.outlineVariant,
-        width: active ? 1.5 : 1,
-      ),
-      shape: const CircleBorder(),
-      fixedSize: Size.square(ScrimIconButtonSize.large.dimension),
-      minimumSize: Size.square(ScrimIconButtonSize.large.dimension),
-    ),
-  );
-}
+/// 音轨多于一条时才在播放设置行提供选择。
+bool _audioSelectable(List<ItemMediaStream> audios) => audios.length > 1;
 
-/// 播放选项胶囊：「图标 + 类别标签 + 当前值 (+ ˅)」，38 高、安静表面、发丝边。
+/// 有任一字幕即可选择（含关闭字幕）。
+bool _subtitleSelectable(List<ItemMediaStream> subtitles) =>
+    subtitles.isNotEmpty;
+
+/// 播放设置胶囊：「图标 + 类别标签 + 当前值 (+ ˅)」，与次级动作同高、安静表面、
+/// 发丝边。
 /// 当前值是要告诉用户的事实，所以写在按钮上；类别说明同时展示并走 tooltip 与读屏。
 class _DetailOptionChip extends StatelessWidget {
   const _DetailOptionChip({
@@ -3457,7 +3242,6 @@ class _DetailOptionChip extends StatelessWidget {
     required this.onPressed,
     this.category,
     this.dropdown = false,
-    this.busy = false,
   });
 
   final IconData icon;
@@ -3469,9 +3253,6 @@ class _DetailOptionChip extends StatelessWidget {
 
   /// 为 true 时行尾画 ˅，表示点开是就地下拉选择。
   final bool dropdown;
-
-  /// 为 true 时图标位换成小菊花（来源解析中）。
-  final bool busy;
 
   /// 当前值过长（发布串、长音轨名）时截断，完整值在 tooltip 里。
   static const double maxValueWidth = 220;
@@ -3504,7 +3285,7 @@ class _DetailOptionChip extends StatelessWidget {
                   ? scheme.outlineVariant
                   : scheme.onSurface.withValues(alpha: .18),
             ),
-            minimumSize: const Size(0, 38),
+            faceExtent: AppActionButton.extentOf(context),
             padding: EdgeInsetsDirectional.only(
               start: AppSpacing.sm,
               end: dropdown ? AppSpacing.xs + 2 : AppSpacing.sm,
@@ -3519,9 +3300,7 @@ class _DetailOptionChip extends StatelessWidget {
             children: [
               SizedBox.square(
                 dimension: 18,
-                child: busy
-                    ? CupertinoActivityIndicator(color: muted, radius: 7)
-                    : Icon(icon, size: 17, color: scheme.primary, fill: 1),
+                child: Icon(icon, size: 17, color: scheme.primary, fill: 1),
               ),
               const SizedBox(width: 6),
               if (categoryLabel != null && categoryLabel.isNotEmpty) ...[

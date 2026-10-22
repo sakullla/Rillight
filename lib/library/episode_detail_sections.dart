@@ -1085,7 +1085,13 @@ class _PersonPosterState extends State<_PersonPoster> {
   }
 }
 
+/// 媒体流的类别。
+enum MediaStreamKind { video, audio, subtitle }
+
 /// 媒体流分区:当前片源的视频/音频/字幕轨分组列出。
+///
+/// [selectableElsewhere] 列出已在别处(桌面详情的播放设置行)提供选择的类别,
+/// 这些类别不再重复列出;视频与不可选的单一音轨照常显示。
 class EpisodeMediaStreamsSection extends StatelessWidget {
   const EpisodeMediaStreamsSection({
     super.key,
@@ -1097,6 +1103,7 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     this.selectedSubtitleIndex,
     this.onAudio,
     this.onSubtitle,
+    this.selectableElsewhere = const {},
   });
 
   static const sectionKey = Key('episode-media-streams');
@@ -1112,6 +1119,9 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
   final ValueChanged<int>? onAudio;
   final ValueChanged<int>? onSubtitle;
 
+  /// 已在播放设置行提供选择、本分区不再列出的类别。
+  final Set<MediaStreamKind> selectableElsewhere;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -1121,16 +1131,19 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final videos = [
-      for (final s in source.streams)
-        if (s.isVideo) s,
+      if (!selectableElsewhere.contains(MediaStreamKind.video))
+        for (final s in source.streams)
+          if (s.isVideo) s,
     ];
     final audios = [
-      for (final s in source.streams)
-        if (s.isAudio) s,
+      if (!selectableElsewhere.contains(MediaStreamKind.audio))
+        for (final s in source.streams)
+          if (s.isAudio) s,
     ];
     final subtitles = [
-      for (final s in source.streams)
-        if (s.isSubtitle) s,
+      if (!selectableElsewhere.contains(MediaStreamKind.subtitle))
+        for (final s in source.streams)
+          if (s.isSubtitle) s,
     ];
     final videoChoices = _choices(videos, _videoLine);
     final audioChoices = _choices(audios, (stream) => _audioLine(l10n, stream));
