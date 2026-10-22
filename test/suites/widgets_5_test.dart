@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/desktop_gestures_cases.dart' as case1;
-import '../app/update_check_cases.dart' as case2;
-import '../auth/provider_connect_dialog_cases.dart' as case3;
-import '../auth/provider_connect_management_cases.dart' as case4;
-import '../library/album_cases.dart' as case5;
-import '../library/episode_thumb_cases.dart' as case6;
+import '../app/artwork_mood_cases.dart' as case1;
+import '../app/desktop_gestures_cases.dart' as case2;
+import '../app/selection_contrast_cases.dart' as case3;
+import '../catalog/library_filter_cases.dart' as case4;
+import '../home/hero_artwork_cases.dart' as case5;
+import '../home/home_page_cases.dart' as case6;
 import '../mobile/phone_home_rails_cases.dart' as case7;
 import '../mobile/phone_player_cases.dart' as case8;
-import '../player/player_window_cases.dart' as case9;
-import '../player/seek_preview_cases.dart' as case10;
+import '../player/ended_navigation_cases.dart' as case9;
+import '../tv/tv_detail_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 5]',
     () => case0.mainShard(4, 6),
   );
-  group('app/desktop_gestures_test.dart', case1.main);
-  group('app/update_check_test.dart', case2.main);
-  group('auth/provider_connect_dialog_test.dart', case3.main);
-  group('auth/provider_connect_management_test.dart', case4.main);
-  group('library/album_test.dart', case5.main);
-  group('library/episode_thumb_test.dart', case6.main);
+  group('app/artwork_mood_test.dart', case1.main);
+  group('app/desktop_gestures_test.dart', case2.main);
+  group('app/selection_contrast_test.dart', case3.main);
+  group('catalog/library_filter_test.dart', case4.main);
+  group('home/hero_artwork_test.dart', case5.main);
+  group('home/home_page_test.dart', case6.main);
   group('mobile/phone_home_rails_test.dart', case7.main);
   group('mobile/phone_player_test.dart [part 2]', () => case8.mainShard(1, 4));
-  group('player/player_window_test.dart', case9.main);
-  group('player/seek_preview_test.dart', case10.main);
+  group('player/ended_navigation_test.dart', case9.main);
+  group('tv/tv_detail_test.dart [part 2]', () => case10.mainShard(1, 2));
 }

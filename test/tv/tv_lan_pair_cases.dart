@@ -277,7 +277,7 @@ void main() {
   );
 
   cases.testWidgets(
-    'phone assist sits after remote connect and confirms only the account',
+    'phone assist sits in the secondary group and confirms only the account',
     (tester) async {
       tester.view.physicalSize = const Size(800, 2000);
       tester.view.devicePixelRatio = 1;
@@ -307,9 +307,20 @@ void main() {
       expect(submit, findsOneWidget);
       expect(assistButton, findsOneWidget);
       expect(find.byKey(const Key('tv-lan-qr')), findsNothing);
+      // 手机辅助与导入备份同在左栏次级入口组,不在右侧表单里。
       expect(
-        tester.getTopLeft(assistButton).dy,
-        greaterThan(tester.getTopLeft(submit).dy),
+        tester.getRect(assistButton).right,
+        lessThan(tester.getRect(submit).left),
+      );
+      final group = find
+          .ancestor(
+            of: find.byKey(const ValueKey('tv-connect-import')),
+            matching: find.byType(Wrap),
+          )
+          .first;
+      expect(
+        find.descendant(of: group, matching: assistButton),
+        findsOneWidget,
       );
 
       await tester.tap(assistButton);

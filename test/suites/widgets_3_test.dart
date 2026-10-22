@@ -3,15 +3,17 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
 import '../app/browse_menu_cases.dart' as case1;
-import '../auth/change_password_cases.dart' as case2;
-import '../auth/provider_connect_entry_user_agent_cases.dart' as case3;
+import '../app/update_ui_cases.dart' as case2;
+import '../auth/change_password_cases.dart' as case3;
 import '../catalog/item_detail_cases.dart' as case4;
-import '../library/episode_list_scroll_cases.dart' as case5;
-import '../mobile/detail_route_identity_cases.dart' as case6;
-import '../mobile/phone_nav_style_cases.dart' as case7;
-import '../mobile/phone_player_interaction_cases.dart' as case8;
-import '../mobile/tv_shell_navigation_cases.dart' as case9;
-import '../player/desktop_player_window_host_cases.dart' as case10;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case5;
+import '../helpers/capture_png_cases.dart' as case6;
+import '../player/android_seek_cancellation_cases.dart' as case7;
+import '../player/desktop_player_window_host_cases.dart' as case8;
+import '../player/playback_image_release_cases.dart' as case9;
+import '../search/aggregation_search_surface_cases.dart' as case10;
+import '../tv/tv_detail_cases.dart' as case11;
+import '../widgets/app_empty_view_cases.dart' as case12;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,13 +23,15 @@ void main() {
     () => case0.mainShard(2, 6),
   );
   group('app/browse_menu_test.dart', case1.main);
-  group('auth/change_password_test.dart', case2.main);
-  group('auth/provider_connect_entry_user_agent_test.dart', case3.main);
+  group('app/update_ui_test.dart', case2.main);
+  group('auth/change_password_test.dart', case3.main);
   group('catalog/item_detail_test.dart [part 1]', () => case4.mainShard(0, 3));
-  group('library/episode_list_scroll_test.dart', case5.main);
-  group('mobile/detail_route_identity_test.dart', case6.main);
-  group('mobile/phone_nav_style_test.dart', case7.main);
-  group('mobile/phone_player_interaction_test.dart', case8.main);
-  group('mobile/tv_shell_navigation_test.dart', case9.main);
-  group('player/desktop_player_window_host_test.dart', case10.main);
+  group('catalog/shelf_grid_scroll_rebuild_test.dart', case5.main);
+  group('helpers/capture_png_test.dart', case6.main);
+  group('player/android_seek_cancellation_test.dart', case7.main);
+  group('player/desktop_player_window_host_test.dart', case8.main);
+  group('player/playback_image_release_test.dart', case9.main);
+  group('search/aggregation_search_surface_test.dart', case10.main);
+  group('tv/tv_detail_test.dart [part 1]', () => case11.mainShard(0, 2));
+  group('widgets/app_empty_view_test.dart', case12.main);
 }

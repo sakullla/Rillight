@@ -21,6 +21,9 @@ import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/server_management_widgets.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
+import 'package:rillight/auth/provider_login_form.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:flutter/services.dart';
 
 import '../helpers/cupertino_test_app.dart';
 
@@ -642,14 +645,28 @@ void main() {
       final group = find
           .ancestor(of: find.byKey(import), matching: find.byType(Wrap))
           .first;
+      for (final key in [all, const Key('tv-lan-assist')]) {
+        expect(
+          find.descendant(of: group, matching: find.byKey(key)),
+          findsOneWidget,
+        );
+      }
       expect(
-        find.descendant(of: group, matching: find.byKey(all)),
-        findsOneWidget,
+        tester.getRect(find.byKey(const Key('tv-lan-assist'))).right,
+        lessThan(
+          tester.getRect(find.byKey(const Key('tv-connect-submit'))).left,
+        ),
       );
       final lastCard = tester.getRect(cards[2]);
       expect(tester.getRect(find.byKey(all)).top, greaterThan(lastCard.top));
       final appearance = find.byKey(const Key('tv-appearance-system'));
-      await tester.ensureVisible(appearance);
+      await tester.scrollUntilVisible(
+        appearance,
+        120,
+        scrollable: find
+            .ancestor(of: find.byKey(import), matching: find.byType(Scrollable))
+            .first,
+      );
       await _settle(tester);
       expect(
         tester.getRect(appearance).top,
@@ -659,6 +676,129 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('TV saved server card enters that server', (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final auth = await savedServers(tester, 2);
+    final target = auth.savedServers.first;
+    final app = RillightApp(
+      auth: auth,
+      environment: PresentationEnvironment.tv,
+    );
+    app.router.go('/connect');
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    final card = find.byKey(Key('tv-saved-server-${target.id}'));
+    expect(card, findsOneWidget);
+
+    await tester.tap(card);
+    for (var i = 0; i < 40 && !auth.isLoggedIn; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(auth.isLoggedIn, isTrue);
+    expect(auth.session!.server.id, target.id);
+    expect(tester.takeException(), isNull);
+    // 已登录首页的重试计时器在卸载后跑完,避免残留 Timer。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(minutes: 1));
+  }, tags: ['integration']);
+
+  testWidgets('TV login D-pad moves from cards to the entry group and form', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final auth = await savedServers(tester, 4);
+    await tester.pumpWidget(host(auth, const TvConnectPage()));
+    await _settle(tester);
+
+    bool focusedIn(Finder target) {
+      final focused = FocusManager.instance.primaryFocus?.context;
+      if (focused == null) return false;
+      final element = target.evaluate().single;
+      if (focused == element) return true;
+      var found = false;
+      focused.visitAncestorElements((ancestor) {
+        found = ancestor == element;
+        return !found;
+      });
+      return found;
+    }
+
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await _settle(tester);
+      // ignore: avoid_print
+    }
+
+    final cards = [
+      for (final saved in auth.savedServers.take(3))
+        find.byKey(Key('tv-saved-server-${saved.id}')),
+    ];
+    const all = Key('tv-connect-servers');
+    const import = ValueKey('tv-connect-import');
+    const assist = Key('tv-lan-assist');
+    expect(focusedIn(find.byKey(const Key('tv-connect-address'))), isTrue);
+
+    Focus.of(
+      tester.element(
+        find.descendant(of: cards.first, matching: find.byType(Text)).first,
+      ),
+    ).requestFocus();
+    await _settle(tester);
+    expect(focusedIn(cards.first), isTrue);
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(focusedIn(cards[1]), isTrue);
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(focusedIn(cards[2]), isTrue);
+    // 按「下」进入次级入口组(落在离卡片中心最近的一颗),不跳到右栏。
+    await press(LogicalKeyboardKey.arrowDown);
+    final group = find
+        .ancestor(of: find.byKey(import), matching: find.byType(Wrap))
+        .first;
+    expect(focusedIn(group), isTrue);
+    for (var i = 0; i < 2 && !focusedIn(find.byKey(all)); i++) {
+      await press(LogicalKeyboardKey.arrowLeft);
+    }
+    expect(focusedIn(find.byKey(all)), isTrue);
+    await press(LogicalKeyboardKey.arrowRight);
+    expect(focusedIn(find.byKey(import)), isTrue);
+    // 右栏表单与左栏次级入口组之间左右可达;手机辅助与导入同行时在右侧,
+    // 换行时在导入下方。
+    final form = find.ancestor(
+      of: find.byKey(const Key('tv-connect-submit')),
+      matching: find.byType(ProviderLoginForm),
+    );
+    final leftColumn = find
+        .ancestor(of: find.byKey(import), matching: find.byType(ListView))
+        .first;
+    final wrapped =
+        tester.getRect(find.byKey(assist)).top >=
+        tester.getRect(find.byKey(import)).bottom;
+    await press(LogicalKeyboardKey.arrowRight);
+    if (wrapped) {
+      expect(focusedIn(form), isTrue);
+      await press(LogicalKeyboardKey.arrowLeft);
+      expect(focusedIn(find.byKey(import)), isTrue);
+      await press(LogicalKeyboardKey.arrowDown);
+      expect(focusedIn(find.byKey(assist)), isTrue);
+    } else {
+      expect(focusedIn(find.byKey(assist)), isTrue);
+      await press(LogicalKeyboardKey.arrowRight);
+      expect(focusedIn(form), isTrue);
+      await press(LogicalKeyboardKey.arrowLeft);
+      expect(focusedIn(leftColumn), isTrue);
+    }
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 
   testWidgets('TV login without saved servers renders no server section', (
     tester,

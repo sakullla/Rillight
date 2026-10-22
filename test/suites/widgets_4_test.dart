@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/android_bootstrap_cases.dart' as case1;
-import '../app/update_platform_cases.dart' as case2;
-import '../auth/backup_import/backup_import_flow_cases.dart' as case3;
-import '../library/episode_row_cases.dart' as case4;
-import '../library/person_works_cases.dart' as case5;
+import '../app/browsing_polish_cases.dart' as case1;
+import '../auth/backup_import/backup_import_flow_cases.dart' as case2;
+import '../auth/library_counts_cases.dart' as case3;
+import '../home/library_latest_row_cases.dart' as case4;
+import '../library/external_link_cases.dart' as case5;
 import '../mobile/mobile_flow_cases.dart' as case6;
-import '../mobile/phone_player_cases.dart' as case7;
-import '../player/subtitle_menu_cases.dart' as case8;
-import '../widgets/liquid_glass_cases.dart' as case9;
-import '../widgets/scrim_icon_button_cases.dart' as case10;
+import '../mobile/mobile_performance_timing_cases.dart' as case7;
+import '../mobile/phone_player_cases.dart' as case8;
+import '../widgets/artwork_crop_cases.dart' as case9;
+import '../widgets/skeleton_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 4]',
     () => case0.mainShard(3, 6),
   );
-  group('app/android_bootstrap_test.dart', case1.main);
-  group('app/update_platform_test.dart', case2.main);
-  group('auth/backup_import/backup_import_flow_test.dart', case3.main);
-  group('library/episode_row_test.dart', case4.main);
-  group('library/person_works_test.dart', case5.main);
+  group('app/browsing_polish_test.dart', case1.main);
+  group('auth/backup_import/backup_import_flow_test.dart', case2.main);
+  group('auth/library_counts_test.dart', case3.main);
+  group('home/library_latest_row_test.dart', case4.main);
+  group('library/external_link_test.dart', case5.main);
   group('mobile/mobile_flow_test.dart [part 4]', () => case6.mainShard(3, 4));
-  group('mobile/phone_player_test.dart [part 1]', () => case7.mainShard(0, 4));
-  group('player/subtitle_menu_test.dart', case8.main);
-  group('widgets/liquid_glass_test.dart', case9.main);
-  group('widgets/scrim_icon_button_test.dart', case10.main);
+  group('mobile/mobile_performance_timing_test.dart', case7.main);
+  group('mobile/phone_player_test.dart [part 1]', () => case8.mainShard(0, 4));
+  group('widgets/artwork_crop_test.dart', case9.main);
+  group('widgets/skeleton_test.dart', case10.main);
 }

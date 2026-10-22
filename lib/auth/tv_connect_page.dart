@@ -23,9 +23,9 @@ import 'package:rillight/app/ui/app_icons.dart';
 
 /// Remote connection flow; credentials remain owned by the auth draft.
 ///
-/// 版式:左侧是品牌、说明、外观与已保存服务器(或手机辅助的二维码/确认),
-/// 右侧是一张表单卡:地址 → 用户名 → 密码 → User-Agent → 连接,遥控器一路
-/// 向下即可完成;卡片底部是手机辅助连接入口。
+/// 版式:左侧是品牌、说明、已保存服务器卡、次级入口组(全部服务器、导入备份、
+/// 手机辅助连接)与外观(手机辅助进行中时换成二维码/确认);右侧是一张表单卡:
+/// 地址 → 用户名 → 密码 → User-Agent → 连接,遥控器一路向下即可完成。
 class TvConnectPage extends StatefulWidget {
   const TvConnectPage({
     super.key,
@@ -291,8 +291,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
                             ],
                             SizedBox(height: 8 * s),
                           ],
-                          // 次级入口同一组:全部服务器、导入备份(无服务与已有
-                          // 服务都可用)。手机辅助连接在右侧表单「或」下方。
+                          // 次级入口同一组:全部服务器、导入备份、手机辅助连接,
+                          // 同为药丸样式;导入与辅助在无服务与已有服务时都可用。
                           Wrap(
                             spacing: 10 * s,
                             runSpacing: 10 * s,
@@ -328,8 +328,23 @@ class _TvConnectPageState extends State<TvConnectPage> {
                                       ),
                                 child: Text(l10n.backupImportEntry),
                               ),
+                              TvAction(
+                                key: const Key('tv-lan-assist'),
+                                pill: true,
+                                focusNode: _assistFocus,
+                                leading: const Icon(
+                                  AppIcons.qrCode,
+                                  fill: AppIcons.filled,
+                                ),
+                                onPressed:
+                                    auth.isBusy || _openingLan || _lanActive
+                                    ? null
+                                    : _openLan,
+                                child: Text(l10n.tvLanAssist),
+                              ),
                             ],
                           ),
+                          ..._lanHint(l10n),
                           SizedBox(height: 18 * s),
                           if (_lanActive)
                             ..._lanSection(l10n, auth.isBusy)
@@ -372,8 +387,6 @@ class _TvConnectPageState extends State<TvConnectPage> {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
-    final lan = _lan;
-    final phase = lan?.phase ?? TvLanPhase.idle;
     return Container(
       padding: EdgeInsets.all(20 * s),
       decoration: BoxDecoration(
@@ -465,57 +478,31 @@ class _TvConnectPageState extends State<TvConnectPage> {
                 ),
               ),
             ),
-            SizedBox(height: 14 * s),
-            Row(
-              children: [
-                Expanded(child: AppDivider(color: scheme.outlineVariant)),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10 * s),
-                  child: Text(
-                    l10n.tvConnectOr,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                Expanded(child: AppDivider(color: scheme.outlineVariant)),
-              ],
-            ),
-            SizedBox(height: 10 * s),
-            if (phase == TvLanPhase.expired)
-              Padding(
-                padding: EdgeInsets.only(bottom: 8 * s),
-                child: Text(
-                  l10n.tvLanExpired,
-                  key: const Key('tv-lan-expired'),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            if (phase == TvLanPhase.failed)
-              Padding(
-                padding: EdgeInsets.only(bottom: 8 * s),
-                child: Text(
-                  l10n.tvLanFailed,
-                  key: const Key('tv-lan-failed'),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            TvAction(
-              key: const Key('tv-lan-assist'),
-              expand: true,
-              focusNode: _assistFocus,
-              leading: const Icon(AppIcons.qrCode, fill: AppIcons.filled),
-              onPressed: auth.isBusy || _openingLan || _lanActive
-                  ? null
-                  : _openLan,
-              child: Text(l10n.tvLanAssist),
-            ),
           ],
         ),
       ),
     );
+  }
+
+  /// 手机辅助过期或失败后的说明,紧跟在次级入口组下方的「手机辅助连接」旁。
+  List<Widget> _lanHint(AppLocalizations l10n) {
+    final phase = _lan?.phase ?? TvLanPhase.idle;
+    final (text, key) = switch (phase) {
+      TvLanPhase.expired => (l10n.tvLanExpired, const Key('tv-lan-expired')),
+      TvLanPhase.failed => (l10n.tvLanFailed, const Key('tv-lan-failed')),
+      _ => (null, null),
+    };
+    if (text == null) return const [];
+    return [
+      SizedBox(height: context.tvdp(8)),
+      Text(
+        text,
+        key: key,
+        style: TextStyle(
+          color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    ];
   }
 
   /// 手机辅助进行中:二维码与配对信息,或手机提交后的确认。
