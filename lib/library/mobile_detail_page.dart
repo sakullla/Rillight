@@ -1162,9 +1162,10 @@ class _DetailPlayActions extends StatelessWidget {
         key: const Key('mobile-detail-play'),
         style: AppButtonStyle(
           minimumSize: const Size(48, _height),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
           backgroundColor: scheme.primary,
           foregroundColor: scheme.onPrimary,
+          boxShadow: AppShadow.emphasis(scheme.brightness),
           shape: shape,
           textStyle: theme.textTheme.titleSmall?.copyWith(
             fontSize: 16,
@@ -1355,10 +1356,10 @@ class _StatusIconButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool highlighted;
 
-  static const double _size = 40;
+  static const double _size = 42;
 
   /// 一格的最大宽度；格数多时按可用宽度均分。
-  static const double maxCellWidth = 72;
+  static const double maxCellWidth = 76;
 
   @override
   Widget build(BuildContext context) {
@@ -1370,7 +1371,7 @@ class _StatusIconButton extends StatelessWidget {
         ? scheme.onSurfaceVariant.withValues(alpha: .38)
         : highlighted
         ? scheme.onPrimaryContainer
-        : scheme.onSurfaceVariant;
+        : scheme.onSurface;
     final animatedIcon = AnimatedSwitcher(
       duration: duration,
       switchInCurve: AppMotion.emphasized,
@@ -1395,8 +1396,10 @@ class _StatusIconButton extends StatelessWidget {
           ? AppSelectionDecoration.of(scheme, radius: AppRadii.pill)
           : BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.pill),
-              color: scheme.surfaceContainerHigh.withValues(alpha: .6),
-              border: Border.all(color: AppEdge.of(theme.brightness)),
+              color: scheme.surfaceContainerHigh.withValues(alpha: .78),
+              border: Border.all(
+                color: AppEdge.of(theme.brightness, strong: true),
+              ),
             ),
       child: Center(child: animatedIcon),
     );

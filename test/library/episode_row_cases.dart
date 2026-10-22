@@ -90,6 +90,15 @@ void main() {
     );
     expect(overview.maxLines, 2);
     expect(find.text('1. 勇者的相遇'), findsOneWidget);
+    final cardContainer = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byType(EpisodeRow),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(cardContainer.foregroundDecoration, isA<BoxDecoration>());
     expect(tester.takeException(), isNull);
   });
 

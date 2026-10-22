@@ -261,23 +261,39 @@ class _EpisodeListState extends State<EpisodeList> {
                     Expanded(
                       child: Wrap(
                         spacing: AppSpacing.sm,
-                        crossAxisAlignment: WrapCrossAlignment.end,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(
                             l10n.episodesRow,
-                            style: theme.textTheme.titleLarge,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                           if (summary != null && summary.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text(
-                                summary,
-                                key: const Key('episode-list-summary'),
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.onSurface.withValues(
+                                  alpha: .07,
+                                ),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.pill,
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 3,
+                                ),
+                                child: Text(
+                                  summary,
+                                  key: const Key('episode-list-summary'),
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -285,13 +301,21 @@ class _EpisodeListState extends State<EpisodeList> {
                       ),
                     ),
                     widget.headerAction,
-                    if (widget.onMore != null && error == null)
+                    if (widget.onMore != null && error == null) ...[
+                      const SizedBox(width: AppSpacing.xs),
                       AppButton(
                         key: CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes),
                         onPressed: widget.onMore,
                         style: AppButtonStyle(
                           foregroundColor: theme.colorScheme.onSurfaceVariant,
-                          textStyle: theme.textTheme.labelLarge,
+                          minimumSize: const Size(0, 38),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          textStyle: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         variant: AppButtonVariant.plain,
                         child: Row(
@@ -303,6 +327,7 @@ class _EpisodeListState extends State<EpisodeList> {
                           ],
                         ),
                       ),
+                    ],
                   ],
                 ),
                 if (error != null && empty)
@@ -498,9 +523,14 @@ class _EpisodeRowState extends State<EpisodeRow> {
     // 当前集只留淡染底、加粗标题和剧照中央的播放标记。
     // 侧边主色细条会切进画面，读起来像一条多余的边。悬停只在非当前集上加浅底。
     final fill = selected
-        ? scheme.primaryContainer.withValues(alpha: 0.5)
+        ? scheme.primaryContainer.withValues(alpha: 0.62)
         : revealed
-        ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.62)
+        : AppInk.transparent;
+    final stroke = selected
+        ? scheme.primary.withValues(alpha: 0.45)
+        : revealed
+        ? AppEdge.of(scheme.brightness, strong: true)
         : AppInk.transparent;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -509,6 +539,10 @@ class _EpisodeRowState extends State<EpisodeRow> {
         decoration: BoxDecoration(
           color: fill,
           borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          border: Border.all(color: stroke, width: selected ? 1.2 : 1),
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(

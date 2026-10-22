@@ -350,6 +350,30 @@ void main() {
         expect(_fill(tester), colors.primary);
         expect(_foreground(tester), colors.onPrimary);
 
+        await _pump(
+          tester,
+          AppButton(
+            onPressed: () {},
+            variant: AppButtonVariant.tinted,
+            child: const Text('次操作'),
+          ),
+          theme: theme,
+        );
+        expect(_fill(tester), colors.primaryContainer);
+        expect(_side(tester).color.a, greaterThan(0));
+
+        await _pump(
+          tester,
+          AppButton(
+            onPressed: () {},
+            variant: AppButtonVariant.outlined,
+            child: const Text('描边'),
+          ),
+          theme: theme,
+        );
+        expect(_fill(tester).a, greaterThan(0));
+        expect(_side(tester).color, colors.outline);
+
         // 悬停、按下也只换实底,不出现渐变或色光。
         final pointer = await tester.startGesture(
           tester.getCenter(find.byType(AppButton)),

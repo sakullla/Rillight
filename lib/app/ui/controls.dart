@@ -244,8 +244,10 @@ class _AppButtonState extends State<AppButton> {
         switch (widget.variant) {
           AppButtonVariant.filled => colors.primary,
           AppButtonVariant.tinted => colors.primaryContainer,
-          AppButtonVariant.plain ||
-          AppButtonVariant.outlined => AppInk.transparent,
+          AppButtonVariant.outlined => colors.surfaceContainerLowest.withValues(
+            alpha: colors.brightness == Brightness.light ? .72 : .28,
+          ),
+          AppButtonVariant.plain => AppInk.transparent,
         };
     final tvFocus = theme.tv && _focused && enabled;
     var fill = resting;
@@ -253,18 +255,27 @@ class _AppButtonState extends State<AppButton> {
     var side =
         widget.style?.side ??
         BorderSide(
-          color: widget.variant == AppButtonVariant.outlined
-              ? colors.outline
-              : AppInk.transparent,
+          color: switch (widget.variant) {
+            AppButtonVariant.outlined => colors.outline,
+            AppButtonVariant.tinted => colors.primary.withValues(alpha: .24),
+            AppButtonVariant.plain ||
+            AppButtonVariant.filled => AppInk.transparent,
+          },
         );
 
     if (!enabled) {
       if (widget.variant == AppButtonVariant.filled) {
         fill = colors.surfaceContainerHigh;
+      } else if (widget.variant == AppButtonVariant.outlined &&
+          customFill == null) {
+        fill = AppInk.transparent;
       }
       if (widget.variant == AppButtonVariant.outlined &&
           widget.style?.side == null) {
         side = BorderSide(color: colors.outline.withValues(alpha: .38));
+      } else if (widget.variant == AppButtonVariant.tinted &&
+          widget.style?.side == null) {
+        side = BorderSide(color: colors.primary.withValues(alpha: .08));
       }
     } else if (tvFocus && !_pressed) {
       fill = colors.inverseSurface;
@@ -294,10 +305,17 @@ class _AppButtonState extends State<AppButton> {
         side = BorderSide(color: colors.primary, width: 2);
       }
     } else if (_hovered) {
-      // 悬停只换底色,不额外加边框,平面按钮更干净。
+      // 悬停抬亮底色,描边/柔和按钮同步加亮轮廓。
       fill =
           widget.style?.hoverColor ??
           _stateFill(colors, resting, customFill != null, _PressKind.hover);
+      if (widget.style?.side == null &&
+          widget.variant == AppButtonVariant.outlined) {
+        side = BorderSide(color: colors.primary.withValues(alpha: .48));
+      } else if (widget.style?.side == null &&
+          widget.variant == AppButtonVariant.tinted) {
+        side = BorderSide(color: colors.primary.withValues(alpha: .4));
+      }
     }
 
     // 主按钮是 accent 实底:不铺渐变,也不带色光。

@@ -301,6 +301,7 @@ void main() {
       for (var i = 0; i < 12; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
+      expect(find.byKey(CatalogKeys.locateEpisode), findsOneWidget);
       expect(similar.isCompleted, isFalse);
       expect(
         tester.widget<EpisodeList>(find.byType(EpisodeList)).episodes,

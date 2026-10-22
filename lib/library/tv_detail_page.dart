@@ -995,17 +995,18 @@ class _TvBadge extends StatelessWidget {
     final s = TvDesign.scaleOf(context);
     return DecoratedBox(
       decoration: BoxDecoration(
+        color: AppInk.white.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(AppRadii.xs * s),
         // 发丝描边:只做轻量分组,不抢封面和标题。
-        border: Border.all(color: AppEdge.of(Brightness.dark)),
+        border: Border.all(color: AppEdge.of(Brightness.dark, strong: true)),
       ),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 6 * s, vertical: 2 * s),
+        padding: EdgeInsets.symmetric(horizontal: 7 * s, vertical: 2 * s),
         child: Text(
           label,
           style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
-            color: AppInk.white.withValues(alpha: .78),
-            fontWeight: FontWeight.w500,
+            color: AppInk.white.withValues(alpha: .88),
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),

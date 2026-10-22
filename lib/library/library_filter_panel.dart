@@ -706,13 +706,23 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: scheme.primary),
-          const SizedBox(width: 6),
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(AppRadii.xs + 2),
+            ),
+            child: Icon(icon, size: 14, color: scheme.primary),
+          ),
+          const SizedBox(width: 8),
           Text(
             // 只有右侧有内容时才显示分隔点，避免悬空的「排序 ·」。
             trailing == null ? title : '$title ·',
             style: theme.textTheme.labelLarge?.copyWith(
-              color: scheme.onSurfaceVariant,
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const Spacer(),

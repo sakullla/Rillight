@@ -280,7 +280,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
           subtitle: filterSummary.isEmpty ? null : filterSummary,
           actions: [
             SizedBox(
-              width: 190 * s,
+              width: 200 * s,
               child: TvInput(
                 key: const Key('tv-library-search'),
                 pill: true,

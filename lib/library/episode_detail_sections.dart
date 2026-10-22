@@ -1563,7 +1563,7 @@ class _PhoneSelectorRow extends StatelessWidget {
     final scheme = theme.colorScheme;
     final interactive = onTap != null;
     final row = ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 52),
+      constraints: const BoxConstraints(minHeight: 54),
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
@@ -1571,17 +1571,29 @@ class _PhoneSelectorRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 18,
-              fill: AppIcons.filled,
-              color: interactive ? scheme.primary : scheme.onSurfaceVariant,
+            Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: interactive
+                    ? scheme.primary.withValues(alpha: .14)
+                    : scheme.onSurface.withValues(alpha: .06),
+                borderRadius: BorderRadius.circular(AppRadii.sm),
+              ),
+              child: Icon(
+                icon,
+                size: 16,
+                fill: AppIcons.filled,
+                color: interactive ? scheme.primary : scheme.onSurfaceVariant,
+              ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Text(
               title,
               style: theme.textTheme.labelLarge?.copyWith(
-                color: scheme.onSurfaceVariant,
+                color: scheme.onSurface,
+                fontWeight: FontWeight.w600,
               ),
             ),
             if (count > 1) ...[
@@ -1601,6 +1613,7 @@ class _PhoneSelectorRow extends StatelessWidget {
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                       fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -1616,8 +1629,11 @@ class _PhoneSelectorRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface,
+                  color: interactive
+                      ? scheme.onSurface
+                      : scheme.onSurfaceVariant,
                   fontSize: 14,
+                  fontWeight: interactive ? FontWeight.w500 : null,
                 ),
               ),
             ),

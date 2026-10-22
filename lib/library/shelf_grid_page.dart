@@ -1365,11 +1365,15 @@ class _Header extends StatelessWidget {
                 ),
               if (searchController != null && onSearchChanged != null)
                 SizedBox(
-                  width: 200,
+                  width: 220,
                   child: AppTextField(
                     key: const Key('catalog-grid-search-field'),
                     controller: searchController,
                     placeholder: l10n.searchHint,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     onChanged: onSearchChanged,
                     prefix: const Icon(
                       AppIcons.search,
@@ -1422,11 +1426,16 @@ class _Header extends StatelessWidget {
                             isAsc
                                 ? CupertinoIcons.sort_up
                                 : CupertinoIcons.sort_down,
-                            size: 18,
-                            color: colorScheme.onSurfaceVariant,
+                            size: 17,
+                            color: colorScheme.primary,
                           ),
                           const SizedBox(width: AppSpacing.xs),
-                          Text(sort.label(l10n), style: textTheme.labelLarge),
+                          Text(
+                            sort.label(l10n),
+                            style: textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           const SizedBox(width: AppSpacing.xxs),
                           Icon(
                             CupertinoIcons.chevron_down,

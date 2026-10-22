@@ -1973,6 +1973,9 @@ class _EpisodeShelfActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final light = scheme.brightness == Brightness.light;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1982,21 +1985,35 @@ class _EpisodeShelfActions extends StatelessWidget {
             seasonId: seasonId,
             onSelected: onSelectSeason,
           ),
+        if (seasons.length > 1 && onLocate != null)
+          const SizedBox(width: AppSpacing.xs),
         if (onLocate != null)
           AppButton.icon(
             key: CatalogKeys.locateEpisode,
             onPressed: onLocate,
-            icon: const Icon(
+            icon: Icon(
               AppIcons.episodes,
               fill: AppIcons.filled,
-              size: 18,
+              size: 17,
+              color: scheme.primary,
             ),
             label: Text(l10n.pickEpisode),
-            // 与选季、更多同一层级:中性墨色,不单独染强调色。
             style: AppButtonStyle(
-              foregroundColor: AppUiTheme.of(context).colorScheme.onSurface,
+              foregroundColor: scheme.onSurface,
+              backgroundColor: light
+                  ? scheme.surfaceContainerLowest
+                  : scheme.surfaceContainerHigh,
+              side: BorderSide(
+                color: AppEdge.of(scheme.brightness, strong: true),
+              ),
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              shape: const StadiumBorder(),
+              textStyle: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            variant: AppButtonVariant.plain,
+            variant: AppButtonVariant.outlined,
           ),
       ],
     );
@@ -2083,6 +2100,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     final ranges = <(int, int)>[];
     for (var start = 1; start <= widget.total; start += _pageSize) {
       final end = math.min(start + _pageSize - 1, widget.total);
@@ -2090,10 +2108,31 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
     }
     final viewport = MediaQuery.sizeOf(context);
     return AppDialog(
-      title: Text(l10n.pickEpisode),
+      title: Row(
+        children: [
+          Text(l10n.pickEpisode),
+          const SizedBox(width: AppSpacing.xs),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(AppRadii.pill),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              child: Text(
+                l10n.episodeCount(widget.total),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: AppViewport.fit(420, viewport.width - 80, viewport),
-        height: AppViewport.fit(420, viewport.height * 0.8, viewport),
+        width: AppViewport.fit(440, viewport.width - 80, viewport),
+        height: AppViewport.fit(440, viewport.height * 0.8, viewport),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -2119,6 +2158,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                   tooltip: l10n.pickEpisode,
                   selected: _rangeStart,
                   onSelected: _loadRange,
+                  padding: EdgeInsets.zero,
                   items: [
                     for (final range in ranges)
                       AppMenuEntry(
@@ -2126,20 +2166,39 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                         child: Text('${range.$1}-${range.$2}'),
                       ),
                   ],
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xs,
-                      vertical: AppSpacing.xs,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
+                      border: Border.all(
+                        color: AppEdge.of(scheme.brightness, strong: true),
+                      ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '$_rangeStart-${math.min(_rangeStart + _pageSize - 1, widget.total)}',
-                          style: theme.textTheme.labelLarge,
-                        ),
-                        const Icon(CupertinoIcons.chevron_down, size: 20),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '$_rangeStart-${math.min(_rangeStart + _pageSize - 1, widget.total)}',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            CupertinoIcons.chevron_down,
+                            size: 14,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -2156,19 +2215,52 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                         final number =
                             episode.indexNumber ?? (index + _rangeStart);
                         final selected = number == widget.current;
+                        final played = episode.userData.played;
                         return AppListTile(
                           selected: selected,
-                          leading: Text(
-                            '$number',
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: selected ? FontWeight.w700 : null,
+                          leading: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 28,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? scheme.primary
+                                  : scheme.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(AppRadii.sm),
+                            ),
+                            child: Text(
+                              '$number',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: selected
+                                    ? scheme.onPrimary
+                                    : scheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
                             ),
                           ),
                           title: Text(
                             episode.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: selected ? FontWeight.w600 : null,
+                            ),
                           ),
+                          trailing: played
+                              ? Icon(
+                                  CupertinoIcons.check_mark_circled_solid,
+                                  size: 16,
+                                  color: selected
+                                      ? scheme.primary
+                                      : scheme.onSurfaceVariant,
+                                )
+                              : null,
                           onTap: () => Navigator.of(context).pop(number),
                         );
                       },
@@ -2194,6 +2286,9 @@ class _SeasonJump extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final light = scheme.brightness == Brightness.light;
     MediaItem current = seasons.first;
     for (final season in seasons) {
       if (season.id == seasonId) {
@@ -2206,26 +2301,44 @@ class _SeasonJump extends StatelessWidget {
       tooltip: AppLocalizations.of(context).seasons,
       selected: seasonId,
       onSelected: onSelected,
+      padding: EdgeInsets.zero,
       items: [
         for (final season in seasons)
           AppMenuEntry(value: season.id, child: Text(season.name)),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              current.name,
-              style: AppUiTheme.of(context).textTheme.labelLarge,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: light
+              ? scheme.surfaceContainerLowest
+              : scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(
+            color: AppEdge.of(scheme.brightness, strong: true),
+          ),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 38),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  current.name,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  CupertinoIcons.chevron_down,
+                  size: 14,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
             ),
-            const SizedBox(width: AppSpacing.xxs),
-            Icon(
-              CupertinoIcons.chevron_down,
-              size: 14,
-              color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2963,10 +3076,18 @@ ItemMediaSource? _headerSource(MediaItem item, String? id) {
 const _subtitleOffToken = -1;
 
 AppButtonStyle _detailGhostButtonStyle(AppColorScheme scheme) {
+  final light = scheme.brightness == Brightness.light;
   return AppButtonStyle(
     foregroundColor: scheme.onSurface,
-    side: BorderSide(color: scheme.onSurface.withValues(alpha: 0.22)),
-    minimumSize: const Size(0, 44),
+    backgroundColor: light
+        ? scheme.surfaceContainerLowest.withValues(alpha: 0.88)
+        : scheme.surfaceContainerHigh.withValues(alpha: 0.56),
+    side: BorderSide(
+      color: light
+          ? scheme.outlineVariant
+          : scheme.onSurface.withValues(alpha: 0.22),
+    ),
+    minimumSize: const Size(0, 46),
     shape: const StadiumBorder(),
     padding: const EdgeInsets.symmetric(
       horizontal: AppSpacing.lg,
@@ -3076,10 +3197,11 @@ class _DetailActions extends StatelessWidget {
           key: PlayerKeys.open,
           onPressed: onPlay,
           style: AppButtonStyle(
-            minimumSize: const Size(0, 44),
+            minimumSize: const Size(0, 46),
             shape: const StadiumBorder(),
+            boxShadow: AppShadow.emphasis(scheme.brightness),
             padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xl,
+              horizontal: 26,
               vertical: AppSpacing.sm,
             ),
           ),
@@ -3123,6 +3245,7 @@ class _DetailActions extends StatelessWidget {
             context,
             key: CatalogKeys.favoriteToggle,
             tooltip: favorite ? l10n.phoneFavorited : l10n.phoneFavorite,
+            active: favorite,
             icon: Icon(
               AppIcons.favorite,
               fill: favorite ? AppIcons.filled : AppIcons.outline,
@@ -3139,6 +3262,7 @@ class _DetailActions extends StatelessWidget {
           context,
           key: CatalogKeys.playedToggle,
           tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+          active: played,
           icon: Icon(
             played
                 ? CupertinoIcons.checkmark_circle_fill
@@ -3273,16 +3397,18 @@ class _DetailActions extends StatelessWidget {
 }
 
 /// 详情操作圆钮。浅色详情头已经是纸面，用纸色圆钮；深色头图仍用黑色 scrim，
-/// 白图标在任意剧照上都读得清。
+/// 白图标在任意剧照上都读得清。激活态（已收藏/已看）带有主色容器光环。
 Widget _detailToolButton(
   BuildContext context, {
   Key? key,
   required String tooltip,
   required Widget icon,
   required VoidCallback? onPressed,
+  bool active = false,
 }) {
   final scheme = AppUiTheme.of(context).colorScheme;
-  if (scheme.brightness != Brightness.light) {
+  final light = scheme.brightness == Brightness.light;
+  if (!light && !active) {
     return ScrimIconButton(
       key: key,
       size: ScrimIconButtonSize.large,
@@ -3303,10 +3429,15 @@ Widget _detailToolButton(
       height: ScrimIconButtonSize.large.dimension,
     ),
     style: AppButtonStyle(
-      backgroundColor: scheme.surfaceContainerLowest,
-      foregroundColor: scheme.onSurface,
+      backgroundColor: active
+          ? scheme.primaryContainer
+          : scheme.surfaceContainerLowest,
+      foregroundColor: active ? scheme.onPrimaryContainer : scheme.onSurface,
       disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
-      side: BorderSide(color: scheme.outlineVariant),
+      side: BorderSide(
+        color: active ? scheme.primary : scheme.outlineVariant,
+        width: active ? 1.5 : 1,
+      ),
       shape: const CircleBorder(),
       fixedSize: Size.square(ScrimIconButtonSize.large.dimension),
       minimumSize: Size.square(ScrimIconButtonSize.large.dimension),
@@ -3314,8 +3445,8 @@ Widget _detailToolButton(
   );
 }
 
-/// 播放选项胶囊：「图标 + 当前值 (+ ˅)」，36 高、安静表面、发丝边。
-/// 当前值是要告诉用户的事实，所以写在按钮上；类别说明走 tooltip 与读屏。
+/// 播放选项胶囊：「图标 + 类别标签 + 当前值 (+ ˅)」，38 高、安静表面、发丝边。
+/// 当前值是要告诉用户的事实，所以写在按钮上；类别说明同时展示并走 tooltip 与读屏。
 class _DetailOptionChip extends StatelessWidget {
   const _DetailOptionChip({
     super.key,
@@ -3324,11 +3455,13 @@ class _DetailOptionChip extends StatelessWidget {
     required this.tooltip,
     required this.semanticLabel,
     required this.onPressed,
+    this.category,
     this.dropdown = false,
     this.busy = false,
   });
 
   final IconData icon;
+  final String? category;
   final String value;
   final String tooltip;
   final String semanticLabel;
@@ -3350,7 +3483,8 @@ class _DetailOptionChip extends StatelessWidget {
     final light = scheme.brightness == Brightness.light;
     final muted = light
         ? scheme.onSurfaceVariant
-        : scheme.onSurface.withValues(alpha: .72);
+        : scheme.onSurface.withValues(alpha: .74);
+    final categoryLabel = category;
     return Semantics(
       button: true,
       label: semanticLabel,
@@ -3363,21 +3497,21 @@ class _DetailOptionChip extends StatelessWidget {
           style: AppButtonStyle(
             foregroundColor: scheme.onSurface,
             backgroundColor: light
-                ? scheme.surfaceContainerLowest
-                : scheme.scrim.withValues(alpha: .24),
+                ? scheme.surfaceContainerLowest.withValues(alpha: .92)
+                : scheme.surfaceContainerHigh.withValues(alpha: .54),
             side: BorderSide(
               color: light
                   ? scheme.outlineVariant
-                  : scheme.onSurface.withValues(alpha: .16),
+                  : scheme.onSurface.withValues(alpha: .18),
             ),
-            minimumSize: const Size(0, 36),
+            minimumSize: const Size(0, 38),
             padding: EdgeInsetsDirectional.only(
               start: AppSpacing.sm,
-              end: dropdown ? AppSpacing.xs : AppSpacing.sm,
+              end: dropdown ? AppSpacing.xs + 2 : AppSpacing.sm,
             ),
             shape: const StadiumBorder(),
             textStyle: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
             ),
           ),
           child: Row(
@@ -3387,9 +3521,24 @@ class _DetailOptionChip extends StatelessWidget {
                 dimension: 18,
                 child: busy
                     ? CupertinoActivityIndicator(color: muted, radius: 7)
-                    : Icon(icon, size: 18, color: muted, fill: 1),
+                    : Icon(icon, size: 17, color: scheme.primary, fill: 1),
               ),
               const SizedBox(width: 6),
+              if (categoryLabel != null && categoryLabel.isNotEmpty) ...[
+                Text(
+                  categoryLabel,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 12,
+                  margin: const EdgeInsets.symmetric(horizontal: 7),
+                  color: scheme.onSurface.withValues(alpha: .16),
+                ),
+              ],
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: maxValueWidth),
                 child: Text(
@@ -3399,8 +3548,8 @@ class _DetailOptionChip extends StatelessWidget {
                 ),
               ),
               if (dropdown) ...[
-                const SizedBox(width: 2),
-                Icon(AppIcons.chevronDown, size: 18, color: muted),
+                const SizedBox(width: 3),
+                Icon(AppIcons.chevronDown, size: 17, color: muted),
               ],
             ],
           ),
@@ -3410,7 +3559,7 @@ class _DetailOptionChip extends StatelessWidget {
   }
 }
 
-/// 播放选项下拉：[_DetailOptionChip] 显示当前值，点开就地弹出菜单。
+/// 播放选项下拉：[_DetailOptionChip] 显示类别与当前值，点开就地弹出菜单。
 class _DetailMenuButton<T> extends StatelessWidget {
   const _DetailMenuButton({
     required this.category,
@@ -3463,6 +3612,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
     return _DetailOptionChip(
       key: menuKey,
       icon: icon,
+      category: category,
       value: value,
       tooltip: '$category · $value',
       semanticLabel: '$category，$value',

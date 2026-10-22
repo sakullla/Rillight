@@ -598,28 +598,41 @@ class _PhoneQuickHeader extends StatelessWidget {
                       child: Text(option.label(l10n)),
                     ),
                 ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
+                    border: Border.all(color: AppEdge.of(theme.brightness)),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        CupertinoIcons.sort_down,
-                        size: 15,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        currentSort.label(l10n),
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: scheme.onSurface,
-                          fontWeight: FontWeight.w600,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          CupertinoIcons.sort_down,
+                          size: 14,
+                          color: scheme.primary,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        Text(
+                          currentSort.label(l10n),
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(
+                          CupertinoIcons.chevron_down,
+                          size: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

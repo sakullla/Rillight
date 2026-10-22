@@ -836,7 +836,7 @@ class MobileSeriesPage extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
             AppSpacing.lg,
-            AppSpacing.xs,
+            AppSpacing.md,
             AppSpacing.xs,
           ),
           child: Row(
@@ -856,13 +856,16 @@ class MobileSeriesPage extends StatelessWidget {
                       ),
                     ),
                     if (summary.isNotEmpty)
-                      Text(
-                        summary.join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          summary.join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                       ),
                   ],
@@ -871,15 +874,31 @@ class MobileSeriesPage extends StatelessWidget {
               if (onPickEpisode != null && (total ?? episodes.length) > 1)
                 AppButton.icon(
                   key: CatalogKeys.locateEpisode,
-                  style: AppButtonStyle(minimumSize: const Size(48, 48)),
+                  style: AppButtonStyle(
+                    minimumSize: const Size(48, 36),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    backgroundColor: theme.colorScheme.surfaceContainerLow,
+                    foregroundColor: theme.colorScheme.onSurface,
+                    side: BorderSide(
+                      color: AppEdge.of(theme.brightness, strong: true),
+                    ),
+                    shape: const StadiumBorder(),
+                    textStyle: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   onPressed: onPickEpisode,
-                  icon: const Icon(
+                  icon: Icon(
                     AppIcons.episodes,
                     fill: AppIcons.filled,
-                    size: 18,
+                    size: 16,
+                    color: theme.colorScheme.primary,
                   ),
                   label: Text(l.pickEpisode),
-                  variant: AppButtonVariant.plain,
+                  variant: AppButtonVariant.outlined,
                 ),
             ],
           ),
