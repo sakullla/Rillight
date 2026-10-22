@@ -22,6 +22,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/server_management_widgets.dart';
 
 import 'server_ui_harness.dart';
 
@@ -132,20 +133,13 @@ void main() {
         expect(find.textContaining(label), findsNothing);
         expect(find.textContaining('连接正常'), findsWidgets);
         expect(find.textContaining('ms'), findsWidgets);
-        expect(
-          tester
-              .widget<ui.AppButton>(
-                find.byKey(const Key('server-lines-discover')),
-              )
-              .variant,
-          ui.AppButtonVariant.outlined,
-        );
-        expect(
-          tester
-              .widget<ui.AppButton>(find.byKey(const Key('server-lines-speed')))
-              .variant,
-          ui.AppButtonVariant.tinted,
-        );
+        // Discovery and speed test are secondary actions on the line page.
+        for (final key in ['server-lines-discover', 'server-lines-speed']) {
+          expect(
+            tester.widget<ui.AppActionButton>(find.byKey(Key(key))).tier,
+            ui.AppActionTier.secondary,
+          );
+        }
         expect(auth.savedServers.single.lines.single.latencyMs, isNotNull);
         expect(auth.savedServers.single.lines.single.checkFailureKind, isNull);
       },
@@ -736,12 +730,73 @@ void main() {
         await pumpServerSelection(tester, auth, phone: phone);
         await openServerEditor(tester, id);
         await serverUiTap(tester, const Key('server-editor-add-line'));
+        // The frame alone titles the step; the fields card has no heading.
+        expect(find.text('添加线路'), findsOneWidget);
+        expect(find.text('保存服务器后生效'), findsOneWidget);
+        final cancel = find.byKey(const Key('server-line-cancel'));
+        final done = find.byKey(const Key('server-line-done'));
+        expect(
+          tester.widget<ui.AppActionButton>(cancel).tier,
+          ui.AppActionTier.tertiary,
+        );
+        expect(
+          tester.widget<ui.AppActionButton>(done).tier,
+          ui.AppActionTier.primary,
+        );
+        final field = tester.getRect(
+          find.byKey(const Key('server-line-address')),
+        );
+        final cancelRect = tester.getRect(cancel);
+        final doneRect = tester.getRect(done);
+        expect(cancelRect.top, closeTo(doneRect.top, 1));
+        expect(cancelRect.right, lessThanOrEqualTo(doneRect.left));
+        if (phone) {
+          // Phone: the two actions share the whole row equally.
+          expect(cancelRect.width, closeTo(doneRect.width, 1));
+          expect(
+            cancelRect.width + doneRect.width,
+            greaterThan(field.width * .9),
+          );
+        } else {
+          // Desktop: trailing, content-wide, never stretched across the panel.
+          expect(doneRect.right, closeTo(field.right, 24));
+          expect(cancelRect.width + doneRect.width, lessThan(field.width * .6));
+        }
+
+        // Cancel leaves the draft untouched and returns to the editor.
+        await tester.enterText(
+          find.byKey(const Key('server-line-address')),
+          wan.baseUrl.toString(),
+        );
+        await serverUiTap(tester, const Key('server-line-cancel'));
+        expect(find.byKey(const Key('server-line-address')), findsNothing);
+        expect(find.byKey(const Key('server-editor-add-line')), findsOneWidget);
+        expect(find.text('draft-wan.test:8096'), findsNothing);
+        expect(auth.savedServers.single.lines, hasLength(1));
+
+        // Invalid and duplicate addresses are reported under the address
+        // field, and the form stays open.
+        await serverUiTap(tester, const Key('server-editor-add-line'));
+        Finder addressError(String text) => find.descendant(
+          of: find.byKey(const Key('server-line-address')),
+          matching: find.text(text),
+        );
+        await tester.enterText(
+          find.byKey(const Key('server-line-address')),
+          'ftp://draft-invalid.test',
+        );
+        await serverUiTap(tester, const Key('server-line-done'));
+        expect(addressError('请输入有效的服务器地址'), findsOneWidget);
+        expect(find.byKey(const Key('server-line-done')), findsOneWidget);
         await tester.enterText(
           find.byKey(const Key('server-line-address')),
           lan.baseUrl.toString(),
         );
+        await tester.pump();
+        expect(addressError('请输入有效的服务器地址'), findsNothing);
         await serverUiTap(tester, const Key('server-line-done'));
-        expect(find.text('请填写服务器名称和有效地址；线路地址不能重复。'), findsOneWidget);
+        expect(addressError('这个地址已在线路列表中'), findsOneWidget);
+        expect(find.byKey(const Key('server-line-done')), findsOneWidget);
         expect(auth.savedServers.single.lines, hasLength(1));
         await tester.enterText(
           find.byKey(const Key('server-line-address')),
@@ -886,11 +941,43 @@ void main() {
       await tvPress(tester, const Key('tv-nav-user'));
       await tvOpenEditor(tester, serverId);
       await tvPress(tester, const Key('server-editor-add-line'));
+      // Cancel and done keep their own width at the trailing edge.
+      final addressRect = tester.getRect(
+        find.byKey(const Key('server-line-address')),
+      );
+      final cancelRect = tester.getRect(
+        find.byKey(const Key('server-line-cancel')),
+      );
+      final doneRect = tester.getRect(
+        find.byKey(const Key('server-line-done')),
+      );
+      expect(
+        cancelRect.width + doneRect.width,
+        lessThan(addressRect.width / 2),
+      );
+      expect(doneRect.right, closeTo(addressRect.right, 2));
+      // A duplicate address is reported under the address and keeps the form.
+      await tvEdit(
+        tester,
+        const Key('server-line-address'),
+        wan.baseUrl.toString(),
+      );
+      await tvPress(tester, const Key('server-line-done'));
+      final error = find.byKey(const Key('server-line-address-error'));
+      expect(tester.widget<Text>(error).data, '这个地址已在线路列表中');
+      expect(
+        tester.getTopLeft(error).dy,
+        greaterThan(
+          tester.getBottomLeft(find.byKey(const Key('server-line-address'))).dy,
+        ),
+      );
+      expect(find.byKey(const Key('server-line-done')), findsOneWidget);
       await tvEdit(
         tester,
         const Key('server-line-address'),
         wan3.baseUrl.toString(),
       );
+      expect(error, findsNothing);
       await tvPress(tester, const Key('server-line-done'));
       // A draft cannot change the running connection before Save.
       expect(auth.savedServers.single.lines, hasLength(2));
@@ -1015,9 +1102,9 @@ void main() {
   testWidgets('narrow phone keeps the whole line label readable', (
     tester,
   ) async {
-    // 线路摘要曾被 MainAxisSize.min + Flexible 压成 "captur…"：
-    // 收缩行里 Flexible 拿到的剩余宽度太小，线路名读不出来。
-    // 截图中被截断的是真实长标签：自动 + 一条长线路地址。
+    // 线路摘要曾被 22 字符预算从中间截断成 "capture-mirror.t…:8096"。
+    // 现在不截断:主机:端口单行放不下时先去掉端口,再折成两行;
+    // 完整安全地址由 tooltip 提供。
     final remote = FakeEmbyServer();
     final relay = FakeEmbyServer(
       serverId: remote.serverId,
@@ -1037,7 +1124,7 @@ void main() {
         password: 'correct-horse',
       ),
     );
-    // 再加一条长地址线路,并选为当前,复现手机列表里被截断的长文案。
+    // 再加一条长地址线路,并选为当前,复现手机列表里的长文案。
     await tester.runAsync(
       () => auth.addLine(
         auth.savedServers.single.id,
@@ -1063,11 +1150,39 @@ void main() {
       matching: find.byType(Text),
     );
     expect(label, findsOneWidget);
-    // 自动模式下没有昵称时,主机名只是排查线索,不该与"自动选择"前缀
-    // 抢宽度——超出的部分会被 ellipsis 砍成"captur…",读不出线路。
     final labelWidget = tester.widget<Text>(label);
-    expect(labelWidget.data, isNot(contains('capture-relay')));
-    expect(labelWidget.data!.length, lessThanOrEqualTo(24));
+    // 不在中间插省略号:要么是完整的主机:端口,要么是去掉端口的完整主机名。
+    expect(labelWidget.data, isNot(contains('…')));
+    expect(
+      labelWidget.data,
+      anyOf(
+        'capture-relay-tunnel-node.example.test:8096',
+        'capture-relay-tunnel-node.example.test',
+      ),
+    );
+    // 360 宽放不下整串地址:去掉端口后折行,不出现单行截断。
+    expect(labelWidget.data, 'capture-relay-tunnel-node.example.test');
+    expect(labelWidget.maxLines, 2);
+    // 完整的安全地址同时是悬停 tooltip 和语义 tooltip。
+    const full = 'http://capture-relay-tunnel-node.example.test:8096';
+    expect(
+      find.descendant(
+        of: chip,
+        matching: find.byWidgetPredicate(
+          (w) => w is ui.AppTooltip && w.message == full,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: chip,
+        matching: find.byWidgetPredicate(
+          (w) => w is Semantics && w.properties.tooltip == full,
+        ),
+      ),
+      findsOneWidget,
+    );
     // 芯片横向撑满内容列,拿到的是整行的可变宽度。
     final chipWidth = tester.getSize(chip).width;
     final cardWidth = tester.getSize(find.byKey(Key('server-enter-$id'))).width;
@@ -1078,6 +1193,80 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  for (final (width, expected) in [
+    (1200.0, 'capture-mirror.test:8096'),
+    // 测试字体每个字符等宽于字号,412 宽放不下主机:端口,先去掉端口。
+    (412.0, 'capture-mirror.test'),
+  ]) {
+    testWidgets('an unnamed line shows its full host at ${width.toInt()}', (
+      tester,
+    ) async {
+      // 无昵称线路显示完整主机名(含非默认端口),不再按字符预算截断。
+      final remote = FakeEmbyServer(
+        baseUrl: Uri.parse('http://capture-mirror.test:8096'),
+      );
+      final auth = AuthController.memory(
+        client: EmbyClient(
+          device: _device,
+          dio: dioForFakeEmby(_SameServerAdapter([remote])),
+        ),
+      );
+      addTearDown(auth.dispose);
+      await tester.runAsync(
+        () => auth.connect(
+          address: remote.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpServerSelection(tester, auth, phone: width < 600);
+      final id = auth.savedServers.single.id;
+      final chip = find.byKey(Key('server-lines-$id'));
+      expect(
+        find.descendant(of: chip, matching: find.text(expected)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: chip, matching: find.textContaining('…')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+  }
+
+  test('line host labels keep the whole host and drop only default ports', () {
+    ServerLine line(String address, [String? nickname]) =>
+        ServerLine(id: 'l', address: address, nickname: nickname);
+    expect(
+      serverLineHostLabel(line('http://capture-mirror.test:8096')),
+      'capture-mirror.test:8096',
+    );
+    expect(
+      serverLineHostLabel(
+        line('http://capture-mirror.test:8096'),
+        withPort: false,
+      ),
+      'capture-mirror.test',
+    );
+    expect(
+      serverLineHostLabel(
+        line('https://a.very-long-relay-subdomain.media.example.test'),
+      ),
+      'a.very-long-relay-subdomain.media.example.test',
+    );
+    expect(serverLineHostLabel(line('https://emby.test:443')), 'emby.test');
+    expect(serverLineHostLabel(line('http://emby.test:80')), 'emby.test');
+    expect(serverLineHostLabel(line('http://[::1]:8096')), '[::1]:8096');
+    expect(serverLineLabel(line('http://x.test:8096', '家里')), '家里');
+    expect(
+      serverLineLabel(line('http://x.test:8096', '家里'), withPort: false),
+      '家里',
+    );
+  });
 
   testWidgets('a named line keeps its nickname next to the mode', (
     tester,

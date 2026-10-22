@@ -2504,7 +2504,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversLineLast => '至少保留一条线路';
 
   @override
-  String get serversLineDraftHint => '返回后继续编辑，点击服务器表单的“保存”才生效。';
+  String get serversLineDraftHint => '保存服务器后生效';
+
+  @override
+  String get serversLineDuplicate => '这个地址已在线路列表中';
 
   @override
   String get serversAdvanced => '高级设置';

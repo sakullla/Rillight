@@ -20,6 +20,7 @@ import '../helpers/cupertino_test_app.dart';
 
 import 'package:rillight/auth/server_password_form.dart';
 import 'package:rillight/auth/server_ui.dart';
+import 'package:rillight/auth/server_management_widgets.dart';
 import 'package:rillight/auth/server_access.dart';
 
 import 'package:rillight/emby/emby_client.dart';
@@ -727,6 +728,136 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets(
+    'server card marks the current server and tiers its failure actions',
+    (tester) async {
+      final saved = _saved('one', '家庭影院', ['http://capture-mirror.test:8096']);
+      var retried = 0, switched = 0;
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          home: CupertinoPageScaffold(
+            child: SizedBox(
+              width: 360,
+              child: ServerSelectionTile(
+                server: saved,
+                current: true,
+                locked: false,
+                error: '无法连接服务器',
+                onEnter: () => retried++,
+                onLines: () => switched++,
+                onAction: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      // 「当前使用」既有图标也有文字,不只靠颜色。
+      final pill = tester.widget<ServerStatusPill>(
+        find.byType(ServerStatusPill),
+      );
+      expect(pill.label, '当前使用');
+      expect(pill.icon, isNotNull);
+      final retry = find.byKey(const Key('server-retry-one'));
+      final switchLine = find.byKey(const Key('server-switch-line-one'));
+      expect(
+        tester.widget<ui.AppActionButton>(retry).tier,
+        ui.AppActionTier.secondary,
+      );
+      expect(
+        tester.widget<ui.AppActionButton>(switchLine).tier,
+        ui.AppActionTier.tertiary,
+      );
+      await tester.tap(retry);
+      await tester.tap(switchLine);
+      expect((retried, switched), (1, 1));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final (phone, width, scale) in [
+    (false, 1024.0, 1.0),
+    (true, 360.0, 1.0),
+    (true, 360.0, 2.0),
+  ]) {
+    testWidgets(
+      'server flows keep one primary and fit at ${width.toInt()} x$scale',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 780);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final auth = controller(
+          servers: MemoryServerListStore(
+            ServerListSnapshot(
+              servers: [
+                _saved('one', '家庭影院', ['http://capture-mirror.test:8096']),
+                _saved('two', '书房里那台名字很长很长的服务器', ['http://emby-two.test:8096']),
+              ],
+            ),
+          ),
+        );
+        addTearDown(auth.dispose);
+        await auth.restore();
+        await pumpServerSelection(tester, auth, phone: phone, scale: scale);
+        int primaries() => tester
+            .widgetList<ui.AppActionButton>(find.byType(ui.AppActionButton))
+            .where((button) => button.tier == ui.AppActionTier.primary)
+            .length;
+        ui.AppActionTier tier(String key) =>
+            tester.widget<ui.AppActionButton>(find.byKey(Key(key))).tier;
+
+        // The hub's one primary action is adding a server.
+        expect(tier('server-add'), ui.AppActionTier.primary);
+        expect(primaries(), 1);
+        expect(tester.takeException(), isNull);
+
+        // Search empty state: recovering is secondary.
+        await tester.enterText(find.byKey(const Key('server-search')), 'none');
+        await settle(tester);
+        expect(tier('server-empty-clear'), ui.AppActionTier.secondary);
+        expect(primaries(), 1);
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('server-empty-clear'));
+
+        // Removal confirmation: cancel is the tertiary text action.
+        await serverUiTap(tester, const Key('server-more-two'));
+        await serverUiTap(tester, const Key('server-action-remove-two'));
+        expect(tier('server-remove-cancel'), ui.AppActionTier.tertiary);
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('server-remove-cancel'));
+        expect(auth.savedServers, hasLength(2));
+
+        // Rename, password and the line form.
+        await openServerEditor(tester, 'two');
+        await tester.enterText(
+          find.byKey(const Key('server-editor-name')),
+          '一个非常非常长的服务器名称用于检查标题与头像不会溢出',
+        );
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('server-editor-password'));
+        expect(find.byKey(const Key('server-password-done')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('server-flow-back'));
+        await serverUiTap(tester, const Key('server-editor-add-line'));
+        expect(primaries(), 1);
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('server-line-cancel'));
+        await serverUiTap(tester, const Key('server-flow-back'));
+        expect(auth.savedServers.last.displayName, '书房里那台名字很长很长的服务器');
+
+        // Adding a server, including its advanced options.
+        await serverUiTap(tester, const Key('server-add'));
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('provider-advanced'));
+        expect(tester.takeException(), isNull);
+        await serverUiTap(tester, const Key('server-add-paste'));
+        expect(tier('server-paste-parse'), ui.AppActionTier.primary);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+  }
 
   testWidgets(
     'explicit paste chooses a group and keeps editable partial fields without writes',

@@ -96,6 +96,7 @@ class _TvServerEditorState extends ServerEditorState {
         key: ValueKey(editing?.id ?? 'new'),
         line: editing,
         otherLines: lines,
+        onCancel: back,
         onDone: (value) {
           setState(() {
             final index = lines.indexWhere((line) => line.id == value.id);
@@ -328,10 +329,9 @@ class _TvServerEditorState extends ServerEditorState {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            serverLineLabel(line),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          ServerLineLabelText(
+                            full: serverLineLabel(line),
+                            compact: serverLineLabel(line, withPort: false),
                           ),
                           Text(
                             serverSafeAddress(line.address),

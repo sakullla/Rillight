@@ -4813,8 +4813,14 @@ abstract class AppLocalizations {
   /// No description provided for @serversLineDraftHint.
   ///
   /// In zh, this message translates to:
-  /// **'返回后继续编辑，点击服务器表单的“保存”才生效。'**
+  /// **'保存服务器后生效'**
   String get serversLineDraftHint;
+
+  /// No description provided for @serversLineDuplicate.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个地址已在线路列表中'**
+  String get serversLineDuplicate;
 
   /// No description provided for @serversAdvanced.
   ///

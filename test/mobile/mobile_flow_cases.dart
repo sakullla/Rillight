@@ -1657,7 +1657,9 @@ void main() {
       await settle(tester);
       expect(find.byType(ServerSelectionPage), findsOneWidget);
       expect(find.byKey(const Key('server-search')), findsOneWidget);
-      expect(find.textContaining('emby.test:8096'), findsWidgets);
+      // The line chip shows the whole host; when host:port does not fit one
+      // line it drops the port first instead of cutting the host.
+      expect(find.textContaining('emby.test'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

@@ -608,18 +608,14 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           backLabel: l.serversDismiss,
           dismissible: true,
           scroll: false,
-          action: AppButton.icon(
+          // 添加服务器是这个视图唯一的主操作。
+          action: AppActionButton(
             key: const Key('server-add'),
+            tier: AppActionTier.primary,
             onPressed: () => showFlow('add'),
-            icon: const Icon(AppIcons.add, size: 18),
-            label: Text(widget.phone ? l.serversAddShort : l.addServer),
+            icon: AppIcons.add,
+            label: widget.phone ? l.serversAddShort : l.addServer,
             semanticLabel: l.addServer,
-            variant: AppButtonVariant.filled,
-            minimumSize: const Size(44, 40),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            style: AppButtonStyle(
-              boxShadow: AppShadow.emphasis(colors.brightness),
-            ),
           ),
           child: Column(
             mainAxisSize: shrink ? MainAxisSize.min : MainAxisSize.max,
@@ -839,21 +835,20 @@ class _ServerEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
+            // 顶栏已有主操作「添加服务器」,空态按钮降为次级,一屏只有一个 primary。
             if (empty)
-              AppButton.icon(
+              AppActionButton(
                 key: const Key('server-empty-add'),
                 onPressed: onAdd,
-                variant: AppButtonVariant.filled,
-                minimumSize: const Size(64, 46),
-                icon: const Icon(AppIcons.add, size: 18),
-                label: Text(l.addServer),
+                icon: AppIcons.add,
+                label: l.addServer,
               )
             else
-              AppButton(
+              AppActionButton(
                 key: const Key('server-empty-clear'),
                 onPressed: onClear,
-                variant: AppButtonVariant.tinted,
-                child: Text(l.serversClearSearch),
+                icon: AppIcons.close,
+                label: l.serversClearSearch,
               ),
           ],
         ),

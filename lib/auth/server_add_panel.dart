@@ -112,13 +112,24 @@ class ServerAddPanelState extends State<ServerAddPanel> {
           ),
           if (error != null) ServerFeedback(error!),
           const SizedBox(height: 20),
-          AppButton.icon(
-            key: const Key('server-paste-parse'),
-            onPressed: parse,
-            variant: AppButtonVariant.filled,
-            minimumSize: const Size(48, 48),
-            icon: const Icon(AppIcons.check, size: 18),
-            label: Text(l.serversParse),
+          // The step's one primary action: full row on phone, trailing and
+          // content-wide in the desktop panel.
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: ServerPanelScope.maybeOf(context)?.compact == true
+                    ? double.infinity
+                    : 0,
+              ),
+              child: AppActionButton(
+                key: const Key('server-paste-parse'),
+                tier: AppActionTier.primary,
+                onPressed: parse,
+                icon: AppIcons.check,
+                label: l.serversParse,
+              ),
+            ),
           ),
         ],
       );

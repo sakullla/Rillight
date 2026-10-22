@@ -7,44 +7,24 @@ import 'login_widgets.dart';
 import 'server_list_store.dart';
 import 'server_ui.dart';
 
-/// 列表里的紧凑主机名:超长时省略中间的主机部分并加省略号,
-/// 避免整串地址把线路芯片撑爆成 "captur…"。完整地址仍见于编辑页。
-String serverLineHostLabel(ServerLine line) {
+/// 无昵称线路的标签:完整主机名,非默认端口时带端口
+/// (capture-mirror.test:8096)。不截断、不在中间插省略号;放不下时由
+/// [ServerLineLabelText] 先去掉端口([withPort] 为 false),再折成两行。
+String serverLineHostLabel(ServerLine line, {bool withPort = true}) {
   final uri = Uri.tryParse(line.address);
-  final host = (uri?.host.isNotEmpty == true ? uri!.host : line.hostLabel)
-      .trim();
-  final port = uri?.hasPort == true ? uri!.port : null;
-  // 默认端口不重复显示;hostLabel 本身已带端口时也不再追加。
-  final tail = (port == null || port == 80 || port == 443) ? '' : ':$port';
-  final bare = tail.isEmpty ? host : host.replaceFirst(RegExp(r':\d+$'), '');
-  final labels = bare.split('.').where((part) => part.isNotEmpty).toList();
-  // 域名比预算长时保留最后两段(capture-mirror.test → mirror.test),
-  // 去掉没有辨识价值的前导子域;仍超长才省略前缀。
-  String name;
-  if (labels.length > 2 &&
-      (bare.length + tail.length) > _serverLineHostBudget) {
-    name = labels.sublist(labels.length - 2).join('.');
-  } else {
-    name = bare;
-  }
-  final withPort = '$name$tail';
-  if (withPort.length <= _serverLineHostBudget) return withPort;
-  final keep = _serverLineHostBudget - tail.length - 1;
-  if (keep <= 1) return withPort;
-  return '${withPort.substring(0, keep)}…$tail';
+  if (uri == null || uri.host.isEmpty) return line.hostLabel.trim();
+  // IPv6 字面量带回方括号,端口才不会与地址混在一起。
+  final host = uri.host.contains(':') ? '[${uri.host}]' : uri.host;
+  final port = uri.hasPort ? uri.port : null;
+  // 默认端口不重复显示。
+  if (!withPort || port == null || port == 80 || port == 443) return host;
+  return '$host:$port';
 }
 
-/// 线路芯片里主机名连端口的显示预算,超出即省略。
-///
-/// 无昵称时标签就是主机名本身,芯片里约 130px 可用,约合 22 个西文字符。
-/// 取 22 让"capture-mirror.test:8096"这类常见地址完整显示,
-/// 只把真正超长的多级子域收成省略号。
-const int _serverLineHostBudget = 22;
-
-String serverLineLabel(ServerLine line) =>
+String serverLineLabel(ServerLine line, {bool withPort = true}) =>
     line.nickname?.trim().isNotEmpty == true
     ? line.nickname!
-    : serverLineHostLabel(line);
+    : serverLineHostLabel(line, withPort: withPort);
 String serverSafeAddress(String address) {
   final uri = Uri.tryParse(address);
   if (uri == null || uri.host.isEmpty) return '';
@@ -56,19 +36,81 @@ String serverSafeAddress(String address) {
   ).toString();
 }
 
-String serverLineSummary(AppLocalizations l, SavedServer server) {
+String serverLineSummary(
+  AppLocalizations l,
+  SavedServer server, {
+  bool withPort = true,
+}) {
   final active = server.activeLine;
   if (active == null) return '—';
-  if (!server.lineSelection.isAutomatic) return serverLineLabel(active);
+  if (!server.lineSelection.isAutomatic) {
+    return serverLineLabel(active, withPort: withPort);
+  }
   // 昵称是用户自己起的短名字,照常显示,只在前面标出当前模式。
   final nickname = active.nickname?.trim();
   if (nickname != null && nickname.isNotEmpty) {
     return '${l.serversAutomatic} · $nickname';
   }
-  // 没有昵称时只显示紧凑主机名:"自动选择 · "这六个字在 360dp 上要占掉
-  // 半个芯片,后面真正有用的主机名就会被 ellipsis 砍成"captur…"。
-  // 自动模式由芯片上的闪电图标表达,文字里不必重复。
-  return serverLineHostLabel(active);
+  // 没有昵称时只显示主机名:"自动选择 · "这六个字在 360dp 上要占掉
+  // 半个芯片,挤掉真正有用的主机名。自动模式由芯片上的闪电图标表达,
+  // 文字里不必重复。
+  return serverLineHostLabel(active, withPort: withPort);
+}
+
+/// 线路标签的自适应排布,三端的线路入口共用:
+///
+/// 1. [full](主机:端口)单行放得下就单行显示;
+/// 2. 放不下时改用 [compact](去掉端口的主机名),单行显示;
+/// 3. 仍放不下才折行,最多 [maxLines] 行。
+///
+/// 任何一档都不在中间插入省略号;完整地址由调用方的 tooltip 或语义
+/// label 提供。
+class ServerLineLabelText extends StatelessWidget {
+  const ServerLineLabelText({
+    super.key,
+    required this.full,
+    String? compact,
+    this.style,
+    this.maxLines = 2,
+  }) : compact = compact ?? full;
+
+  final String full, compact;
+  final TextStyle? style;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final resolved = DefaultTextStyle.of(context).style.merge(style);
+      final direction = Directionality.of(context);
+      final scaler = MediaQuery.textScalerOf(context);
+      bool fits(String text) {
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: resolved),
+          textDirection: direction,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout(maxWidth: box.maxWidth);
+        final result = !painter.didExceedMaxLines;
+        painter.dispose();
+        return result;
+      }
+
+      if (!box.maxWidth.isFinite || fits(full)) {
+        return Text(full, maxLines: 1, softWrap: false, style: style);
+      }
+      if (compact != full && fits(compact)) {
+        return Text(compact, maxLines: 1, softWrap: false, style: style);
+      }
+      return Text(
+        compact,
+        maxLines: maxLines,
+        softWrap: true,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      );
+    },
+  );
 }
 
 String serverOperationFailure(
@@ -333,6 +375,20 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
                                     label: widget.locked
                                         ? l.serversLines
                                         : serverLineSummary(l, server),
+                                    compactLabel: widget.locked
+                                        ? null
+                                        : serverLineSummary(
+                                            l,
+                                            server,
+                                            withPort: false,
+                                          ),
+                                    address:
+                                        widget.locked ||
+                                            server.activeLine == null
+                                        ? null
+                                        : serverSafeAddress(
+                                            server.activeLine!.address,
+                                          ),
                                     icon: widget.locked
                                         ? AppIcons.lock
                                         : server.lineSelection.isAutomatic
@@ -390,28 +446,23 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                 child: ServerFeedbackCard(
                   widget.error!,
+                  // 重试是这里的次级操作,切换线路为第三级纯文字。
                   action: Wrap(
                     spacing: 6,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.end,
                     children: [
-                      AppButton(
-                        onPressed: widget.busy ? null : widget.onEnter,
-                        variant: AppButtonVariant.outlined,
-                        minimumSize: const Size(44, 36),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        child: Text(l.serversRetry),
-                      ),
-                      AppButton(
+                      AppActionButton(
+                        key: Key('server-switch-line-${server.id}'),
+                        tier: AppActionTier.tertiary,
                         onPressed: widget.busy ? null : widget.onLines,
-                        variant: AppButtonVariant.tinted,
-                        minimumSize: const Size(44, 36),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        child: Text(l.serversSwitchLine),
+                        label: l.serversSwitchLine,
+                      ),
+                      AppActionButton(
+                        key: Key('server-retry-${server.id}'),
+                        icon: AppIcons.refresh,
+                        onPressed: widget.busy ? null : widget.onEnter,
+                        label: l.serversRetry,
                       ),
                     ],
                   ),
@@ -426,15 +477,22 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
 
 /// The line entry on a server row: mode icon, "自动选择 · 家庭直连", the last
 /// known health of that line and a chevron. Opens the line picker directly.
+///
+/// The label never shortens in the middle: host and port on one line, then
+/// the host alone, then two lines. The full safe address is both the hover
+/// tooltip and the semantic tooltip.
 class _ServerLineChip extends StatefulWidget {
   const _ServerLineChip({
     super.key,
     required this.label,
     required this.icon,
     required this.onTap,
+    this.compactLabel,
+    this.address,
     this.health,
   });
   final String label;
+  final String? compactLabel, address;
   final IconData icon;
   final VoidCallback? onTap;
   final ServerTone? health;
@@ -449,7 +507,8 @@ class _ServerLineChipState extends State<_ServerLineChip> {
     final theme = AppUiTheme.of(context);
     final colors = theme.colorScheme;
     final dark = colors.brightness == Brightness.dark;
-    return AppSurfaceAction(
+    final address = widget.address;
+    final chip = AppSurfaceAction(
       onTap: widget.onTap,
       onHover: (value) => setState(() => hovered = value),
       borderRadius: BorderRadius.circular(AppRadii.pill),
@@ -478,10 +537,9 @@ class _ServerLineChipState extends State<_ServerLineChip> {
             ),
             const SizedBox(width: 7),
             Flexible(
-              child: Text(
-                widget.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: ServerLineLabelText(
+                full: widget.label,
+                compact: widget.compactLabel,
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: colors.onSurface,
                   fontWeight: FontWeight.w600,
@@ -501,6 +559,11 @@ class _ServerLineChipState extends State<_ServerLineChip> {
           ],
         ),
       ),
+    );
+    if (address == null || address.isEmpty) return chip;
+    return AppTooltip(
+      message: address,
+      child: Semantics(tooltip: address, child: chip),
     );
   }
 }

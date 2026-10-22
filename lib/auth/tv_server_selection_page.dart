@@ -444,8 +444,13 @@ class _TvServerSelectionState extends ServerSelectionPageState {
                             ),
                           ),
                           const SizedBox(width: 20),
-                          SizedBox(
-                            width: 204 * TvDesign.scaleOf(context),
+                          // Wide enough for a full host:port on one line;
+                          // shorter labels keep a stable minimum target.
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minWidth: 204 * TvDesign.scaleOf(context),
+                              maxWidth: 340 * TvDesign.scaleOf(context),
+                            ),
                             child: TvAction(
                               key: Key('server-lines-${server.id}'),
                               focusNode: node('server-lines-${server.id}'),
@@ -461,13 +466,21 @@ class _TvServerSelectionState extends ServerSelectionPageState {
                                     ? AppIcons.bolt
                                     : AppIcons.route,
                               ),
-                              child: Text(
-                                !widget.auth.serverAccess.allows(server.id)
-                                    ? l.serversLines
-                                    : serverLineSummary(l, server),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              child: !widget.auth.serverAccess.allows(server.id)
+                                  ? Text(l.serversLines, maxLines: 1)
+                                  : Semantics(
+                                      tooltip: serverSafeAddress(
+                                        server.activeLine?.address ?? '',
+                                      ),
+                                      child: ServerLineLabelText(
+                                        full: serverLineSummary(l, server),
+                                        compact: serverLineSummary(
+                                          l,
+                                          server,
+                                          withPort: false,
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ),
                           const SizedBox(width: 20),

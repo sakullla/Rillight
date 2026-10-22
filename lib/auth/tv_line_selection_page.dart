@@ -139,6 +139,7 @@ class TvServerLineFields extends ServerLineFields {
     super.key,
     super.line,
     required super.onDone,
+    required super.onCancel,
     required super.otherLines,
   });
   @override
@@ -147,8 +148,24 @@ class TvServerLineFields extends ServerLineFields {
 
 class _TvLineFieldsState extends ServerLineFieldsState {
   @override
+  void initState() {
+    super.initState();
+    address.addListener(addressChanged);
+  }
+
+  @override
+  void dispose() {
+    address.removeListener(addressChanged);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final s = TvDesign.scaleOf(context);
+    // The frame titles the step; the address problem sits right under the
+    // address, and the two actions keep their own width on the trailing edge.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -165,15 +182,65 @@ class _TvLineFieldsState extends ServerLineFieldsState {
           controller: address,
           keyboardType: TextInputType.url,
         ),
-        const SizedBox(height: 16),
-        Text(l.serversLineDraftHint),
-        if (error != null) ServerFeedback(error!),
+        if (error != null)
+          Padding(
+            padding: EdgeInsets.fromLTRB(16 * s, 8 * s, 16 * s, 0),
+            child: Semantics(
+              liveRegion: true,
+              child: Row(
+                children: [
+                  Icon(
+                    AppIcons.error,
+                    size: 18 * s,
+                    color: theme.colorScheme.error,
+                    fill: AppIcons.filled,
+                  ),
+                  SizedBox(width: 8 * s),
+                  Expanded(
+                    child: Text(
+                      error!,
+                      key: const Key('server-line-address-error'),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         const SizedBox(height: 20),
-        TvAction(
-          key: const Key('server-line-done'),
-          onPressed: done,
-          emphasized: true,
-          child: Text(l.serversDone),
+        Row(
+          children: [
+            Icon(
+              AppIcons.info,
+              size: 18 * s,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            SizedBox(width: 8 * s),
+            Expanded(
+              child: Text(
+                l.serversLineDraftHint,
+                key: const Key('server-line-draft-hint'),
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+            SizedBox(width: 20 * s),
+            TvAction(
+              key: ServerLineFieldsState.cancelKey,
+              onPressed: widget.onCancel,
+              child: Text(l.serversCancel),
+            ),
+            SizedBox(width: 16 * s),
+            TvAction(
+              key: ServerLineFieldsState.doneKey,
+              onPressed: done,
+              emphasized: true,
+              pill: true,
+              leading: const Icon(AppIcons.check),
+              child: Text(l.serversDone),
+            ),
+          ],
         ),
       ],
     );

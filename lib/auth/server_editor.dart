@@ -174,6 +174,7 @@ class ServerEditorState extends State<ServerEditor> {
         key: ValueKey(editing?.id ?? 'new'),
         line: editing,
         otherLines: lines,
+        onCancel: back,
         onDone: (value) => setState(() {
           final index = lines.indexWhere((line) => line.id == value.id);
           if (index < 0) {
@@ -499,7 +500,12 @@ class ServerEditorState extends State<ServerEditor> {
                   ),
                   title: Row(
                     children: [
-                      Flexible(child: Text(serverLineLabel(lines[i]))),
+                      Flexible(
+                        child: ServerLineLabelText(
+                          full: serverLineLabel(lines[i]),
+                          compact: serverLineLabel(lines[i], withPort: false),
+                        ),
+                      ),
                       if (lines[i].id == widget.server.activeLine?.id) ...[
                         const SizedBox(width: 8),
                         ServerStatusPill(

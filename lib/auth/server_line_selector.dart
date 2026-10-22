@@ -199,41 +199,27 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
                   '${server.username} · ${l.serversLineCount(server.lines.length)}',
             ),
             const SizedBox(height: 12),
+            // Discovery and speed test are secondary: choosing a line below
+            // is what this page is for.
             Row(
               children: [
                 Expanded(
-                  child: AppButton.icon(
+                  child: AppActionButton(
                     key: const Key('server-lines-discover'),
                     onPressed: idle ? discover : null,
-                    variant: AppButtonVariant.outlined,
-                    minimumSize: const Size(48, 44),
-                    icon: discovering
-                        ? const CupertinoActivityIndicator(radius: 8)
-                        : const Icon(AppIcons.refresh, size: 17),
-                    label: Text(
-                      discovering
-                          ? l.serversDiscoveringLines
-                          : l.serversDiscoverLines,
-                    ),
+                    icon: discovering ? AppIcons.hourglass : AppIcons.refresh,
+                    label: discovering
+                        ? l.serversDiscoveringLines
+                        : l.serversDiscoverLines,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: AppButton.icon(
+                  child: AppActionButton(
                     key: const Key('server-lines-speed'),
                     onPressed: idle ? checkAll : null,
-                    variant: AppButtonVariant.tinted,
-                    minimumSize: const Size(48, 44),
-                    icon: testing
-                        ? const CupertinoActivityIndicator(radius: 8)
-                        : const Icon(
-                            AppIcons.bolt,
-                            fill: AppIcons.filled,
-                            size: 17,
-                          ),
-                    label: Text(
-                      testing ? l.serversSpeedTesting : l.serversSpeedTest,
-                    ),
+                    icon: testing ? AppIcons.hourglass : AppIcons.bolt,
+                    label: testing ? l.serversSpeedTesting : l.serversSpeedTest,
                   ),
                 ),
               ],
@@ -390,8 +376,9 @@ class ServerLineChoice extends StatelessWidget {
       title: Row(
         children: [
           Flexible(
-            child: Text(
-              serverLineLabel(line),
+            child: ServerLineLabelText(
+              full: serverLineLabel(line),
+              compact: serverLineLabel(line, withPort: false),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),

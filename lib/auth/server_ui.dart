@@ -649,7 +649,8 @@ class _ServerRowState extends State<ServerRow> {
 }
 
 /// Section used by the editor for form content (text fields, icon picker).
-/// Title sits outside the card like every other group.
+/// Title sits outside the card like every other group; a null [title] leaves
+/// only the card, for child steps whose frame already names the form.
 class ServerSectionCard extends StatelessWidget {
   const ServerSectionCard({
     super.key,
@@ -660,7 +661,7 @@ class ServerSectionCard extends StatelessWidget {
     this.trailing,
   });
 
-  final String title;
+  final String? title;
   final List<Widget> children;
   final IconData? icon;
   final String? description;
@@ -674,11 +675,12 @@ class ServerSectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ServerGroupHeader(
-            title: title,
-            trailing: trailing,
-            description: description,
-          ),
+          if (title != null)
+            ServerGroupHeader(
+              title: title!,
+              trailing: trailing,
+              description: description,
+            ),
           Container(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
             decoration: BoxDecoration(
@@ -1074,17 +1076,16 @@ class ServerDecisionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppUiTheme.of(context).colorScheme;
+    // Cancel is the tertiary text action; confirm is the view's one primary
+    // action, at the same face height as every other shared action button.
     return Row(
       children: [
         Expanded(
-          child: AppButton(
+          child: AppActionButton(
             key: cancelKey,
+            tier: AppActionTier.tertiary,
             onPressed: onCancel,
-            variant: AppButtonVariant.tinted,
-            foregroundColor: colors.onSurface,
-            color: colors.onSurface.withValues(alpha: .07),
-            minimumSize: const Size(64, 48),
-            child: Text(cancelLabel),
+            label: cancelLabel,
           ),
         ),
         const SizedBox(width: 10),
@@ -1095,7 +1096,10 @@ class ServerDecisionButtons extends StatelessWidget {
             variant: AppButtonVariant.filled,
             color: destructive ? colors.error : null,
             foregroundColor: destructive ? colors.onError : null,
-            minimumSize: const Size(64, 48),
+            style: AppButtonStyle(
+              faceExtent: AppActionButton.extentOf(context),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            ),
             child: busy
                 ? CupertinoActivityIndicator(
                     radius: 9,

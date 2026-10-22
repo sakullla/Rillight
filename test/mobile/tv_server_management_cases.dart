@@ -319,6 +319,80 @@ void main() {
   );
 
   testWidgets(
+    'TV line button shows the whole host on one line beside more actions',
+    (tester) async {
+      final mirror = FakeEmbyServer(
+        serverId: 'tv-b',
+        baseUrl: Uri.parse('http://capture-mirror.test:8096'),
+      );
+      final auth = await setupTv(tester, extra: [mirror]);
+      // A non-current server whose only line is an unnamed long host.
+      final id = auth.savedServers.last.id;
+      expect(auth.session!.server.id, isNot(id));
+      final server = auth.sources.server(id);
+      final token = await tester.runAsync(() => auth.credentials.read(id));
+      mirror.issuedTokens.add(token!.accessToken);
+      await tester.runAsync(
+        () => auth.saveConfiguration(
+          id,
+          nickname: server.displayName,
+          userAgent: server.userAgent ?? '',
+          lines: [
+            server.lines.single.copyWith(
+              address: 'http://capture-mirror.test:8096',
+            ),
+          ],
+        ),
+      );
+      await settle(tester);
+      final button = find.byKey(Key('server-lines-$id'));
+      // The whole host name on one line: with its port when it fits, else the
+      // host alone (the test font is wider than the real one). Never cut.
+      final label = find.descendant(
+        of: button,
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              (w.data == 'capture-mirror.test:8096' ||
+                  w.data == 'capture-mirror.test'),
+        ),
+      );
+      expect(label, findsOneWidget);
+      expect(tester.widget<Text>(label).maxLines, 1);
+      expect(
+        find.descendant(of: button, matching: find.textContaining('…')),
+        findsNothing,
+      );
+      // One text line: the label is no taller than a single line of its style.
+      final style = DefaultTextStyle.of(tester.element(label)).style;
+      expect(
+        tester.getSize(label).height,
+        lessThan((style.fontSize ?? 14) * (style.height ?? 1.5) * 1.6),
+      );
+      // The full safe address is the semantic tooltip of the line target.
+      expect(
+        find.descendant(
+          of: button,
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is Semantics &&
+                w.properties.tooltip == 'http://capture-mirror.test:8096',
+          ),
+        ),
+        findsOneWidget,
+      );
+      // 「更多操作」仍是右侧独立的焦点目标。
+      tvTarget(tester, Key('server-lines-$id')).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await settle(tester);
+      expect(tvTarget(tester, Key('server-more-$id')).hasFocus, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
     'TV editor keeps cancelled drafts and saves name with remote keyboard',
     (tester) async {
       final auth = await setupTv(tester);
