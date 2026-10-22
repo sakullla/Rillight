@@ -49,7 +49,7 @@ abstract final class ServerUi {
 
   /// Subtle stroke that separates a raised group from the panel background.
   static Color groupStroke(AppColorScheme colors) => colors.outlineVariant
-      .withValues(alpha: colors.brightness == Brightness.dark ? .55 : .8);
+      .withValues(alpha: colors.brightness == Brightness.dark ? .62 : .85);
 
   /// Semantic success colour; the app scheme has no dedicated token and the
   /// tertiary hue is not reliably green across themes.
@@ -573,10 +573,10 @@ class _ServerRowState extends State<ServerRow> {
         : colors.onSurface;
     final highlight = widget.selected
         ? colors.primary.withValues(
-            alpha: colors.brightness == Brightness.dark ? .12 : .07,
+            alpha: colors.brightness == Brightness.dark ? .14 : .085,
           )
         : hovered && enabled
-        ? colors.onSurface.withValues(alpha: .045)
+        ? colors.onSurface.withValues(alpha: .05)
         : null;
     final content = AnimatedContainer(
       duration: AppMotion.fast,

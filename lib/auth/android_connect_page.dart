@@ -315,10 +315,17 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             icon: const Icon(
                               AppIcons.server,
                               fill: AppIcons.filled,
-                              size: 18,
+                              size: 16,
                             ),
                             label: Text(l10n.phoneManageServer),
-                            variant: AppButtonVariant.plain,
+                            style: const AppButtonStyle(
+                              minimumSize: Size(44, 34),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                            ),
+                            variant: AppButtonVariant.outlined,
                           ),
                         ],
                       ),
@@ -435,15 +442,25 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                               message: embyFailureMessage(l10n, auth.failure!),
                             ),
                           ],
-                          const SizedBox(height: 22),
-                          AppButton(
+                          const SizedBox(height: 18),
+                          AppButton.icon(
                             key: const Key('android-connect-submit'),
                             style: AppButtonStyle(
-                              minimumSize: const Size(52, 52),
+                              minimumSize: const Size(52, 50),
+                              boxShadow: AppShadow.emphasis(
+                                AppUiTheme.of(context).colorScheme.brightness,
+                              ),
                             ),
                             onPressed: auth.isBusy ? null : _submit,
                             variant: AppButtonVariant.filled,
-                            child: BusyLabel(
+                            icon: Icon(
+                              auth.failure != null
+                                  ? AppIcons.refresh
+                                  : AppIcons.play,
+                              fill: AppIcons.filled,
+                              size: 18,
+                            ),
+                            label: BusyLabel(
                               busy: auth.isBusy,
                               label: auth.failure != null
                                   ? l10n.retry
@@ -451,7 +468,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                               busyLabel: l10n.connecting,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 8),
                           AppButton.icon(
                             key: const Key('android-connect-import'),
                             onPressed: auth.isBusy
@@ -462,11 +479,15 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             icon: const Icon(
                               AppIcons.download,
                               fill: AppIcons.filled,
-                              size: 18,
+                              size: 17,
                             ),
                             label: Text(l10n.backupImportEntry),
-                            variant: AppButtonVariant.plain,
+                            style: const AppButtonStyle(
+                              minimumSize: Size(48, 42),
+                            ),
+                            variant: AppButtonVariant.outlined,
                           ),
+                          const SizedBox(height: 4),
                           _buildMore(context, l10n, auth),
                         ],
                       ),
@@ -508,25 +529,29 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
             placeholder: '/emby',
           ),
           const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              l10n.lines,
-              style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
-                color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Wrap(
-            spacing: 8,
+          Row(
             children: [
+              Expanded(
+                child: Text(
+                  l10n.lines,
+                  style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
+                    color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
               AppButton.icon(
                 key: const Key('android-connect-add-line'),
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
+                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 16),
                 label: Text(l10n.addLine),
-                variant: AppButtonVariant.plain,
+                style: const AppButtonStyle(
+                  minimumSize: Size(44, 34),
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+                variant: AppButtonVariant.tinted,
               ),
+              const SizedBox(width: 6),
               AppButton.icon(
                 key: const Key('android-connect-delete-line'),
                 onPressed: auth.isBusy || !canDelete
@@ -535,13 +560,18 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                 icon: const Icon(
                   AppIcons.link,
                   fill: AppIcons.filled,
-                  size: 18,
+                  size: 16,
                 ),
                 label: Text(l10n.deleteLine),
                 style: AppButtonStyle(
+                  minimumSize: const Size(44, 34),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   foregroundColor: AppUiTheme.of(context).colorScheme.error,
                 ),
-                variant: AppButtonVariant.plain,
+                variant: AppButtonVariant.outlined,
               ),
             ],
           ),
@@ -626,16 +656,15 @@ class _PhoneServerChip extends StatelessWidget {
       button: true,
       selected: selected,
       child: Container(
-        decoration: BoxDecoration(
-          color: selected
-              ? scheme.primary.withValues(alpha: .12)
-              : scheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(
-            color: selected ? scheme.primary : scheme.outlineVariant,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
+        decoration: selected
+            ? AppSelectionDecoration.of(scheme, radius: AppRadii.md)
+            : BoxDecoration(
+                color: scheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                border: Border.all(
+                  color: AppEdge.of(theme.brightness, strong: true),
+                ),
+              ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(
           onTap: onPressed,

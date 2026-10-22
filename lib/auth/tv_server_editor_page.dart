@@ -76,6 +76,7 @@ class _TvServerEditorState extends ServerEditorState {
     key: Key(key),
     focusNode: node(key),
     emphasized: primary,
+    pill: primary,
     onPressed: busy ? null : callback,
     child: Text(label),
   );

@@ -617,6 +617,9 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
             variant: AppButtonVariant.filled,
             minimumSize: const Size(44, 40),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            style: AppButtonStyle(
+              boxShadow: AppShadow.emphasis(colors.brightness),
+            ),
           ),
           child: Column(
             mainAxisSize: shrink ? MainAxisSize.min : MainAxisSize.max,
@@ -718,9 +721,9 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
                               ),
                               border: Border.all(
                                 color: colors.outlineVariant.withValues(
-                                  alpha: .7,
+                                  alpha: .78,
                                 ),
-                                width: .7,
+                                width: .85,
                               ),
                               boxShadow: AppShadow.overlay(colors.brightness),
                             ),

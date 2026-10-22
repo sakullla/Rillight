@@ -59,6 +59,7 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                 Expanded(
                   child: TvAction(
                     key: const Key('server-lines-discover'),
+                    pill: true,
                     onPressed: idle ? discover : null,
                     leading: const Icon(AppIcons.refresh),
                     child: Text(
@@ -72,6 +73,7 @@ class _TvLineSelectionState extends ServerLineSelectorState {
                 Expanded(
                   child: TvAction(
                     key: const Key('server-lines-speed'),
+                    pill: true,
                     onPressed: idle ? checkAll : null,
                     leading: const Icon(AppIcons.bolt),
                     child: Text(

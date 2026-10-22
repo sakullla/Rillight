@@ -132,6 +132,20 @@ void main() {
         expect(find.textContaining(label), findsNothing);
         expect(find.textContaining('连接正常'), findsWidgets);
         expect(find.textContaining('ms'), findsWidgets);
+        expect(
+          tester
+              .widget<ui.AppButton>(
+                find.byKey(const Key('server-lines-discover')),
+              )
+              .variant,
+          ui.AppButtonVariant.outlined,
+        );
+        expect(
+          tester
+              .widget<ui.AppButton>(find.byKey(const Key('server-lines-speed')))
+              .variant,
+          ui.AppButtonVariant.tinted,
+        );
         expect(auth.savedServers.single.lines.single.latencyMs, isNotNull);
         expect(auth.savedServers.single.lines.single.checkFailureKind, isNull);
       },

@@ -367,9 +367,37 @@ class PlaybackLineMenu extends StatelessWidget {
             if (actual != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Text(
-                  l10n.playbackLineActual(playbackLineLabel(actual)),
-                  key: const Key('playback-line-actual'),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppUiTheme.of(context).colorScheme.onSurface
+                        .withValues(alpha: .06),
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          AppIcons.route,
+                          size: 16,
+                          color: AppUiTheme.of(context).colorScheme.primary,
+                          fill: AppIcons.filled,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            l10n.playbackLineActual(playbackLineLabel(actual)),
+                            key: const Key('playback-line-actual'),
+                            style: AppUiTheme.of(context).textTheme.labelLarge
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             if (failure != null)
@@ -389,6 +417,7 @@ class PlaybackLineMenu extends StatelessWidget {
               AppButton(
                 key: const Key('playback-line-cancel'),
                 onPressed: controller.cancelLineRecovery,
+                variant: AppButtonVariant.outlined,
                 child: Text(l10n.cancelAction),
               ),
             ],
@@ -397,11 +426,21 @@ class PlaybackLineMenu extends StatelessWidget {
               leading: Icon(
                 AppIcons.bolt,
                 size: 20,
+                fill: AppIcons.filled,
                 color: selection.isAutomatic
                     ? AppUiTheme.of(context).colorScheme.primary
                     : AppUiTheme.of(context).colorScheme.onSurfaceVariant,
               ),
-              title: Text(l10n.serversAutomatic),
+              title: Row(
+                children: [
+                  Flexible(child: Text(l10n.serversAutomatic)),
+                  const SizedBox(width: 8),
+                  ServerStatusPill(
+                    label: l10n.serversRecommend,
+                    tone: ServerTone.success,
+                  ),
+                ],
+              ),
               subtitle: Text(l10n.serversAutomaticHint),
               trailing: selection.isAutomatic
                   ? Icon(

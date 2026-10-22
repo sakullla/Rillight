@@ -112,11 +112,13 @@ class ServerAddPanelState extends State<ServerAddPanel> {
           ),
           if (error != null) ServerFeedback(error!),
           const SizedBox(height: 20),
-          AppButton(
+          AppButton.icon(
             key: const Key('server-paste-parse'),
             onPressed: parse,
             variant: AppButtonVariant.filled,
-            child: Text(l.serversParse),
+            minimumSize: const Size(48, 48),
+            icon: const Icon(AppIcons.check, size: 18),
+            label: Text(l.serversParse),
           ),
         ],
       );

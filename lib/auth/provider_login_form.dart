@@ -105,6 +105,7 @@ class _ProviderLoginFormState extends State<ProviderLoginForm> {
               l.loginServiceLabel,
               style: theme.textTheme.labelMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
                 letterSpacing: .4,
               ),
             ),
@@ -113,7 +114,7 @@ class _ProviderLoginFormState extends State<ProviderLoginForm> {
           ProviderSwitcher(value: type, onChanged: onChanged),
           const SizedBox(height: 10),
           ProviderHint(type: type),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           if (wrap == null)
             LoginFormTransition(child: body)
           else

@@ -542,12 +542,22 @@ class _ConnectPageState extends State<ConnectPage> {
           ),
         ),
         const SizedBox(height: AppSpacing.xl),
-        AppButton(
+        AppButton.icon(
           key: ConnectFormKeys.submit,
-          style: AppButtonStyle(minimumSize: const Size(48, 48)),
+          style: AppButtonStyle(
+            minimumSize: const Size(48, 48),
+            boxShadow: AppShadow.emphasis(
+              AppUiTheme.of(context).colorScheme.brightness,
+            ),
+          ),
           onPressed: auth.isBusy ? null : _submit,
           variant: AppButtonVariant.filled,
-          child: BusyLabel(
+          icon: Icon(
+            auth.failure == null ? AppIcons.play : AppIcons.refresh,
+            fill: AppIcons.filled,
+            size: 18,
+          ),
+          label: BusyLabel(
             busy: auth.isBusy,
             label: auth.failure == null ? l10n.connect : l10n.retry,
             busyLabel: l10n.connecting,
@@ -586,23 +596,27 @@ class _ConnectPageState extends State<ConnectPage> {
             placeholder: '/emby',
           ),
           const SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              l10n.lines,
-              style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
-                color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
           Row(
             children: [
+              Expanded(
+                child: Text(
+                  l10n.lines,
+                  style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
+                    color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
               AppButton.icon(
                 key: ConnectFormKeys.addLine,
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
+                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 16),
                 label: Text(l10n.addLine),
-                variant: AppButtonVariant.plain,
+                style: const AppButtonStyle(
+                  minimumSize: Size(44, 34),
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+                variant: AppButtonVariant.tinted,
               ),
               const SizedBox(width: AppSpacing.xs),
               AppButton.icon(
@@ -619,13 +633,18 @@ class _ConnectPageState extends State<ConnectPage> {
                 icon: const Icon(
                   AppIcons.link,
                   fill: AppIcons.filled,
-                  size: 18,
+                  size: 16,
                 ),
                 label: Text(l10n.deleteLine),
                 style: AppButtonStyle(
+                  minimumSize: const Size(44, 34),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   foregroundColor: AppUiTheme.of(context).colorScheme.error,
                 ),
-                variant: AppButtonVariant.plain,
+                variant: AppButtonVariant.outlined,
               ),
             ],
           ),
@@ -711,16 +730,25 @@ class _ConnectPageState extends State<ConnectPage> {
           onPressed: auth.isBusy
               ? null
               : () => unawaited(showBackupImportFlow(context, auth: auth)),
-          icon: const Icon(AppIcons.download, fill: AppIcons.filled, size: 18),
+          icon: const Icon(AppIcons.download, fill: AppIcons.filled, size: 16),
           label: Text(l10n.backupImportEntry),
-          variant: AppButtonVariant.plain,
+          style: const AppButtonStyle(
+            minimumSize: Size(44, 34),
+            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          ),
+          variant: AppButtonVariant.outlined,
         ),
+        const SizedBox(width: AppSpacing.xxs),
         AppButton.icon(
           key: ConnectFormKeys.addServer,
           onPressed: auth.isBusy ? null : _startNewServer,
-          icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
+          icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 16),
           label: Text(l10n.addServer),
-          variant: AppButtonVariant.plain,
+          style: const AppButtonStyle(
+            minimumSize: Size(44, 34),
+            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          ),
+          variant: AppButtonVariant.tinted,
         ),
       ],
     );
@@ -908,11 +936,20 @@ class _ConnectPageState extends State<ConnectPage> {
                   AppSpacing.md,
                   AppSpacing.sm,
                 ),
-                child: Column(
-                  children: [
-                    for (final line in server.lines)
-                      _buildLineTile(context, auth, server, line, selected),
-                  ],
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colorScheme.onSurface.withValues(alpha: .04),
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Column(
+                      children: [
+                        for (final line in server.lines)
+                          _buildLineTile(context, auth, server, line, selected),
+                      ],
+                    ),
+                  ),
                 ),
               ),
           ],

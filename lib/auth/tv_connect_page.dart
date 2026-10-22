@@ -390,8 +390,13 @@ class _TvConnectPageState extends State<TvConnectPage> {
             TvAction(
               key: const Key('tv-connect-submit'),
               emphasized: true,
+              pill: true,
               expand: true,
               focusNode: _submitFocus,
+              leading: Icon(
+                auth.failure != null ? AppIcons.refresh : AppIcons.play,
+                fill: AppIcons.filled,
+              ),
               onPressed: auth.isBusy ? null : _submit,
               child: Center(
                 child: Text(

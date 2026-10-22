@@ -101,12 +101,16 @@ class _TvServerAddPanelState extends ServerAddPanelState {
             if (selected == null)
               TvAction(
                 key: const Key('server-add-paste'),
+                pill: true,
                 onPressed: paste,
                 leading: const Icon(AppIcons.copy),
                 child: Text(l.serversPaste),
               ),
+            const SizedBox(height: 12),
             TvAction(
               key: const Key('server-add-import'),
+              pill: true,
+              leading: const Icon(AppIcons.download),
               onPressed: widget.onImport,
               child: Text(l.serversImportFile),
             ),

@@ -275,6 +275,7 @@ class ServerEditorState extends State<ServerEditor> {
         variant: AppButtonVariant.filled,
         minimumSize: const Size(64, 40),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        style: AppButtonStyle(boxShadow: AppShadow.emphasis(colors.brightness)),
         child: busy
             ? CupertinoActivityIndicator(radius: 8, color: colors.onPrimary)
             : Text(l.serversSave),

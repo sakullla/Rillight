@@ -539,7 +539,8 @@ class _LoginAdvancedSectionState extends State<LoginAdvancedSection> {
             key: widget.toggleKey,
             style: AppButtonStyle(
               foregroundColor: scheme.onSurfaceVariant,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              minimumSize: const Size(44, 34),
             ),
             onPressed: () {
               setState(() => _expanded = !_expanded);
@@ -551,7 +552,7 @@ class _LoginAdvancedSectionState extends State<LoginAdvancedSection> {
               child: const Icon(
                 AppIcons.chevronRight,
                 fill: AppIcons.filled,
-                size: 20,
+                size: 18,
               ),
             ),
             label: Text(

@@ -342,5 +342,15 @@ void main() {
           ?.text,
       'CustomUA/1.0',
     );
+    expect(
+      tester.widget<ui.AppButton>(find.byKey(ConnectFormKeys.addLine)).variant,
+      ui.AppButtonVariant.tinted,
+    );
+    expect(
+      tester
+          .widget<ui.AppButton>(find.byKey(ConnectFormKeys.deleteLine))
+          .variant,
+      ui.AppButtonVariant.outlined,
+    );
   }, tags: ['integration']);
 }

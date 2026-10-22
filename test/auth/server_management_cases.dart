@@ -707,6 +707,12 @@ void main() {
       await serverUiTap(tester, const Key('server-flow-back'));
       expect(auth.savedServers.single.displayName, isNot('取消的名字'));
       await openServerEditor(tester, id);
+      expect(
+        tester
+            .widget<ui.AppButton>(find.byKey(const Key('server-editor-save')))
+            .variant,
+        ui.AppButtonVariant.filled,
+      );
       await tester.enterText(
         find.byKey(const Key('server-editor-name')),
         '我的影院',

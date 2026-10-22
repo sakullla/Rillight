@@ -209,11 +209,11 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
           borderRadius: BorderRadius.circular(ServerUi.cardRadius + 2),
           border: Border.all(
             color: widget.current
-                ? colors.primary.withValues(alpha: dark ? .38 : .28)
+                ? colors.primary.withValues(alpha: dark ? .48 : .36)
                 : widget.error != null
-                ? colors.error.withValues(alpha: .35)
+                ? colors.error.withValues(alpha: .38)
                 : ServerUi.groupStroke(colors),
-            width: widget.current ? 1 : .6,
+            width: widget.current ? 1.2 : .8,
           ),
           boxShadow: hovered && !widget.busy
               ? [
@@ -395,6 +395,7 @@ class _ServerSelectionTileState extends State<ServerSelectionTile> {
                     children: [
                       AppButton(
                         onPressed: widget.busy ? null : widget.onEnter,
+                        variant: AppButtonVariant.outlined,
                         minimumSize: const Size(44, 36),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -451,16 +452,21 @@ class _ServerLineChipState extends State<_ServerLineChip> {
     return AppSurfaceAction(
       onTap: widget.onTap,
       onHover: (value) => setState(() => hovered = value),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadii.pill),
       child: AnimatedContainer(
         duration: AppMotion.fast,
-        constraints: const BoxConstraints(minHeight: 40),
-        padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
+        constraints: const BoxConstraints(minHeight: 38),
+        padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
         decoration: BoxDecoration(
           color: hovered
               ? colors.primary.withValues(alpha: dark ? .16 : .10)
               : colors.onSurface.withValues(alpha: dark ? .06 : .04),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(
+            color: hovered
+                ? colors.primary.withValues(alpha: .36)
+                : AppEdge.of(colors.brightness, strong: !dark),
+          ),
         ),
         child: Row(
           children: [

@@ -100,7 +100,10 @@ class _ServerFlowFrameState extends State<ServerFlowFrame> {
           widget.backLabel ?? (closeAtEnd ? l.serversDismiss : l.serversBack),
       onPressed: widget.onBack,
       minimumSize: const Size(44, 44),
-      icon: Icon(closeAtEnd ? AppIcons.close : AppIcons.back, size: 22),
+      style: AppButtonStyle(
+        backgroundColor: colors.onSurface.withValues(alpha: .05),
+      ),
+      icon: Icon(closeAtEnd ? AppIcons.close : AppIcons.back, size: 20),
     );
     final header = Padding(
       padding: EdgeInsets.fromLTRB(

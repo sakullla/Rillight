@@ -96,12 +96,13 @@ class ServerLineFieldsState extends State<ServerLineFields> {
           ServerFeedback(error!),
           const SizedBox(height: 14),
         ],
-        AppButton(
+        AppButton.icon(
           key: const Key('server-line-done'),
           onPressed: done,
           variant: AppButtonVariant.filled,
           minimumSize: const Size(64, 48),
-          child: Text(l.serversDone),
+          icon: const Icon(AppIcons.check, size: 18),
+          label: Text(l.serversDone),
         ),
         const SizedBox(height: 10),
         Text(

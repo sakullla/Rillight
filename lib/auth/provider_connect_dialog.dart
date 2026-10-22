@@ -302,7 +302,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       );
     }
     final child = BusyLabel(busy: busy, label: label, busyLabel: l.connecting);
-    final style = AppButtonStyle(minimumSize: const Size(48, 48));
+    final style = AppButtonStyle(
+      minimumSize: const Size(48, 48),
+      boxShadow: AppShadow.emphasis(
+        AppUiTheme.of(context).colorScheme.brightness,
+      ),
+    );
     return icon == null || busy
         ? AppButton(
             key: Key(id),

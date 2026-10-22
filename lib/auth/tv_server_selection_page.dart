@@ -288,6 +288,7 @@ class _TvServerSelectionState extends ServerSelectionPageState {
           action: TvAction(
             key: const Key('server-add'),
             emphasized: true,
+            pill: true,
             onPressed: () {
               origin = 'server-add';
               showFlow('add');
