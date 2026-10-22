@@ -336,6 +336,27 @@ void main() {
   );
 
   cases.testWidgets(
+    'series without resume progress targets the first unwatched episode',
+    (tester) async {
+      // 固定夹具：S1E1 已看、S1E2 未看，两集都没有续播进度。
+      final app = await pumpApp(tester);
+      await openItem(tester, app, _series);
+      final play = find.byKey(PlayerKeys.open);
+      expect(play, findsOneWidget);
+      expect(
+        find.descendant(of: play, matching: find.text('播放 S1E2')),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<EpisodeList>(find.byType(EpisodeList)).currentId,
+        'episode-friends-s1e2',
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
     'a late initial season response cannot replace a newly selected season',
     (tester) async {
       server.setSeasons(_series, const [

@@ -174,6 +174,17 @@ extension PageCaptures on CaptureSession {
     app.router.go('/item/series-long');
     await advance(900);
     final picker = find.byKey(CatalogKeys.seasonPicker);
+    if (picker.evaluate().isEmpty) {
+      // Opening the series locates the current (first unwatched) episode;
+      // on short viewports that scrolls the season header out of the page.
+      final page = find
+          .byWidgetPredicate(
+            (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+          )
+          .first;
+      await tester.scrollUntilVisible(picker, -300, scrollable: page);
+      await advance(300);
+    }
     expect(
       picker,
       findsOneWidget,

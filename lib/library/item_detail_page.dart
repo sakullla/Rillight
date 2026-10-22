@@ -1179,10 +1179,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         return episode;
       }
     }
-    if (_episodes.isNotEmpty) {
-      return _episodes.first;
-    }
-    return null;
+    // Match DetailController: without resume progress, continue from the
+    // first unwatched episode before falling back to the first one.
+    return _episodes.where((e) => !e.userData.played).firstOrNull ??
+        _episodes.firstOrNull;
   }
 
   MediaItem? _nextEpisodeAfter(MediaItem item) {
