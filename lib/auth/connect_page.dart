@@ -13,7 +13,6 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -23,6 +22,7 @@ import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/server_management_widgets.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -42,6 +42,10 @@ abstract final class ConnectFormKeys {
   static const serverSearch = Key('connect-server-search');
   static const connectAppearanceKey = Key('connect-appearance');
   static Key extraLine(int index) => Key('connect-extra-line-$index');
+
+  /// 已保存服务器卡上的「N 条线路」展开钮;只在多线路时出现。
+  static Key savedServerLines(String serverId) =>
+      Key('saved-server-lines-$serverId');
 }
 
 class ConnectPage extends StatefulWidget {
@@ -63,6 +67,9 @@ class _ConnectPageState extends State<ConnectPage> {
   bool _moreExpanded = false;
   bool _passwordVisible = false;
   String _serverQuery = '';
+
+  /// 展开了线路列表的已保存服务器。线路默认折叠,卡片只显示当前线路。
+  final Set<String> _expandedServers = {};
   final List<TextEditingController> _extraLines = [];
   ConnectDraft? _draft;
   int _passwordRevision = 0;
@@ -607,20 +614,16 @@ class _ConnectPageState extends State<ConnectPage> {
                   ),
                 ),
               ),
-              AppButton.icon(
+              AppActionButton(
                 key: ConnectFormKeys.addLine,
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 16),
-                label: Text(l10n.addLine),
-                style: const AppButtonStyle(
-                  minimumSize: Size(44, 34),
-                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                ),
-                variant: AppButtonVariant.tinted,
+                icon: AppIcons.add,
+                label: l10n.addLine,
               ),
-              const SizedBox(width: AppSpacing.xs),
-              AppButton.icon(
+              const SizedBox(width: AppSpacing.xxs),
+              AppActionButton(
                 key: ConnectFormKeys.deleteLine,
+                tier: AppActionTier.tertiary,
                 onPressed: auth.isBusy
                     ? null
                     : _extraLines.isNotEmpty
@@ -630,21 +633,7 @@ class _ConnectPageState extends State<ConnectPage> {
                           _selectedLineId == null)
                     ? null
                     : _deleteSelectedLine,
-                icon: const Icon(
-                  AppIcons.link,
-                  fill: AppIcons.filled,
-                  size: 16,
-                ),
-                label: Text(l10n.deleteLine),
-                style: AppButtonStyle(
-                  minimumSize: const Size(44, 34),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  foregroundColor: AppUiTheme.of(context).colorScheme.error,
-                ),
-                variant: AppButtonVariant.outlined,
+                label: l10n.deleteLine,
               ),
             ],
           ),
@@ -686,6 +675,8 @@ class _ConnectPageState extends State<ConnectPage> {
     return null;
   }
 
+  /// 已保存的服务器:标题与次级入口(导入备份、添加服务器)同属一组,
+  /// 下面是紧凑卡片列表。没有已保存服务器时只保留「导入备份」,不画空列表。
   Widget _buildSavedServers(
     BuildContext context,
     AppLocalizations l10n,
@@ -695,7 +686,37 @@ class _ConnectPageState extends State<ConnectPage> {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final servers = _filteredServers(auth);
-    final header = Row(
+    final empty = auth.savedServers.isEmpty;
+    final actions = Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
+        AppActionButton(
+          key: ConnectFormKeys.importBackup,
+          onPressed: auth.isBusy
+              ? null
+              : () => unawaited(showBackupImportFlow(context, auth: auth)),
+          icon: AppIcons.download,
+          label: l10n.backupImportEntry,
+        ),
+        if (!empty)
+          AppActionButton(
+            key: ConnectFormKeys.addServer,
+            onPressed: auth.isBusy ? null : _startNewServer,
+            icon: AppIcons.add,
+            label: l10n.addServer,
+          ),
+      ],
+    );
+    if (empty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [actions],
+      );
+    }
+    final title = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
           child: Text(
@@ -707,50 +728,30 @@ class _ConnectPageState extends State<ConnectPage> {
             ),
           ),
         ),
-        if (auth.savedServers.isNotEmpty) ...[
-          const SizedBox(width: AppSpacing.xs),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-            decoration: BoxDecoration(
-              color: scheme.onSurface.withValues(alpha: .08),
-              borderRadius: BorderRadius.circular(AppRadii.pill),
-            ),
-            child: Text(
-              '${auth.savedServers.length}',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
+        const SizedBox(width: AppSpacing.xs),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+          decoration: BoxDecoration(
+            color: scheme.onSurface.withValues(alpha: .08),
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+          ),
+          child: Text(
+            '${auth.savedServers.length}',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
             ),
           ),
-        ],
-        const Spacer(),
-        AppButton.icon(
-          key: ConnectFormKeys.importBackup,
-          onPressed: auth.isBusy
-              ? null
-              : () => unawaited(showBackupImportFlow(context, auth: auth)),
-          icon: const Icon(AppIcons.download, fill: AppIcons.filled, size: 16),
-          label: Text(l10n.backupImportEntry),
-          style: const AppButtonStyle(
-            minimumSize: Size(44, 34),
-            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          ),
-          variant: AppButtonVariant.outlined,
-        ),
-        const SizedBox(width: AppSpacing.xxs),
-        AppButton.icon(
-          key: ConnectFormKeys.addServer,
-          onPressed: auth.isBusy ? null : _startNewServer,
-          icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 16),
-          label: Text(l10n.addServer),
-          style: const AppButtonStyle(
-            minimumSize: Size(44, 34),
-            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          ),
-          variant: AppButtonVariant.tinted,
         ),
       ],
+    );
+    // 放得下时标题与入口同一行,窄栏下入口整组折到标题下方。
+    final header = Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.xs,
+      children: [title, actions],
     );
     final search = auth.savedServers.length > 6
         ? Padding(
@@ -770,38 +771,32 @@ class _ConnectPageState extends State<ConnectPage> {
     Widget card(int index) =>
         _buildServerCard(context, l10n, auth, servers[index]);
     Widget separator(BuildContext context, int index) =>
-        const SizedBox(height: AppSpacing.sm);
+        const SizedBox(height: AppSpacing.xs);
     if (fill) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           header,
-          if (auth.savedServers.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Text(
-                l10n.loginSavedServersHint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+          Padding(
+            padding: const EdgeInsets.only(
+              top: AppSpacing.xxs,
+              bottom: AppSpacing.sm,
+            ),
+            child: Text(
+              l10n.loginSavedServersHint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
             ),
+          ),
           ?search,
           Expanded(
-            child: auth.savedServers.isEmpty
-                ? Align(
-                    alignment: Alignment.topCenter,
-                    child: AppEmptyView(
-                      message: l10n.noSavedServers,
-                      icon: AppIcons.server,
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    itemCount: servers.length,
-                    separatorBuilder: separator,
-                    itemBuilder: (context, index) => card(index),
-                  ),
+            child: ListView.separated(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              itemCount: servers.length,
+              separatorBuilder: separator,
+              itemBuilder: (context, index) => card(index),
+            ),
           ),
         ],
       );
@@ -811,23 +806,19 @@ class _ConnectPageState extends State<ConnectPage> {
       children: [
         header,
         const SizedBox(height: AppSpacing.sm),
-        if (auth.savedServers.isEmpty)
-          AppEmptyView(message: l10n.noSavedServers, icon: AppIcons.server)
-        else ...[
-          ?search,
-          SizedBox(
-            height: auth.savedServers.length > 4 ? 320 : null,
-            child: ListView.separated(
-              shrinkWrap: auth.savedServers.length <= 4,
-              physics: auth.savedServers.length <= 4
-                  ? const NeverScrollableScrollPhysics()
-                  : null,
-              itemCount: servers.length,
-              separatorBuilder: separator,
-              itemBuilder: (context, index) => card(index),
-            ),
+        ?search,
+        SizedBox(
+          height: auth.savedServers.length > 4 ? 320 : null,
+          child: ListView.separated(
+            shrinkWrap: auth.savedServers.length <= 4,
+            physics: auth.savedServers.length <= 4
+                ? const NeverScrollableScrollPhysics()
+                : null,
+            itemCount: servers.length,
+            separatorBuilder: separator,
+            itemBuilder: (context, index) => card(index),
           ),
-        ],
+        ),
       ],
     );
   }
@@ -845,6 +836,8 @@ class _ConnectPageState extends State<ConnectPage> {
     ];
   }
 
+  /// 紧凑服务器卡:类型标记、名称、「账号 · 当前线路」。多线路时卡尾是
+  /// 「N 条线路」展开钮,展开后才列出各条线路;点线路把地址填进表单。
   Widget _buildServerCard(
     BuildContext context,
     AppLocalizations l10n,
@@ -854,10 +847,21 @@ class _ConnectPageState extends State<ConnectPage> {
     final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
     final selected = server.id == _selectedServerId;
-    final host = server.activeLine?.hostLabel ?? server.baseUrl;
+    final multiLine = server.lines.length > 1;
+    final expanded = multiLine && _expandedServers.contains(server.id);
+    ServerLine? line = server.activeLine;
+    if (selected) {
+      for (final candidate in server.lines) {
+        if (candidate.id == _selectedLineId) {
+          line = candidate;
+          break;
+        }
+      }
+    }
+    final lineLabel = line == null ? server.baseUrl : serverLineLabel(line);
     final subtitle = server.username.isEmpty
-        ? host
-        : '${server.username} · $host';
+        ? lineLabel
+        : '${server.username} · $lineLabel';
 
     return AnimatedContainer(
       duration: AppMotion.durationOf(context, AppMotion.fast),
@@ -873,87 +877,112 @@ class _ConnectPageState extends State<ConnectPage> {
           width: selected ? AppSelectionDecoration.borderWidth : 1,
         ),
       ),
-      child: Container(
-        decoration: BoxDecoration(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AppSurfaceAction(
-              key: Key('saved-server-${server.id}'),
-              onTap: auth.isBusy ? null : () => _selectSaved(server),
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.sm,
-                ),
-                child: Row(
-                  children: [
-                    ServerTypeMark(type: server.serviceType, size: 36),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            server.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: AppSurfaceAction(
+                  key: Key('saved-server-${server.id}'),
+                  onTap: auth.isBusy ? null : () => _selectSaved(server),
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    child: Row(
+                      children: [
+                        ServerTypeMark(type: server.serviceType, size: 32),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                server.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: selected
+                                      ? colorScheme.onPrimaryContainer
+                                      : colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            subtitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
+                        ),
+                        if (selected) ...[
+                          const SizedBox(width: AppSpacing.xs),
+                          Icon(
+                            AppIcons.checkCircle,
+                            fill: AppIcons.filled,
+                            color: colorScheme.onPrimaryContainer,
+                            size: 20,
                           ),
                         ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    Icon(
-                      selected ? AppIcons.checkCircle : AppIcons.chevronRight,
-                      fill: AppIcons.filled,
-                      color: selected
-                          ? colorScheme.onPrimaryContainer
-                          : colorScheme.onSurfaceVariant,
-                      size: 20,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (server.lines.length > 1)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  0,
-                  AppSpacing.md,
-                  AppSpacing.sm,
-                ),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colorScheme.onSurface.withValues(alpha: .04),
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Column(
-                      children: [
-                        for (final line in server.lines)
-                          _buildLineTile(context, auth, server, line, selected),
                       ],
                     ),
                   ),
                 ),
               ),
-          ],
-        ),
+              if (multiLine)
+                Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.xs),
+                  child: Semantics(
+                    expanded: expanded,
+                    child: AppActionButton(
+                      key: ConnectFormKeys.savedServerLines(server.id),
+                      icon: AppIcons.route,
+                      trailingIcon: expanded
+                          ? AppIcons.chevronUp
+                          : AppIcons.chevronDown,
+                      label: l10n.lineCount(server.lines.length),
+                      onPressed: () => setState(() {
+                        if (!_expandedServers.remove(server.id)) {
+                          _expandedServers.add(server.id);
+                        }
+                      }),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurface.withValues(alpha: .04),
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Column(
+                    children: [
+                      for (final line in server.lines)
+                        _buildLineTile(context, auth, server, line, selected),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

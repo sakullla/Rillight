@@ -228,6 +228,59 @@ extension ProviderCaptures on CaptureSession {
     );
   }
 
+  /// provider 授权对话框的真实入口在已登录外壳里(服务器管理、会话过期
+  /// 重登),普通登录页保留自己的表单。截图在已登录首页上打开对话框,
+  /// 背景不再是一份同样的登录表单。
+  Future<void> _openProviderDialog(
+    RillightApp app,
+    AuthController auth,
+    FakeEmbyServer emby,
+    MediaServerType type,
+  ) async {
+    if (!auth.isLoggedIn) await _signInThroughDialog(app, auth, emby);
+    expect(auth.isLoggedIn, isTrue, reason: '${auth.failure}');
+    app.router.go('/');
+    await advance(800);
+    await _showDialog(app, auth);
+    if (type != MediaServerType.emby) {
+      await tap(Key('provider-type-${type.name}'));
+    }
+  }
+
+  Future<void> _showDialog(RillightApp app, AuthController auth) async {
+    final host = app.router.routerDelegate.navigatorKey.currentContext!;
+    expect(host.mounted, isTrue);
+    if (!host.mounted) return;
+    unawaited(showProviderConnect(host, auth));
+    await advance(400);
+    expect(find.byType(ProviderConnectDialog), findsOneWidget);
+  }
+
+  /// 登录页截图已注销当前服务器,而主服务器在夹具里还挂着返回 503 的备用
+  /// 线路。这里不截图,只用与用户相同的授权对话框以单条直连线路重新登录,
+  /// 得到一个已登录外壳。
+  Future<void> _signInThroughDialog(
+    RillightApp app,
+    AuthController auth,
+    FakeEmbyServer emby,
+  ) async {
+    app.router.go('/connect?add=1');
+    await advance(400);
+    await _showDialog(app, auth);
+    await _providerField('provider-address', emby.baseUrl.toString());
+    await _providerField('provider-username', 'alice');
+    await _providerField('provider-password', 'correct-horse');
+    await activate(find.byKey(const Key('provider-password-submit')));
+    for (
+      var i = 0;
+      i < 30 && find.byType(ProviderConnectDialog).evaluate().isNotEmpty;
+      i++
+    ) {
+      await advance(200);
+    }
+    expect(find.byType(ProviderConnectDialog), findsNothing);
+  }
+
   Future<void> providerPages(
     RillightApp app,
     AuthController auth,
@@ -238,21 +291,7 @@ extension ProviderCaptures on CaptureSession {
     for (final type in MediaServerType.values) {
       if (!wants('login') && !wants('player')) continue;
       final name = type.name;
-      app.router.go('/connect?add=1');
-      await advance(400);
-      if (type == MediaServerType.emby) {
-        // The reusable authorization dialog remains available to management
-        // flows; the ordinary login page retains its dedicated Emby form.
-        unawaited(
-          showProviderConnect(
-            tester.element(find.byKey(const Key('login-provider-emby'))),
-            auth,
-          ),
-        );
-        await advance(400);
-      } else {
-        await tap(Key('login-provider-$name'));
-      }
+      await _openProviderDialog(app, auth, emby, type);
       await _providerField('provider-user-agent', 'Rillight-Capture/1.0');
       await save('provider-$name-login');
       if (type == MediaServerType.plex) {
@@ -298,8 +337,11 @@ extension ProviderCaptures on CaptureSession {
           await activate(find.byKey(const Key('provider-authorize')));
           await _providerWait('provider-authorization-code');
           await save('provider-jellyfin-quick-connect');
-          await tap(const Key('login-provider-emby'));
-          await tap(const Key('login-provider-jellyfin'));
+          // In the dialog the type switcher only shows on the credentials
+          // step; cancelling and reopening returns to it, as a user would.
+          await activate(find.byKey(const Key('provider-cancel')));
+          await advance(300);
+          await _openProviderDialog(app, auth, emby, type);
           await _providerField(
             'provider-address',
             CaptureProviders.jellyfin.url.toString(),

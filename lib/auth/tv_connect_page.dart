@@ -1,3 +1,6 @@
+import 'login_widgets.dart';
+import 'server_list_store.dart';
+import 'server_management_widgets.dart';
 import 'tv_server_selection_page.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
@@ -180,6 +183,25 @@ class _TvConnectPageState extends State<TvConnectPage> {
     }
   }
 
+  /// 左栏直接列出的已保存服务器卡数;其余经「全部服务器」进入。
+  static const _maxSavedCards = 3;
+
+  Future<void> _showServers({String? initialServerId}) {
+    final auth = AuthScope.of(context);
+    return showTvServerSelection(
+      context,
+      auth: auth,
+      initialServerId: initialServerId,
+      onEntered: () async {
+        if (mounted) context.go('/');
+      },
+    );
+  }
+
+  /// 左栏服务器卡:与「全部服务器」列表里按下同一张卡相同,直接进入。
+  Future<void> _enterSaved(String serverId) =>
+      _showServers(initialServerId: serverId);
+
   @override
   void dispose() {
     _lan?.removeListener(_onLan);
@@ -252,39 +274,74 @@ class _TvConnectPageState extends State<TvConnectPage> {
                             ),
                           ),
                           SizedBox(height: 24 * s),
-                          // 备份导入:无服务与已有服务都可用,遥控可聚焦。
-                          TvNavTile(
-                            actionKey: const ValueKey('tv-connect-import'),
-                            icon: AppIcons.download,
-                            title: l10n.backupImportEntry,
-                            onPressed: auth.isBusy
-                                ? null
-                                : () => unawaited(
-                                    showBackupImportFlow(context, auth: auth),
+                          if (!_lanActive && auth.savedServers.isNotEmpty) ...[
+                            TvSectionTitle(l10n.savedServers),
+                            SizedBox(height: 4 * s),
+                            for (final server in auth.savedServers.take(
+                              _maxSavedCards,
+                            )) ...[
+                              _TvSavedServerCard(
+                                key: Key('tv-saved-server-${server.id}'),
+                                server: server,
+                                onPressed: auth.isBusy
+                                    ? null
+                                    : () => _enterSaved(server.id),
+                              ),
+                              SizedBox(height: 6 * s),
+                            ],
+                            SizedBox(height: 8 * s),
+                          ],
+                          // 次级入口同一组:全部服务器、导入备份(无服务与已有
+                          // 服务都可用)。手机辅助连接在右侧表单「或」下方。
+                          Wrap(
+                            spacing: 10 * s,
+                            runSpacing: 10 * s,
+                            children: [
+                              if (!_lanActive && auth.savedServers.isNotEmpty)
+                                TvAction(
+                                  key: const Key('tv-connect-servers'),
+                                  pill: true,
+                                  leading: const Icon(
+                                    AppIcons.server,
+                                    fill: AppIcons.filled,
                                   ),
+                                  onPressed: _showServers,
+                                  child: Text(
+                                    '${l10n.serversSectionAll} · '
+                                    '${auth.savedServers.length}',
+                                  ),
+                                ),
+                              TvAction(
+                                key: const ValueKey('tv-connect-import'),
+                                pill: true,
+                                leading: const Icon(
+                                  AppIcons.download,
+                                  fill: AppIcons.filled,
+                                ),
+                                onPressed: auth.isBusy
+                                    ? null
+                                    : () => unawaited(
+                                        showBackupImportFlow(
+                                          context,
+                                          auth: auth,
+                                        ),
+                                      ),
+                                child: Text(l10n.backupImportEntry),
+                              ),
+                            ],
                           ),
                           SizedBox(height: 18 * s),
                           if (_lanActive)
                             ..._lanSection(l10n, auth.isBusy)
                           else ...[
-                            if (auth.savedServers.isNotEmpty) ...[
-                              TvSectionTitle(l10n.savedServers),
-                              SizedBox(height: 4 * s),
-                              TvNavTile(
-                                actionKey: const Key('tv-connect-servers'),
-                                icon: AppIcons.server,
-                                title: l10n.serversTitle,
-                                onPressed: () => showTvServerSelection(
-                                  context,
-                                  auth: auth,
-                                  onEntered: () async {
-                                    if (mounted) context.go('/');
-                                  },
-                                ),
+                            // 外观是偶尔才改的偏好:放在左栏底部,标题降一档。
+                            SizedBox(height: 6 * s),
+                            Text(
+                              l10n.settingsAppearance,
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: scheme.onSurfaceVariant,
                               ),
-                              SizedBox(height: 18 * s),
-                            ],
-                            TvSectionTitle(l10n.settingsAppearance),
+                            ),
                             SizedBox(height: 6 * s),
                             const TvAppearancePicker(),
                           ],
@@ -830,4 +887,58 @@ String _lanClock(DateTime time) {
   final local = time.toLocal();
   String two(int value) => value.toString().padLeft(2, '0');
   return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
+}
+
+/// 左栏的已保存服务器卡:类型标记、名称、「账号 · 当前线路」,遥控器可聚焦。
+class _TvSavedServerCard extends StatelessWidget {
+  const _TvSavedServerCard({
+    super.key,
+    required this.server,
+    required this.onPressed,
+  });
+
+  final SavedServer server;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = TvDesign.scaleOf(context);
+    final line = server.activeLine;
+    final lineLabel = line == null ? server.baseUrl : serverLineLabel(line);
+    final subtitle = server.username.isEmpty
+        ? lineLabel
+        : '${server.username} · $lineLabel';
+    return TvAction(
+      variant: TvActionVariant.tile,
+      onPressed: onPressed,
+      leading: ServerTypeMark(type: server.serviceType, size: 28 * s),
+      trailing: Builder(
+        builder: (context) => Icon(
+          AppIcons.chevronRight,
+          fill: AppIcons.filled,
+          color: TvAction.secondaryColor(context),
+        ),
+      ),
+      child: Builder(
+        builder: (context) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              server.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppUiTheme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: TvAction.secondaryColor(context)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

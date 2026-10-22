@@ -18,6 +18,7 @@ import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
+import 'package:rillight/auth/server_management_widgets.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -299,59 +300,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                   children: [
                     _PhoneBrandHeader(l10n: l10n),
                     const SizedBox(height: 28),
-                    if (auth.savedServers.isNotEmpty) ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              l10n.savedServers,
-                              style: AppUiTheme.of(context).textTheme.titleSmall
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          AppButton.icon(
-                            key: const Key('phone-connect-manage-servers'),
-                            onPressed: auth.isBusy ? null : _manageServers,
-                            icon: const Icon(
-                              AppIcons.server,
-                              fill: AppIcons.filled,
-                              size: 16,
-                            ),
-                            label: Text(l10n.phoneManageServer),
-                            style: const AppButtonStyle(
-                              minimumSize: Size(44, 34),
-                              padding: EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                            ),
-                            variant: AppButtonVariant.outlined,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      SizedBox(
-                        height: 24 + MediaQuery.textScalerOf(context).scale(40),
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          clipBehavior: Clip.none,
-                          itemCount: auth.savedServers.length,
-                          separatorBuilder: (_, _) => const SizedBox(width: 10),
-                          itemBuilder: (context, index) {
-                            final server = auth.savedServers[index];
-                            return _PhoneServerChip(
-                              key: Key('phone-saved-server-${server.id}'),
-                              server: server,
-                              selected: _draft?.selectedServerId == server.id,
-                              onPressed: auth.isBusy
-                                  ? null
-                                  : () => setState(() => _select(server)),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
+                    ..._savedServers(context, l10n, auth),
+                    const SizedBox(height: 24),
                     ProviderLoginForm(
                       userAgent: () => _userAgent.text,
                       selectedServer: auth.savedServers
@@ -468,25 +418,6 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                               busyLabel: l10n.connecting,
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          AppButton.icon(
-                            key: const Key('android-connect-import'),
-                            onPressed: auth.isBusy
-                                ? null
-                                : () => unawaited(
-                                    showBackupImportFlow(context, auth: auth),
-                                  ),
-                            icon: const Icon(
-                              AppIcons.download,
-                              fill: AppIcons.filled,
-                              size: 17,
-                            ),
-                            label: Text(l10n.backupImportEntry),
-                            style: const AppButtonStyle(
-                              minimumSize: Size(48, 42),
-                            ),
-                            variant: AppButtonVariant.outlined,
-                          ),
                           const SizedBox(height: 4),
                           _buildMore(context, l10n, auth),
                         ],
@@ -500,6 +431,74 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
         ),
       ),
     );
+  }
+
+  /// 已保存的服务器只列最多 [_maxSavedCards] 张竖排紧凑卡,其余经「管理
+  /// 服务器」进入;导入备份与管理服务器同属一组次级入口。没有已保存服务器
+  /// 时只剩「导入备份」,不画空列表。
+  static const _maxSavedCards = 3;
+
+  List<Widget> _savedServers(
+    BuildContext context,
+    AppLocalizations l10n,
+    AuthController auth,
+  ) {
+    final theme = AppUiTheme.of(context);
+    final saved = auth.savedServers;
+    final selectedId = _draft?.selectedServerId;
+    // 选中的服务器即使排在第三张之后也留在卡片里,避免选中项看不见。
+    final shown = saved.take(_maxSavedCards).toList();
+    final selected = saved.where((s) => s.id == selectedId).firstOrNull;
+    if (selected != null && !shown.contains(selected)) {
+      shown[shown.length - 1] = selected;
+    }
+    final actions = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (saved.isNotEmpty)
+          AppActionButton(
+            key: const Key('phone-connect-manage-servers'),
+            onPressed: auth.isBusy ? null : _manageServers,
+            icon: AppIcons.server,
+            label: saved.length > _maxSavedCards
+                ? '${l10n.phoneManageServer} · ${saved.length}'
+                : l10n.phoneManageServer,
+          ),
+        AppActionButton(
+          key: const Key('android-connect-import'),
+          onPressed: auth.isBusy
+              ? null
+              : () => unawaited(showBackupImportFlow(context, auth: auth)),
+          icon: AppIcons.download,
+          label: l10n.backupImportEntry,
+        ),
+      ],
+    );
+    if (saved.isEmpty) return [actions];
+    return [
+      Semantics(
+        header: true,
+        child: Text(
+          l10n.savedServers,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      const SizedBox(height: 8),
+      for (final server in shown) ...[
+        _PhoneServerCard(
+          key: Key('phone-saved-server-${server.id}'),
+          server: server,
+          selected: selectedId == server.id,
+          onPressed: auth.isBusy ? null : () => setState(() => _select(server)),
+        ),
+        const SizedBox(height: 8),
+      ],
+      const SizedBox(height: 4),
+      actions,
+    ];
   }
 
   Widget _buildMore(
@@ -529,49 +528,39 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
             placeholder: '/emby',
           ),
           const SizedBox(height: 16),
-          Row(
+          // 标题与「添加 / 删除线路」放得下时同一行,200% 字号时按钮整组折行。
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
-              Expanded(
-                child: Text(
-                  l10n.lines,
-                  style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
-                    color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                  ),
+              Text(
+                l10n.lines,
+                style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
+                  color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              AppButton.icon(
-                key: const Key('android-connect-add-line'),
-                onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 16),
-                label: Text(l10n.addLine),
-                style: const AppButtonStyle(
-                  minimumSize: Size(44, 34),
-                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                ),
-                variant: AppButtonVariant.tinted,
-              ),
-              const SizedBox(width: 6),
-              AppButton.icon(
-                key: const Key('android-connect-delete-line'),
-                onPressed: auth.isBusy || !canDelete
-                    ? null
-                    : () => _deleteLine(auth),
-                icon: const Icon(
-                  AppIcons.link,
-                  fill: AppIcons.filled,
-                  size: 16,
-                ),
-                label: Text(l10n.deleteLine),
-                style: AppButtonStyle(
-                  minimumSize: const Size(44, 34),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  AppActionButton(
+                    key: const Key('android-connect-add-line'),
+                    onPressed: auth.isBusy ? null : _addExtraLine,
+                    icon: AppIcons.add,
+                    label: l10n.addLine,
                   ),
-                  foregroundColor: AppUiTheme.of(context).colorScheme.error,
-                ),
-                variant: AppButtonVariant.outlined,
+                  AppActionButton(
+                    key: const Key('android-connect-delete-line'),
+                    tier: AppActionTier.tertiary,
+                    onPressed: auth.isBusy || !canDelete
+                        ? null
+                        : () => _deleteLine(auth),
+                    label: l10n.deleteLine,
+                  ),
+                ],
               ),
             ],
           ),
@@ -635,9 +624,10 @@ class _PhoneBrandHeader extends StatelessWidget {
   }
 }
 
-/// 已保存服务器的横滑卡片:服务标记 + 名称 + 地址,选中描主色边。
-class _PhoneServerChip extends StatelessWidget {
-  const _PhoneServerChip({
+/// 已保存服务器的竖排紧凑卡:服务标记 + 名称 + 「账号 · 当前线路」,
+/// 选中描主色边。高度随字号增长,不固定行高。
+class _PhoneServerCard extends StatelessWidget {
+  const _PhoneServerCard({
     super.key,
     required this.server,
     required this.selected,
@@ -652,6 +642,11 @@ class _PhoneServerChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final line = server.activeLine;
+    final lineLabel = line == null ? server.baseUrl : serverLineLabel(line);
+    final subtitle = server.username.isEmpty
+        ? lineLabel
+        : '${server.username} · $lineLabel';
     return Semantics(
       button: true,
       selected: selected,
@@ -669,15 +664,14 @@ class _PhoneServerChip extends StatelessWidget {
         child: AppSurfaceAction(
           onTap: onPressed,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 150, maxWidth: 230),
+            constraints: const BoxConstraints(minHeight: 56),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   ServerTypeMark(type: server.serviceType, size: 30),
-                  const SizedBox(width: 10),
-                  Flexible(
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -691,25 +685,25 @@ class _PhoneServerChip extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          server.activeLine?.hostLabel ?? server.baseUrl,
+                          subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                            color: selected
+                                ? scheme.onPrimaryContainer
+                                : scheme.onSurfaceVariant,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  if (selected) ...[
-                    const SizedBox(width: 8),
-                    Icon(
-                      AppIcons.checkCircle,
-                      fill: AppIcons.filled,
-                      size: 18,
-                      color: scheme.primary,
-                    ),
-                  ],
+                  const SizedBox(width: 8),
+                  Icon(
+                    selected ? AppIcons.checkCircle : AppIcons.chevronRight,
+                    fill: AppIcons.filled,
+                    size: 18,
+                    color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                  ),
                 ],
               ),
             ),

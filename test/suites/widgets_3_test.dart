@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/mobile_shell_nav_cases.dart' as case1;
-import '../app_shell_cases.dart' as case2;
-import '../auth/change_password_cases.dart' as case3;
-import '../auth/connect_page_cases.dart' as case4;
-import '../auth/provider_connect_entry_user_agent_cases.dart' as case5;
-import '../catalog/item_detail_cases.dart' as case6;
-import '../library/episode_list_scroll_cases.dart' as case7;
-import '../player/phone_presentation_lifecycle_cases.dart' as case8;
-import '../tv/tv_frame_cases.dart' as case9;
-import '../tv/tv_shell_nav_cases.dart' as case10;
+import '../app/browse_menu_cases.dart' as case1;
+import '../auth/change_password_cases.dart' as case2;
+import '../auth/provider_connect_entry_user_agent_cases.dart' as case3;
+import '../catalog/item_detail_cases.dart' as case4;
+import '../library/episode_list_scroll_cases.dart' as case5;
+import '../mobile/detail_route_identity_cases.dart' as case6;
+import '../mobile/phone_nav_style_cases.dart' as case7;
+import '../mobile/phone_player_interaction_cases.dart' as case8;
+import '../mobile/tv_shell_navigation_cases.dart' as case9;
+import '../player/desktop_player_window_host_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 3]',
     () => case0.mainShard(2, 6),
   );
-  group('app/mobile_shell_nav_test.dart', case1.main);
-  group('app_shell_test.dart', case2.main);
-  group('auth/change_password_test.dart', case3.main);
-  group('auth/connect_page_test.dart', case4.main);
-  group('auth/provider_connect_entry_user_agent_test.dart', case5.main);
-  group('catalog/item_detail_test.dart [part 1]', () => case6.mainShard(0, 3));
-  group('library/episode_list_scroll_test.dart', case7.main);
-  group('player/phone_presentation_lifecycle_test.dart', case8.main);
-  group('tv/tv_frame_test.dart', case9.main);
-  group('tv/tv_shell_nav_test.dart', case10.main);
+  group('app/browse_menu_test.dart', case1.main);
+  group('auth/change_password_test.dart', case2.main);
+  group('auth/provider_connect_entry_user_agent_test.dart', case3.main);
+  group('catalog/item_detail_test.dart [part 1]', () => case4.mainShard(0, 3));
+  group('library/episode_list_scroll_test.dart', case5.main);
+  group('mobile/detail_route_identity_test.dart', case6.main);
+  group('mobile/phone_nav_style_test.dart', case7.main);
+  group('mobile/phone_player_interaction_test.dart', case8.main);
+  group('mobile/tv_shell_navigation_test.dart', case9.main);
+  group('player/desktop_player_window_host_test.dart', case10.main);
 }
