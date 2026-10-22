@@ -669,6 +669,13 @@
     ]
   },
   {
+    "id": "login-saved-servers-expanded",
+    "feature": "login",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
     "id": "login-validation",
     "feature": "login",
     "platforms": [
@@ -1241,10 +1248,21 @@
     ]
   },
   {
+    "id": "series-season-overflow",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
     "id": "series-season-picker",
     "feature": "detail",
     "platforms": [
-      "desktop"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {

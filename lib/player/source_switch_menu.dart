@@ -297,11 +297,10 @@ Future<void> showPlaybackLineDialog(
               ),
               Padding(
                 padding: const EdgeInsets.all(12),
-                child: AppActionButton(
+                child: AppButton(
                   key: const Key('playback-lines-close'),
-                  tier: AppActionTier.tertiary,
                   onPressed: () => Navigator.pop(dialogContext),
-                  label: l10n.serversDismiss,
+                  child: Text(l10n.serversDismiss),
                 ),
               ),
             ],
@@ -415,15 +414,11 @@ class PlaybackLineMenu extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 child: Text(l10n.playbackLinePending),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: AppActionButton(
-                  key: const Key('playback-line-cancel'),
-                  tier: AppActionTier.secondary,
-                  onPressed: controller.cancelLineRecovery,
-                  icon: AppIcons.close,
-                  label: l10n.cancelAction,
-                ),
+              AppButton(
+                key: const Key('playback-line-cancel'),
+                onPressed: controller.cancelLineRecovery,
+                variant: AppButtonVariant.outlined,
+                child: Text(l10n.cancelAction),
               ),
             ],
             AppListTile(

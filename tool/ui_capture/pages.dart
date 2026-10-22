@@ -164,6 +164,31 @@ extension PageCaptures on CaptureSession {
     await dismiss();
   }
 
+  /// 多季剧（特别篇加 14 季）：三端季标签都放不下，切换器折叠为「当前季 ˅」。
+  /// 先截入口所在的剧集页，再点开桌面菜单、手机单选表或 TV 选择列表。
+  Future<void> captureSeasonOverflow(RillightApp app) async {
+    if (!shouldCapture('series-season-overflow') &&
+        !shouldCapture('series-season-picker')) {
+      return;
+    }
+    app.router.go('/item/series-long');
+    await advance(900);
+    final picker = find.byKey(CatalogKeys.seasonPicker);
+    expect(
+      picker,
+      findsOneWidget,
+      reason: 'Fifteen seasons must fold the switcher into a picker',
+    );
+    expect(find.byKey(CatalogKeys.seasonTab('season-long-1')), findsNothing);
+    expect(find.byKey(CatalogKeys.season('season-long-1')), findsNothing);
+    expect(find.byKey(const ValueKey('season-long-1')), findsNothing);
+    // 与点开下拉时的滚动位置一致，两张截图可直接对照。
+    await Scrollable.ensureVisible(tester.element(picker), alignment: .5);
+    await advance(300);
+    await save('series-season-overflow');
+    await modal(CatalogKeys.seasonPicker, 'series-season-picker');
+  }
+
   Future<void> pages(
     RillightApp app,
     AuthController auth,
@@ -466,10 +491,8 @@ extension PageCaptures on CaptureSession {
         await tap(CatalogKeys.season('season-friends-1'));
         await save('series-first-season-artwork');
       }
-
-      if (platform == 'desktop') {
-        await modal(CatalogKeys.seasonPicker, 'series-season-picker');
-      }
+      // 两季时季切换器是并排标签；多季剧放不下时折叠为下拉入口。
+      await captureSeasonOverflow(app);
       await route(
         app,
         '/item/series-friends?season=season-friends-1',
@@ -1292,6 +1315,18 @@ extension PageCaptures on CaptureSession {
   Future<void> loginPages(RillightApp app, AuthController auth) async {
     await tester.runAsync(auth.logout);
     await route(app, '/connect', 'login-saved-servers');
+    if (platform == 'desktop') {
+      // 多线路服务器卡默认折叠；点「N 条线路」展开各条线路。
+      final server = auth.savedServers.firstWhere(
+        (server) => server.lines.length > 1,
+      );
+      final toggle = ConnectFormKeys.savedServerLines(server.id);
+      await tap(toggle);
+      expect(find.byKey(Key('saved-line-${server.lines.last.id}')), findsOne);
+      await save('login-saved-servers-expanded');
+      // 收起，后续状态仍是默认的折叠卡。
+      await tap(toggle);
+    }
     for (final provider in ['jellyfin', 'plex']) {
       await tap(Key('login-provider-$provider'));
       await save('login-$provider');

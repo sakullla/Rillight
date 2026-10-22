@@ -340,6 +340,7 @@ FakeEmbyServer captureServer() {
       mediaStreams: streams,
     ),
   ]);
+  _addLongSeries(server, streams);
   final denseStreams = _denseStreams();
   server.items.add(
     FakeEmbyItem(
@@ -365,6 +366,62 @@ FakeEmbyServer captureServer() {
     ),
   );
   return server;
+}
+
+/// 多季剧夹具：特别篇加 14 季，三端季标签都放不下，季切换器折叠为
+/// 「当前季 ˅」入口（`series-season-overflow` / `series-season-picker`）。
+///
+/// 不挂在任何媒体库下，片库与搜索截图不出现它；入库日期取最早，只排在
+/// 「最近更新的剧集」货架末尾。
+void _addLongSeries(FakeEmbyServer server, List<FakeMediaStream> streams) {
+  final added = DateTime.utc(2001, 1, 1);
+  server.items.add(
+    FakeEmbyItem(
+      id: 'series-long',
+      name: '港湾灯塔',
+      type: 'Series',
+      parentId: 'view-capture-archive',
+      overview: '海边小镇的灯塔守护人一家，跨越十余年的四季与潮汐。',
+      productionYear: 2008,
+      childCount: 15,
+      primaryImageTag: 'tag-long',
+      communityRating: 8.4,
+      genres: const ['剧情', '家庭'],
+      dateCreated: added,
+    ),
+  );
+  server.setSeasons('series-long', [
+    const FakeSeason(
+      id: 'season-long-0',
+      name: '特别篇',
+      indexNumber: 0,
+      primaryImageTag: 'long-s0',
+    ),
+    for (var season = 1; season <= 14; season++)
+      FakeSeason(
+        id: 'season-long-$season',
+        name: '第 $season 季',
+        indexNumber: season,
+        primaryImageTag: 'long-s$season',
+      ),
+  ]);
+  server.setEpisodes('series-long', [
+    for (var i = 1; i <= 12; i++)
+      FakeEpisode(
+        id: 'episode-long-s1e$i',
+        name: '潮汐 $i',
+        seasonId: 'season-long-1',
+        indexNumber: i,
+        parentIndexNumber: 1,
+        primaryImageTag: 'long-e$i',
+        runtime: const Duration(minutes: 45),
+        premiereDate: DateTime.utc(2008, 4, 6).add(Duration(days: 7 * (i - 1))),
+        overview: '风暴前夜，守塔人在旧航海日志里发现了一段被撕掉的记录。',
+        mediaStreams: streams,
+        played: i <= 3,
+        dateCreated: added,
+      ),
+  ]);
 }
 
 /// 首页整页失败/空态捕获的合成传输故障。
