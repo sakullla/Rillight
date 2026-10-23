@@ -738,8 +738,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             recovery = null;
             _openingRecoveryBudget = null;
             attemptedLines.clear();
-            resolvedOrigin = await runtime!.resolve(request);
-            launch = await prepareLaunch(resolvedOrigin, null);
+            final opened = await runtime!.resolve(request);
+            resolvedOrigin = opened;
+            launch = await prepareLaunch(opened, null);
           }
         } else {
           resolvedOrigin = prepared ?? await runtime!.resolve(request);

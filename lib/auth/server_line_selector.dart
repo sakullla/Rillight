@@ -194,13 +194,12 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     } finally {
       if (!mounted || ticket != _checksTicket) {
         checking.remove(line.id);
-        return;
+      } else if (checking.contains(line.id) || busy == line.id) {
+        setState(() {
+          checking.remove(line.id);
+          if (busy == line.id) busy = null;
+        });
       }
-      if (!checking.contains(line.id) && busy != line.id) return;
-      setState(() {
-        checking.remove(line.id);
-        if (busy == line.id) busy = null;
-      });
     }
   }
 

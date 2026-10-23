@@ -2,7 +2,6 @@ import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -18,6 +17,7 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/catalog_keys.dart';
 
 import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/player/player_bindings.dart';
