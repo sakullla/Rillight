@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -241,6 +244,9 @@ class _TvDetailPageState extends State<TvDetailPage> {
                   _TvDetailBackdrop(
                     item: item,
                     artwork: artwork,
+                    holdUntilReady: item.isSeries,
+                    blockAdvance: c.episodeError != null,
+                    settled: c.episodeError == null && !c.episodesLoading,
                     scrolled: _scrolled,
                   ),
                 NotificationListener<ScrollNotification>(
@@ -763,22 +769,237 @@ class _TvEpisodeRowState extends State<_TvEpisodeRow> {
 }
 
 /// 整屏背景:选定条目的宣传图,左侧与底部压暗;页面下滚时整体再压暗。
-class _TvDetailBackdrop extends StatelessWidget {
+///
+/// 剧集切季时,上一张已绘制的图留到新季头图按同一候选和请求宽度进入缓存。
+/// 未就绪或加载失败不换成新季的 [MediaImage];分集失败则退回切换前。
+class _TvDetailBackdrop extends StatefulWidget {
   const _TvDetailBackdrop({
     required this.item,
     required this.artwork,
+    required this.holdUntilReady,
+    required this.blockAdvance,
+    required this.settled,
     required this.scrolled,
   });
 
   final MediaItem item;
   final MediaItem? artwork;
+
+  /// 为真时,新头图能绘制前不更换正在显示的图。
+  final bool holdUntilReady;
+
+  /// 这一季的分集失败。进行中的换图取消,已经换上的退回切换前。
+  final bool blockAdvance;
+
+  /// 分集请求已经结束且没有错误。可以丢掉退回用的上一张图。
+  final bool settled;
   final ValueListenable<double> scrolled;
+
+  @override
+  State<_TvDetailBackdrop> createState() => _TvDetailBackdropState();
+}
+
+class _TvDetailBackdropState extends State<_TvDetailBackdrop> {
+  MediaItem? _shown;
+  MediaItem? _before;
+  String? _advancingId;
+  String? _failedId;
+  int _serial = 0;
+
+  bool get _preferBackdrop => !widget.item.isEpisode;
+
+  bool get _preferParentBackdrop => widget.item.isEpisode;
+
+  MediaItem get _requested => widget.artwork ?? widget.item;
+
+  @override
+  void initState() {
+    super.initState();
+    _shown = _requested;
+  }
+
+  @override
+  void didUpdateWidget(_TvDetailBackdrop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    _serial++;
+    super.dispose();
+  }
+
+  void _sync() {
+    final requested = _requested;
+    if (!widget.holdUntilReady) {
+      _serial++;
+      _advancingId = null;
+      _failedId = null;
+      _before = null;
+      _shown = requested;
+      return;
+    }
+    _shown ??= requested;
+    final identity = _imageIdentity(requested);
+    if (widget.blockAdvance) {
+      _serial++;
+      _advancingId = null;
+      final shown = _shown;
+      final before = _before;
+      if (before != null &&
+          shown != null &&
+          _imageIdentity(shown) == identity) {
+        _shown = before;
+        _before = null;
+      }
+      return;
+    }
+    if (_imageIdentity(_shown!) == identity) {
+      if (widget.settled) {
+        _before = null;
+        _advancingId = null;
+        _failedId = null;
+      }
+      return;
+    }
+    if (_failedId != null && _failedId != identity) _failedId = null;
+    if (_failedId == identity || _advancingId == identity) return;
+    _advancingId = identity;
+    final serial = ++_serial;
+    final previous = _shown!;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || serial != _serial || _advancingId != identity) return;
+      unawaited(
+        _reveal(requested, identity, previous, serial, _requestWidth()),
+      );
+    });
+  }
+
+  Future<void> _reveal(
+    MediaItem requested,
+    String identity,
+    MediaItem previous,
+    int serial,
+    int width,
+  ) async {
+    final ready = await _artworkReady(
+      requested,
+      maxWidth: width,
+      current: () =>
+          mounted &&
+          serial == _serial &&
+          !widget.blockAdvance &&
+          _imageIdentity(_requested) == identity,
+    );
+    if (!mounted || serial != _serial || widget.blockAdvance) return;
+    if (_imageIdentity(_requested) != identity) return;
+    if (!ready) {
+      _failedId = identity;
+      _advancingId = null;
+      return;
+    }
+    setState(() {
+      _before = previous;
+      _shown = requested;
+      _advancingId = null;
+    });
+  }
+
+  String _imageIdentity(MediaItem item) =>
+      '${item.id}|${item.primaryImageTag}|${item.thumbImageTag}|'
+      '${item.backdropImageTag}|${item.parentBackdropItemId}|'
+      '${item.parentBackdropImageTag}|${item.seriesPrimaryImageTag}';
+
+  int _requestWidth() {
+    final size = MediaQuery.sizeOf(context);
+    return mediaHeroBackdropRequestWidth(
+      layoutWidth: size.width,
+      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      max: kMediaBackdropTvMaxRequestWidth,
+    );
+  }
+
+  /// 与背景 [MediaImage] 同一条候选和请求宽度。字节进缓存后才允许换图。
+  Future<bool> _artworkReady(
+    MediaItem artwork, {
+    required int maxWidth,
+    required bool Function() current,
+  }) async {
+    if (!current()) return false;
+    final auth = AuthScope.maybeOf(context);
+    final policy = DetailSourceScope.imagePolicyOf(context);
+    final scope = policy != null
+        ? (policy.isValid ? policy.scope : null)
+        : mediaImageAccountScope(auth);
+    if (scope == null) return false;
+    final client =
+        DetailSourceScope.maybeOf(context)?.client ?? auth?.imageClient;
+    if (client == null) return false;
+    final candidates = artwork.imageCandidates(
+      preferBackdrop: _preferBackdrop,
+      preferParentBackdrop: _preferParentBackdrop,
+    );
+    for (final candidate in candidates) {
+      if (!current()) return false;
+      final peeked = MediaImageCache.instance.peek(
+        serverId: scope,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      );
+      if (peeked != null && peeked.isNotEmpty) return true;
+      if (MediaImageCache.instance.isNegativeCached(
+        serverId: scope,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      )) {
+        continue;
+      }
+      CancelToken? token;
+      try {
+        final bytes = await MediaImageCache.instance.load(
+          policy: policy,
+          serverId: scope,
+          itemId: candidate.itemId,
+          type: candidate.type,
+          tag: candidate.tag,
+          maxWidth: maxWidth,
+          isCurrent: current,
+          inViewport: current,
+          fetch: () async {
+            if (!current()) return null;
+            token = CancelToken();
+            final data = await client.getItemImage(
+              candidate.itemId,
+              type: candidate.type,
+              tag: candidate.tag,
+              maxWidth: maxWidth,
+              cancelToken: token,
+            );
+            if (data.isEmpty) return null;
+            return Uint8List.fromList(data);
+          },
+          onAbort: () => token?.cancel('tv-season-artwork'),
+        );
+        if (!current()) return false;
+        if (bytes != null && bytes.isNotEmpty) return true;
+      } catch (_) {
+        // 下一张候选仍可能画得出来。
+      }
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final size = MediaQuery.sizeOf(context);
     final page = theme.scaffoldBackgroundColor;
+    final shown = _shown ?? _requested;
     return Stack(
       key: const Key('tv-detail-backdrop'),
       fit: StackFit.expand,
@@ -786,10 +1007,12 @@ class _TvDetailBackdrop extends StatelessWidget {
         ColoredBox(color: theme.colorScheme.surfaceContainerLowest),
         RepaintBoundary(
           child: MediaImage(
-            item: artwork ?? item,
+            item: shown,
             smartCrop: true,
-            preferBackdrop: !item.isEpisode,
-            preferParentBackdrop: item.isEpisode,
+            preferBackdrop: _preferBackdrop,
+            preferParentBackdrop: _preferParentBackdrop,
+            // 默认不保留上一帧。这里只盖住换源后的解码空隙,不改 MediaImage 的默认值。
+            retainVisibleFrame: true,
             maxWidth: mediaHeroBackdropRequestWidth(
               layoutWidth: size.width,
               devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
@@ -814,7 +1037,7 @@ class _TvDetailBackdrop extends StatelessWidget {
         ),
         // 下滚后逐步压暗,分集与信息不和背景图抢对比度。
         ValueListenableBuilder<double>(
-          valueListenable: scrolled,
+          valueListenable: widget.scrolled,
           builder: (context, offset, _) {
             final t = (offset / (size.height * .45)).clamp(0.0, 1.0);
             if (t == 0) return const SizedBox.shrink();

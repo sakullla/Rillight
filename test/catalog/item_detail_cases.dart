@@ -747,6 +747,55 @@ void main() {
       await tester.tap(retry);
       await settle(tester);
       expect(_loadedEpisodeIds(tester), ['ep-s3']);
+
+      // 缓存分集先写入、随后网络失败:错误和重试仍在分集区,头图留在切换前。
+      await tester.ensureVisible(picker);
+      await tester.tap(picker);
+      await settle(tester);
+      await tester.tap(find.byKey(CatalogKeys.seasonOption('season-5')));
+      await settle(tester);
+      expect(_loadedEpisodeIds(tester), ['ep-s5']);
+      final heroBeforeFailure = tester.widget<MediaImage>(hero).item.id;
+      final again = Completer<void>();
+      addTearDown(() {
+        if (!again.isCompleted) again.complete();
+      });
+      server.episodeHolds['season-3'] = again;
+      server.failEpisodesOf = 'season-3';
+      await tester.ensureVisible(picker);
+      await tester.tap(picker);
+      await settle(tester);
+      await tester.tap(find.byKey(CatalogKeys.seasonOption('season-3')));
+      var sawCachedSeason = false;
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        final loading = tester.widget<EpisodeList>(find.byType(EpisodeList));
+        final ids = loading.episodes.map((episode) => episode.id).join(',');
+        if (loading.loading && loading.error == null && ids == 'ep-s3') {
+          sawCachedSeason = true;
+          break;
+        }
+      }
+      expect(sawCachedSeason, isTrue);
+      again.complete();
+      await settle(tester);
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.textContaining('season-episodes-failed'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text('重试')),
+        findsOneWidget,
+      );
+      final failed = tester.widget<EpisodeList>(find.byType(EpisodeList));
+      expect(failed.episodes, isEmpty);
+      expect(failed.error, isNotNull);
+      expect(tester.widget<MediaImage>(hero).item.id, heroBeforeFailure);
+      expect(find.byKey(ItemDetailPage.titleKey), findsOneWidget);
+      expect(find.byKey(ItemDetailPage.actionRowKey), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

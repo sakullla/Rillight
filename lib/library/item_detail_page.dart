@@ -1611,9 +1611,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
       if (item.isSeries) ...[
         EpisodeList(
-          episodes: _episodeError != null && !_episodesBelongTo(_seasonId)
-              ? const <MediaItem>[]
-              : _episodes,
+          // 缓存分集已经属于当前季时，失败仍要空列表，错误和重试才会画出来。
+          episodes: _episodeError != null ? const <MediaItem>[] : _episodes,
           currentId: _focusedEpisodeId ?? playTarget?.id,
           revealToken: _episodeReveal,
           loading: _episodesLoading,
@@ -1621,7 +1620,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           onRetry: _seasonId == null
               ? () => unawaited(_load(keepChrome: true))
               : () => unawaited(_selectSeason(_seasonId!)),
-          hasMore: _episodeWindowEnd < _episodeTotal,
+          hasMore: _episodeError == null && _episodeWindowEnd < _episodeTotal,
           loadingMore: _loadingMore,
           loadMoreError: _episodeLoadMoreError,
           onRetryLoadMore: _retryEpisodeContinuation,
