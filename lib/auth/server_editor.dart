@@ -731,24 +731,51 @@ class _ServerIconChoice extends StatelessWidget {
   }
 }
 
-/// 编辑器线路行的副标题:地址放不下时省略地址尾部,自动选择与延迟等
-/// 状态标记始终完整显示。
+/// 编辑器线路行的副标题:地址与自动选择、延迟等状态标记。
+///
+/// 地址和标记一行放得下时同行显示;放不下(窄屏手机、大字号)时地址独占
+/// 一行(过长省略尾部),标记另起一行并可继续折行,两者都不会被挤没。
 class _LineSubtitle extends StatelessWidget {
   const _LineSubtitle({required this.address, required this.marks});
   final String address;
   final List<String> marks;
   @override
   Widget build(BuildContext context) {
-    if (marks.isEmpty) {
-      return Text(address, maxLines: 1, overflow: TextOverflow.ellipsis);
-    }
-    return Row(
-      children: [
-        Flexible(
-          child: Text(address, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-        Text(' · ${marks.join(' · ')}', maxLines: 1),
-      ],
+    final addressText = Text(
+      address,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    if (marks.isEmpty) return addressText;
+    final status = marks.join(' · ');
+    final inline = '$address · $status';
+    final style = DefaultTextStyle.of(context).style;
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: inline, style: style),
+          textDirection: direction,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout(maxWidth: constraints.maxWidth);
+        final fits = !painter.didExceedMaxLines;
+        painter.dispose();
+        if (fits) {
+          return Row(
+            children: [
+              Flexible(child: addressText),
+              Text(' · $status', maxLines: 1),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [addressText, Text(status)],
+        );
+      },
     );
   }
 }

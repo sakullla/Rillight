@@ -1360,31 +1360,65 @@ void main() {
     return (auth, saved.id, activeId, standbyId);
   }
 
-  for (final (phone, automatic) in [(false, true), (true, false)]) {
+  // 窄屏手机上「自动选择 · 42 ms」放不进地址同一行时,地址与标记分两行,
+  // 地址不能被挤成零宽,也不能溢出。
+  for (final (phone, automatic, scale) in [
+    (false, true, 1.0),
+    (true, false, 1.0),
+    (true, true, 1.0),
+    (true, true, 1.3),
+    (true, true, 2.0),
+  ]) {
     testWidgets(
-      'server editor line rows show current marker and latency on ${phone ? "phone" : "desktop"} (${automatic ? "auto" : "fixed"})',
+      'server editor line rows show current marker and latency on ${phone ? "phone 360" : "desktop"} (${automatic ? "auto" : "fixed"}, text x$scale)',
       (tester) async {
-        tester.view.physicalSize = Size(phone ? 360 : 1200, 900);
+        tester.view.physicalSize = Size(phone ? 360 : 1200, phone ? 800 : 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         final (auth, id, activeId, standbyId) = await editorLines(
           tester,
           automatic: automatic,
         );
-        await pumpServerSelection(tester, auth, phone: phone);
+        final activeAddress = serverSafeAddress(
+          auth.savedServers.single.lines
+              .firstWhere((line) => line.id == activeId)
+              .address,
+        );
+        await pumpServerSelection(tester, auth, phone: phone, scale: scale);
         await openServerEditor(tester, id);
+        expect(tester.takeException(), isNull);
+        final activeRow = find.byKey(Key('server-editor-line-$activeId'));
+        await tester.ensureVisible(activeRow);
+        await settle(tester);
         Finder inRow(String lineId, Finder matching) => find.descendant(
           of: find.byKey(Key('server-editor-line-$lineId')),
           matching: matching,
         );
         expect(inRow(activeId, find.text('当前')), findsOneWidget);
-        expect(
-          inRow(
-            activeId,
-            find.text(automatic ? ' · 自动选择 · 42 ms' : ' · 42 ms'),
-          ),
-          findsOneWidget,
-        );
+        final status = automatic ? '自动选择 · 42 ms' : '42 ms';
+        final address = inRow(activeId, find.text(activeAddress));
+        expect(address, findsOneWidget);
+        // 地址不能被状态标记挤成零宽。
+        expect(tester.getSize(address).width, greaterThan(60));
+        final sameLine = inRow(activeId, find.text(' · $status'));
+        final ownLine = inRow(activeId, find.text(status));
+        if (phone || !tester.any(sameLine)) {
+          // 放不下时(测试字体下 360dp 手机必然如此)地址独占一行,
+          // 标记另起一行。
+          expect(sameLine, findsNothing);
+          expect(ownLine, findsOneWidget);
+          expect(
+            tester.getTopLeft(ownLine).dy,
+            greaterThanOrEqualTo(tester.getBottomLeft(address).dy),
+          );
+        } else {
+          // 放得下时地址与标记同行。
+          expect(ownLine, findsNothing);
+          expect(
+            tester.getCenter(sameLine).dy,
+            closeTo(tester.getCenter(address).dy, 1),
+          );
+        }
         expect(inRow(standbyId, find.text('当前')), findsNothing);
         expect(inRow(standbyId, find.textContaining('自动选择')), findsNothing);
         expect(inRow(standbyId, find.textContaining('ms')), findsNothing);
