@@ -700,11 +700,17 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           PlaybackRecoveryCandidate candidate(ServerLine line) =>
               PlaybackRecoveryCandidate(line.id, (window) async {
                 final result = await window.run(() async {
-                  final origin = await runtime!.resolveInitialLine(
-                    request,
-                    line.id,
-                    window.remaining,
-                  );
+                  // The line already attached to this session uses the same
+                  // resolve as a fixed line, so catalog art and observations
+                  // stay on that client. Other lines still open on their own.
+                  final origin =
+                      Uri.tryParse(line.address) == auth.client.baseUrl
+                      ? await runtime!.resolve(request)
+                      : await runtime!.resolveInitialLine(
+                          request,
+                          line.id,
+                          window.remaining,
+                        );
                   window.check();
                   final preparedLaunch = await prepareLaunch(origin, window);
                   window.check();

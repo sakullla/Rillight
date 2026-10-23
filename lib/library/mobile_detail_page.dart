@@ -132,8 +132,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     }
     final previousArtwork = _artworkSeasonId;
     final serial = ++_artworkSerial;
+    // selectSeason publishes the new id before its first await. The artwork
+    // check treats any other id as stale, so it has to start after that write.
+    final pending = controller.selectSeason(id);
     unawaited(_revealSeasonArtwork(id, serial));
-    await controller.selectSeason(id);
+    await pending;
     if (!mounted || serial != _artworkSerial) return;
     if (controller.episodeError != null &&
         _artworkSeasonId != previousArtwork) {

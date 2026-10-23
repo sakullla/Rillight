@@ -1573,7 +1573,6 @@ void main() {
             seasonId: 'season-friends-1',
             indexNumber: 1,
             parentIndexNumber: 1,
-            played: true,
           ),
           FakeEpisode(
             id: 'episode-s2',
@@ -1601,9 +1600,12 @@ void main() {
         );
       },
     );
-    unawaited(harness.router.push('/item/series-friends'));
+    unawaited(
+      harness.router.push('/item/series-friends?season=season-friends-1'),
+    );
     await settle(tester);
     expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
+    // 显式打开第一季。续播扫描不会先把第二季写进目录缓存。
     holdSeason = true;
     final second = find.byKey(CatalogKeys.season('season-friends-2'));
     await tester.ensureVisible(second);
@@ -1614,7 +1616,21 @@ void main() {
     expect(find.text('第二季试点'), findsNothing);
     expect(find.byKey(const Key('mobile-detail-play')), findsOneWidget);
     expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
-    expect(find.byKey(const Key('phone-detail-pending-header')), findsNothing);
+    // 已加载的头图和占位骨架共用这个 key。切季必须留在横幅上，不能换成整页骨架。
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('phone-detail-pending-header')),
+        matching: find.byKey(PhoneItemBanner.bannerKey),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('phone-detail-pending-header')),
+        matching: find.byType(SkeletonBlock),
+      ),
+      findsNothing,
+    );
     episodes.complete();
     await settle(tester);
     expect(_seasonSelected(tester, 'season-friends-2'), isTrue);
@@ -2810,7 +2826,11 @@ Future<_Started> _start(
         pageBuilder: (context, state) => PhoneMotion.detailPage(
           context: context,
           state: state,
-          child: MobileDetailPage(itemId: state.pathParameters['itemId']!),
+          child: MobileDetailPage(
+            itemId: state.pathParameters['itemId']!,
+            initialSeasonId: state.uri.queryParameters['season'],
+            initialEpisodeId: state.uri.queryParameters['episode'],
+          ),
         ),
       ),
     ],

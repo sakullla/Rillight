@@ -666,9 +666,10 @@ class AuthController extends ChangeNotifier {
     if (stored == null || !_savedEmbyCredentials(server, stored)) return -1;
     final line = server.activeLine ?? server.lines.firstOrNull;
     if (line == null) return 0;
-    _extendedDomainChecks.add(id);
+    // A factory that cannot detach must not undo restore or a deferred entry.
     final probe = _discoveryClient();
     if (probe == null) return 0;
+    _extendedDomainChecks.add(id);
     var added = 0;
     try {
       probe.attachSession(
@@ -720,20 +721,34 @@ class AuthController extends ChangeNotifier {
   }
 
   EmbyClient? _discoveryClient() {
-    final created = createProviderClient(MediaServerType.emby);
-    final live = identical(created, _client) || identical(created, client);
-    final probe = live ? created.createDetached() : created;
-    if (probe is! EmbyClient ||
-        identical(probe, _client) ||
-        identical(probe, client)) {
-      if (!identical(probe, _client) && !identical(probe, client)) {
-        probe.clearSession();
+    MediaServerClient? created;
+    try {
+      created = createProviderClient(MediaServerType.emby);
+      final live = identical(created, _client) || identical(created, client);
+      final probe = live ? created.createDetached() : created;
+      if (probe is! EmbyClient ||
+          identical(probe, _client) ||
+          identical(probe, client)) {
+        if (!identical(probe, _client) && !identical(probe, client)) {
+          probe.clearSession();
+        }
+        return null;
+      }
+      probe.onSessionExpired = null;
+      probe.onRefreshSession = null;
+      return probe;
+    } on Object {
+      if (created != null &&
+          !identical(created, _client) &&
+          !identical(created, client)) {
+        try {
+          created.clearSession();
+        } on Object {
+          // The unused probe is already unusable. Keep the browsing session.
+        }
       }
       return null;
     }
-    probe.onSessionExpired = null;
-    probe.onRefreshSession = null;
-    return probe;
   }
 
   void _discardDiscoveryClient(MediaServerClient probe) {

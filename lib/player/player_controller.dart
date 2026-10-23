@@ -1014,9 +1014,12 @@ class PlayerController extends ChangeNotifier {
             activeLineId = line.id;
           }
         }
-      } catch (_) {
+      } catch (failure) {
         loading = false;
         error = PlayerErrorKind.load;
+        // Automatic attempts can fail inside resolve, before _start records
+        // the catalog exception. Keep that exception for the load message.
+        if (failure is MediaServerException) loadFailure = failure;
         state.phase = PlaybackPhase.failed;
         disconnectDetail = 'Playback source permission unavailable';
         _emit();
