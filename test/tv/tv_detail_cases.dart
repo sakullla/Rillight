@@ -2,8 +2,12 @@ import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
 
 import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -765,6 +769,144 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  cases.testWidgets(
+    'season change keeps the drawn backdrop until the next frame is ready',
+    (tester) async {
+      final server = _HeldImageServer();
+      server.setSeasons('series-friends', const [
+        FakeSeason(
+          id: 'season-friends-1',
+          name: '第 1 季',
+          indexNumber: 1,
+          backdropImageTag: 'bd-s1',
+        ),
+        FakeSeason(
+          id: 'season-friends-2',
+          name: '第 2 季',
+          indexNumber: 2,
+          backdropImageTag: 'bd-s2',
+        ),
+      ]);
+      server.setEpisodes('series-friends', const [
+        FakeEpisode(
+          id: 'episode-s1',
+          name: '第一季开头',
+          seasonId: 'season-friends-1',
+          indexNumber: 1,
+          parentIndexNumber: 1,
+        ),
+        FakeEpisode(
+          id: 'episode-s2',
+          name: '第二季开头',
+          seasonId: 'season-friends-2',
+          indexNumber: 1,
+          parentIndexNumber: 2,
+        ),
+      ]);
+      final hold = Completer<void>();
+      addTearDown(() {
+        if (!hold.isCompleted) hold.complete();
+      });
+      final app = await start(tester, server);
+      await login(tester, server);
+      await openItem(tester, app, 'series-friends');
+      final backdrop = find.byKey(const Key('tv-detail-backdrop'));
+      await _waitForBackdrop(tester, backdrop, 'season-friends-1');
+
+      server.imageHolds['season-friends-2'] = hold;
+      final next = find.byKey(const ValueKey('season-friends-2'));
+      await tester.ensureVisible(next);
+      await tester.tap(next);
+      await _settle(tester);
+      expect(_backdropItem(tester, backdrop).id, 'season-friends-1');
+      expect(
+        find.descendant(of: backdrop, matching: find.byType(SkeletonBlock)),
+        findsNothing,
+      );
+      expect(
+        find.text('1. 第二季开头', skipOffstage: false),
+        findsOneWidget,
+      );
+      hold.complete();
+      await _waitForBackdrop(tester, backdrop, 'season-friends-2');
+      expect(
+        find.descendant(of: backdrop, matching: find.byType(SkeletonBlock)),
+        findsNothing,
+      );
+
+      server.failEpisodesOf = 'season-friends-1';
+      final back = find.byKey(const ValueKey('season-friends-1'));
+      await tester.ensureVisible(back);
+      await tester.tap(back);
+      await _settle(tester);
+      expect(_backdropItem(tester, backdrop).id, 'season-friends-2');
+      expect(find.byType(TvFailure), findsWidgets);
+      expect(find.text('重试'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+}
+
+MediaItem _backdropItem(WidgetTester tester, Finder backdrop) {
+  return tester
+      .widget<MediaImage>(
+        find.descendant(of: backdrop, matching: find.byType(MediaImage)),
+      )
+      .item;
+}
+
+Future<void> _waitForBackdrop(
+  WidgetTester tester,
+  Finder backdrop,
+  String id,
+) async {
+  for (var i = 0; i < 40; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    final drawn = tester
+        .widgetList<RawImage>(
+          find.descendant(of: backdrop, matching: find.byType(RawImage)),
+        )
+        .any((raw) => raw.image != null);
+    if (drawn && _backdropItem(tester, backdrop).id == id) return;
+  }
+  fail('backdrop did not draw $id');
+}
+
+class _HeldImageServer extends FakeEmbyServer {
+  String? failEpisodesOf;
+  final imageHolds = <String, Completer<void>>{};
+
+  @override
+  Future<ResponseBody> handle(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+  ) async {
+    final segments = options.uri.pathSegments;
+    final images = segments.indexOf('Images');
+    if (images > 0) {
+      final hold = imageHolds[segments[images - 1]];
+      if (hold != null) await hold.future;
+    }
+    final query = options.uri.queryParameters;
+    if (failEpisodesOf != null &&
+        query['IncludeItemTypes'] == 'Episode' &&
+        query['ParentId'] == failEpisodesOf &&
+        query['Filters'] != 'IsResumable') {
+      return ResponseBody.fromString(
+        'season-episodes-failed',
+        500,
+        headers: {
+          Headers.contentTypeHeader: ['text/plain'],
+        },
+      );
+    }
+    return super.handle(options, requestStream);
+  }
 }
 
 final cases = CaseShard(2);

@@ -464,6 +464,57 @@ void main() {
     });
 
     test(
+      'unnumbered row or incomplete list does not hide one coordinate hit',
+      () {
+        final target = episode('b');
+        final unnumbered = episode('b', number: null);
+        final hit = lookup(episode('a'), [target, unnumbered]);
+        expect(hit.status, EpisodeLookupStatus.confirmed);
+        expect(hit.source, same(target));
+        final incomplete = lookup(episode('a'), [target], complete: false);
+        expect(incomplete.status, EpisodeLookupStatus.confirmed);
+        expect(incomplete.source, same(target));
+        final combined = EpisodeSource.fromMediaItem(
+          ref('b', id: 'combined'),
+          decodeEmbyMediaItem({
+            'Id': 'combined',
+            'Type': 'Episode',
+            'SeriesId': 'same',
+            'ParentIndexNumber': 1,
+            'IndexNumber': 2,
+            'IndexNumberEnd': 3,
+          }),
+          numberingScheme: 'aired',
+        );
+        final withCombined = lookup(episode('a'), [target, combined]);
+        expect(withCombined.status, EpisodeLookupStatus.confirmed);
+        expect(withCombined.source, same(target));
+        final unresolved = lookup(
+          episode('a'),
+          [unnumbered],
+          complete: false,
+        );
+        expect(unresolved.status, EpisodeLookupStatus.uncertain);
+        expect(unresolved.source, isNull);
+        expect(
+          lookup(episode('a'), [
+            target,
+            EpisodeSource(
+              reference: ref('b', id: 'duplicate'),
+              series: ref('b'),
+              season: 1,
+              episode: 2,
+              isSpecial: false,
+              numberingScheme: 'aired',
+            ),
+            unnumbered,
+          ]).status,
+          EpisodeLookupStatus.ambiguous,
+        );
+      },
+    );
+
+    test(
       'a shared provider id confirms the episode without a season scheme',
       () {
         final target = episode(
