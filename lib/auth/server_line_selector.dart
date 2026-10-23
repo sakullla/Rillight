@@ -137,9 +137,15 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     });
     try {
       await Future.wait(
-        lines.map((line) => _runCheck(line, ticket)),
+        lines.map(
+          (line) =>
+              _runCheck(line, ticket, speedOnly: true, refreshServers: false),
+        ),
         eagerError: false,
       );
+      if (mounted && ticket == _checksTicket) {
+        await widget.auth.refreshServers();
+      }
     } finally {
       if (mounted && ticket == _checksTicket) {
         setState(() => testing = false);
@@ -164,11 +170,17 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     }
   }
 
-  Future<void> _runCheck(ServerLine line, int ticket) async {
+  Future<void> _runCheck(
+    ServerLine line,
+    int ticket, {
+    bool speedOnly = false,
+    bool refreshServers = true,
+  }) async {
     try {
       final result = await widget.auth.sources.check(
         widget.serverId,
         lineId: line.id,
+        speedOnly: speedOnly,
       );
       if (!mounted || ticket != _checksTicket) return;
       setState(() {
@@ -176,7 +188,7 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
         checking.remove(line.id);
         if (busy == line.id) busy = null;
       });
-      await widget.auth.refreshServers();
+      if (refreshServers) await widget.auth.refreshServers();
     } catch (failure) {
       if (!mounted ||
           ticket != _checksTicket ||

@@ -2334,6 +2334,11 @@ class SourceSessionRegistry {
     String id, {
     String? lineId,
     Duration timeout = const Duration(seconds: 10),
+
+    /// Bulk speed tests only need endpoint reachability and latency. Skipping
+    /// the account round trip avoids one credential read, session attach and
+    /// user request for every line.
+    bool speedOnly = false,
   }) async {
     final server = _allowed(id);
     final line = lineId == null
@@ -2372,6 +2377,7 @@ class SourceSessionRegistry {
             info.id != server.expectedServerId) {
           return ManualCheckStatus.identityMismatch;
         }
+        if (speedOnly) return ManualCheckStatus.available;
         final stored = await credentials.read(id);
         guard();
         if (stored == null || !_credentialsMatch(server, stored)) {

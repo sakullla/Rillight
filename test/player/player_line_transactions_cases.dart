@@ -983,6 +983,25 @@ void main() {
   });
 
   test(
+    'automatic line order uses measured latency before fallback preference',
+    () {
+      const lines = [
+        ServerLine(id: 'last', address: 'http://last.test', latencyMs: 180),
+        ServerLine(id: 'fast', address: 'http://fast.test', latencyMs: 24),
+        ServerLine(id: 'unknown', address: 'http://unknown.test'),
+      ];
+      expect(
+        automaticPlaybackLineOrder(
+          lines: lines,
+          lastSuccessfulLineId: 'last',
+          activeLineId: 'last',
+        ).map((line) => line.id),
+        ['fast', 'last', 'unknown'],
+      );
+    },
+  );
+
+  test(
     'automatic playback tries the last successful line before the others',
     () async {
       final runtime = player.runtime!;

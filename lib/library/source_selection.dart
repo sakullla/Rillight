@@ -1417,6 +1417,13 @@ class _RankedVersion {
   final int bitrate;
 }
 
+// A source card is rendered several times during one dialog build (sorting,
+// filtering, badges and the card itself). Media streams are immutable, so a
+// weak identity cache avoids reparsing the same presentation metadata while
+// still allowing old query results to be collected.
+final Expando<List<_VersionFace>> _versionFacesMemo =
+    Expando<List<_VersionFace>>('source-selection-version-faces');
+
 const _resolutionOrder = ['4K', '1440p', '1080p', '720p'];
 const _rangeOrder = ['杜比视界', 'HDR10+', 'HDR'];
 const _videoOrder = ['AV1', 'H.265', 'VP9', 'H.264', 'MPEG-2'];
@@ -1675,6 +1682,8 @@ _VersionFace _faceFor(ItemMediaSource source) {
 }
 
 List<_VersionFace> _versionFaces(MediaItem item) {
+  final cached = _versionFacesMemo[item];
+  if (cached != null) return cached;
   final faces = <_VersionFace>[];
   for (final source in item.mediaSources) {
     final face = _faceFor(source);
@@ -1688,7 +1697,9 @@ List<_VersionFace> _versionFaces(MediaItem item) {
       faces.add(face);
     }
   }
-  return faces;
+  final result = List<_VersionFace>.unmodifiable(faces);
+  _versionFacesMemo[item] = result;
+  return result;
 }
 
 @visibleForTesting

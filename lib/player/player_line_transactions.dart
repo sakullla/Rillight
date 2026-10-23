@@ -7,7 +7,8 @@ class _PlaybackContentFailure extends PlaybackRecoveryFailure {
   final PlayerErrorKind error;
 }
 
-/// Last successful line, then the other saved lines on the same server.
+/// Prefer measured low-latency lines, retaining the last successful line as a
+/// tie breaker and as the fallback when no speed result is available.
 List<ServerLine> automaticPlaybackLineOrder({
   required List<ServerLine> lines,
   String? lastSuccessfulLineId,
@@ -17,15 +18,30 @@ List<ServerLine> automaticPlaybackLineOrder({
   final preferred = lines.any((line) => line.id == lastSuccessfulLineId)
       ? lastSuccessfulLineId
       : activeLineId;
-  if (preferred == null || !lines.any((line) => line.id == preferred)) {
-    return List<ServerLine>.of(lines);
-  }
-  return [
-    for (final line in lines)
-      if (line.id == preferred) line,
-    for (final line in lines)
-      if (line.id != preferred) line,
+  final preferredIndex = preferred == null
+      ? -1
+      : lines.indexWhere((line) => line.id == preferred);
+  final indexed = [
+    for (var index = 0; index < lines.length; index++)
+      (line: lines[index], index: index),
   ];
+  indexed.sort((a, b) {
+    final aLatency = a.line.latencyMs;
+    final bLatency = b.line.latencyMs;
+    if (aLatency != null || bLatency != null) {
+      // Unknown measurements trail known ones. A successful line remains the
+      // deterministic tie breaker for equal or unavailable measurements.
+      if (aLatency == null) return 1;
+      if (bLatency == null) return -1;
+      final latency = aLatency.compareTo(bLatency);
+      if (latency != 0) return latency;
+    }
+    final aPreferred = a.index == preferredIndex ? 0 : 1;
+    final bPreferred = b.index == preferredIndex ? 0 : 1;
+    final preference = aPreferred.compareTo(bPreferred);
+    return preference == 0 ? a.index.compareTo(b.index) : preference;
+  });
+  return [for (final value in indexed) value.line];
 }
 
 /// Same-server line policy and transactions. Native commands still pass through
