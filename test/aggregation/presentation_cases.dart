@@ -4852,7 +4852,9 @@ void main() {
         isEmpty,
       );
       expect(
-        f.b.requests.where((request) => request.contains('ParentId=b-season-2')),
+        f.b.requests.where(
+          (request) => request.contains('ParentId=b-season-2'),
+        ),
         isEmpty,
       );
       expect(
@@ -4968,14 +4970,18 @@ void main() {
       );
       await tester.tap(find.byKey(const Key('source-selection-open')));
       await _settle(tester);
-      final failed = find.byKey(Key('source-selection-item-${f.bId}-shared-id'));
+      final failed = find.byKey(
+        Key('source-selection-item-${f.bId}-shared-id'),
+      );
       final other = find.byKey(
         Key('source-selection-item-${f.extraIds.single}-shared-id'),
       );
       expect(failed, findsOneWidget);
       expect(other, findsOneWidget);
       f.b.itemStatus = 503;
-      await tester.tap(find.descendant(of: failed, matching: find.text('来源 B')));
+      await tester.tap(
+        find.descendant(of: failed, matching: find.text('来源 B')),
+      );
       await _settle(tester);
       const unreachable = '这台服务器暂时连不上，当前连接不受影响。';
       expect(find.text(unreachable), findsOneWidget);

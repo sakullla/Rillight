@@ -736,8 +736,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       entry?.cancel();
       if (mounted) {
         setState(() {
-          _rowErrors[row] =
-              AppLocalizations.of(context).sourceSelectionUnreachable;
+          _rowErrors[row] = AppLocalizations.of(context)
+              .sourceSelectionUnreachable;
         });
       }
     } finally {

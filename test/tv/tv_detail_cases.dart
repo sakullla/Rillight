@@ -824,10 +824,7 @@ void main() {
         find.descendant(of: backdrop, matching: find.byType(SkeletonBlock)),
         findsNothing,
       );
-      expect(
-        find.text('1. 第二季开头', skipOffstage: false),
-        findsOneWidget,
-      );
+      expect(find.text('1. 第二季开头', skipOffstage: false), findsOneWidget);
       hold.complete();
       await _waitForBackdrop(tester, backdrop, 'season-friends-2');
       expect(

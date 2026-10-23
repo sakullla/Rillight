@@ -1017,9 +1017,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   MediaItem? _seasonArtwork(String seasonId) {
     final item = _item;
     if (item == null || !item.isSeries) return null;
-    final season = _seasons
-        .where((entry) => entry.id == seasonId)
-        .firstOrNull;
+    final season = _seasons.where((entry) => entry.id == seasonId).firstOrNull;
     if (season == null) return null;
     return seasonArtworkItem(season, item);
   }

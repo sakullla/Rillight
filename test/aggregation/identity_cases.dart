@@ -489,11 +489,7 @@ void main() {
         final withCombined = lookup(episode('a'), [target, combined]);
         expect(withCombined.status, EpisodeLookupStatus.confirmed);
         expect(withCombined.source, same(target));
-        final unresolved = lookup(
-          episode('a'),
-          [unnumbered],
-          complete: false,
-        );
+        final unresolved = lookup(episode('a'), [unnumbered], complete: false);
         expect(unresolved.status, EpisodeLookupStatus.uncertain);
         expect(unresolved.source, isNull);
         expect(
