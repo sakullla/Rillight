@@ -2,71 +2,71 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/access_boundary_cases.dart' as case0;
-import '../aggregation/query_cases.dart' as case1;
-import '../app/palette_contrast_cases.dart' as case2;
-import '../app/source_route_extra_codec_cases.dart' as case3;
-import '../app/update_controller_cases.dart' as case4;
-import '../app/window_geometry_cases.dart' as case5;
-import '../auth/provider_line_boundaries_cases.dart' as case6;
-import '../auth/provider_selection_cases.dart' as case7;
-import '../emby/media_source_format_cases.dart' as case8;
-import '../emby/video_preview_cases.dart' as case9;
-import '../helpers/synthetic_mailbox_cases.dart' as case10;
-import '../media_server/contract_cases.dart' as case11;
-import '../player/cache/media_time_index_cases.dart' as case12;
-import '../player/cache/proxy_progressive_timeline_cases.dart' as case13;
-import '../player/cache_crc32_cases.dart' as case14;
-import '../player/danmaku/danmaku_layout_cases.dart' as case15;
-import '../player/danmaku/danmaku_timeline_cases.dart' as case16;
+import '../aggregation/history_cases.dart' as case1;
+import '../app/color_hygiene_cases.dart' as case2;
+import '../app/file_import_cases.dart' as case3;
+import '../app/source_route_extra_codec_cases.dart' as case4;
+import '../auth/auth_controller_cases.dart' as case5;
+import '../auth/provider_selection_cases.dart' as case6;
+import '../catalog/catalog_cache_cases.dart' as case7;
+import '../emby/emby_item_image_cases.dart' as case8;
+import '../emby/emby_socket_cases.dart' as case9;
+import '../emby/video_preview_cases.dart' as case10;
+import '../helpers/synthetic_mailbox_cases.dart' as case11;
+import '../library/source_selection_filter_cases.dart' as case12;
+import '../player/danmaku/dandanplay_client_cases.dart' as case13;
+import '../player/danmaku/danmaku_hash_cases.dart' as case14;
+import '../player/emby_playback_client_cases.dart' as case15;
+import '../player/hls_prefetch_cases.dart' as case16;
 import '../player/playback_http_proxy_cases.dart' as case17;
-import '../player/playback_metadata_cases.dart' as case18;
-import '../player/playback_recovery_cases.dart' as case19;
-import '../player/playback_transport_session_cases.dart' as case20;
+import '../player/playback_recovery_cases.dart' as case18;
+import '../player/playback_session_snapshot_cases.dart' as case19;
+import '../player/playback_wake_lock_cases.dart' as case20;
 import '../player/player_process_control_cases.dart' as case21;
-import '../player/provider_failed_preparation_recovery_cases.dart' as case22;
-import '../player/provider_part_playback_cases.dart' as case23;
-import '../player/provider_process_boundary_cases.dart' as case24;
-import '../player/rillight_video_backend_cases.dart' as case25;
-import '../search/recent_searches_cases.dart' as case26;
-import '../webdav/webdav_client_cases.dart' as case27;
+import '../player/player_window_launch_cases.dart' as case22;
+import '../player/provider_failed_preparation_recovery_cases.dart' as case23;
+import '../player/rillight_video_backend_cases.dart' as case24;
+import '../player/subtitle_slots_cases.dart' as case25;
+import '../plex/plex_review_regression_cases.dart' as case26;
+import '../search/recent_searches_cases.dart' as case27;
 import '../webdav/webdav_config_cases.dart' as case28;
 import '../helpers/suite.dart';
 
 void main() {
   verifySuiteManifest();
   group('aggregation/access_boundary_test.dart', case0.main);
-  group('aggregation/query_test.dart', case1.main);
-  group('app/palette_contrast_test.dart', case2.main);
-  group('app/source_route_extra_codec_test.dart', case3.main);
-  group('app/update_controller_test.dart', case4.main);
-  group('app/window_geometry_test.dart', case5.main);
-  group('auth/provider_line_boundaries_test.dart', case6.main);
-  group('auth/provider_selection_test.dart', case7.main);
-  group('emby/media_source_format_test.dart', case8.main);
-  group('emby/video_preview_test.dart', case9.main);
-  group('helpers/synthetic_mailbox_test.dart', case10.main);
-  group('media_server/contract_test.dart', case11.main);
-  group('player/cache/media_time_index_test.dart', case12.main);
-  group('player/cache/proxy_progressive_timeline_test.dart', case13.main);
-  group('player/cache_crc32_test.dart', case14.main);
-  group('player/danmaku/danmaku_layout_test.dart', case15.main);
-  group('player/danmaku/danmaku_timeline_test.dart', case16.main);
+  group('aggregation/history_test.dart', case1.main);
+  group('app/color_hygiene_test.dart', case2.main);
+  group('app/file_import_test.dart', case3.main);
+  group('app/source_route_extra_codec_test.dart', case4.main);
+  group('auth/auth_controller_test.dart', case5.main);
+  group('auth/provider_selection_test.dart', case6.main);
+  group('catalog/catalog_cache_test.dart', case7.main);
+  group('emby/emby_item_image_test.dart', case8.main);
+  group('emby/emby_socket_test.dart', case9.main);
+  group('emby/video_preview_test.dart', case10.main);
+  group('helpers/synthetic_mailbox_test.dart', case11.main);
+  group('library/source_selection_filter_test.dart', case12.main);
+  group('player/danmaku/dandanplay_client_test.dart', case13.main);
+  group('player/danmaku/danmaku_hash_test.dart', case14.main);
+  group('player/emby_playback_client_test.dart', case15.main);
+  group('player/hls_prefetch_test.dart', case16.main);
   group(
     'player/playback_http_proxy_test.dart [part 1]',
     () => case17.mainShard(0, 4),
   );
-  group('player/playback_metadata_test.dart', case18.main);
-  group('player/playback_recovery_test.dart', case19.main);
-  group('player/playback_transport_session_test.dart', case20.main);
+  group('player/playback_recovery_test.dart', case18.main);
+  group('player/playback_session_snapshot_test.dart', case19.main);
+  group('player/playback_wake_lock_test.dart', case20.main);
   group('player/player_process_control_test.dart', case21.main);
-  group('player/provider_failed_preparation_recovery_test.dart', case22.main);
-  group('player/provider_part_playback_test.dart', case23.main);
-  group('player/provider_process_boundary_test.dart', case24.main);
+  group('player/player_window_launch_test.dart', case22.main);
+  group('player/provider_failed_preparation_recovery_test.dart', case23.main);
   group(
     'player/rillight_video_backend_test.dart [part 1]',
-    () => case25.mainShard(0, 3),
+    () => case24.mainShard(0, 3),
   );
-  group('search/recent_searches_test.dart', case26.main);
-  group('webdav/webdav_client_test.dart', case27.main);
+  group('player/subtitle_slots_test.dart', case25.main);
+  group('plex/plex_review_regression_test.dart', case26.main);
+  group('search/recent_searches_test.dart', case27.main);
   group('webdav/webdav_config_test.dart', case28.main);
 }

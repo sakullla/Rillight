@@ -2,15 +2,15 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/update_verification_ui_cases.dart' as case1;
-import '../home/shelf_hover_clip_cases.dart' as case2;
-import '../media_image/blurred_artwork_cases.dart' as case3;
-import '../mobile/phone_home_first_screen_cases.dart' as case4;
-import '../mobile/phone_nav_style_cases.dart' as case5;
+import '../app/content_theme_motion_cases.dart' as case1;
+import '../app/update_platform_cases.dart' as case2;
+import '../auth/phone_server_manager_cases.dart' as case3;
+import '../library/detail_palette_cases.dart' as case4;
+import '../mobile/motion_behaviors_cases.dart' as case5;
 import '../mobile/phone_player_cases.dart' as case6;
-import '../mobile/tv_shell_navigation_cases.dart' as case7;
-import '../player/danmaku/danmaku_renderer_cases.dart' as case8;
-import '../player/phone_presentation_lifecycle_cases.dart' as case9;
+import '../player/danmaku/danmaku_renderer_cases.dart' as case7;
+import '../player/desktop_player_page_cases.dart' as case8;
+import '../player/subtitle_viewport_cases.dart' as case9;
 import '../tv/tv_player_controls_cases.dart' as case10;
 import '../helpers/suite.dart';
 
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 6]',
     () => case0.mainShard(5, 6),
   );
-  group('app/update_verification_ui_test.dart', case1.main);
-  group('home/shelf_hover_clip_test.dart', case2.main);
-  group('media_image/blurred_artwork_test.dart', case3.main);
-  group('mobile/phone_home_first_screen_test.dart', case4.main);
-  group('mobile/phone_nav_style_test.dart', case5.main);
+  group('app/content_theme_motion_test.dart', case1.main);
+  group('app/update_platform_test.dart', case2.main);
+  group('auth/phone_server_manager_test.dart', case3.main);
+  group('library/detail_palette_test.dart', case4.main);
+  group('mobile/motion_behaviors_test.dart', case5.main);
   group('mobile/phone_player_test.dart [part 3]', () => case6.mainShard(2, 4));
-  group('mobile/tv_shell_navigation_test.dart', case7.main);
-  group('player/danmaku/danmaku_renderer_test.dart', case8.main);
-  group('player/phone_presentation_lifecycle_test.dart', case9.main);
+  group('player/danmaku/danmaku_renderer_test.dart', case7.main);
+  group('player/desktop_player_page_test.dart', case8.main);
+  group('player/subtitle_viewport_test.dart', case9.main);
   group('tv/tv_player_controls_test.dart', case10.main);
 }

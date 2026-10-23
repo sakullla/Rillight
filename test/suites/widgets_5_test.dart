@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/artwork_mood_cases.dart' as case1;
-import '../app/desktop_gestures_cases.dart' as case2;
-import '../app/selection_contrast_cases.dart' as case3;
-import '../catalog/library_filter_cases.dart' as case4;
-import '../home/hero_artwork_cases.dart' as case5;
-import '../home/home_page_cases.dart' as case6;
-import '../mobile/phone_home_rails_cases.dart' as case7;
-import '../mobile/phone_player_cases.dart' as case8;
-import '../player/ended_navigation_cases.dart' as case9;
-import '../tv/tv_detail_cases.dart' as case10;
+import '../app/desktop_gestures_cases.dart' as case1;
+import '../app/home_failure_cases.dart' as case2;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case3;
+import '../home/hero_artwork_cases.dart' as case4;
+import '../home/home_page_cases.dart' as case5;
+import '../mobile/phone_home_rails_cases.dart' as case6;
+import '../mobile/phone_player_cases.dart' as case7;
+import '../player/player_cache_status_cases.dart' as case8;
+import '../player/subtitle_menu_cases.dart' as case9;
+import '../widgets/app_empty_view_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 5]',
     () => case0.mainShard(4, 6),
   );
-  group('app/artwork_mood_test.dart', case1.main);
-  group('app/desktop_gestures_test.dart', case2.main);
-  group('app/selection_contrast_test.dart', case3.main);
-  group('catalog/library_filter_test.dart', case4.main);
-  group('home/hero_artwork_test.dart', case5.main);
-  group('home/home_page_test.dart', case6.main);
-  group('mobile/phone_home_rails_test.dart', case7.main);
-  group('mobile/phone_player_test.dart [part 2]', () => case8.mainShard(1, 4));
-  group('player/ended_navigation_test.dart', case9.main);
-  group('tv/tv_detail_test.dart [part 2]', () => case10.mainShard(1, 2));
+  group('app/desktop_gestures_test.dart', case1.main);
+  group('app/home_failure_test.dart', case2.main);
+  group('catalog/shelf_grid_scroll_rebuild_test.dart', case3.main);
+  group('home/hero_artwork_test.dart', case4.main);
+  group('home/home_page_test.dart', case5.main);
+  group('mobile/phone_home_rails_test.dart', case6.main);
+  group('mobile/phone_player_test.dart [part 2]', () => case7.mainShard(1, 4));
+  group('player/player_cache_status_test.dart', case8.main);
+  group('player/subtitle_menu_test.dart', case9.main);
+  group('widgets/app_empty_view_test.dart', case10.main);
 }

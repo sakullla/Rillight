@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../catalog/catalog_controller_cases.dart' as case1;
-import '../catalog/item_detail_cases.dart' as case2;
-import '../home/hero_playback_actions_cases.dart' as case3;
-import '../library/season_switcher_cases.dart' as case4;
-import '../mobile/phone_detail_redesign_cases.dart' as case5;
-import '../mobile/phone_pages_cases.dart' as case6;
-import '../tv/tv_lan_pair_cases.dart' as case7;
-import '../tv/tv_shell_nav_cases.dart' as case8;
-import '../widgets/cupertino_controls_cases.dart' as case9;
-import '../widgets/desktop_back_button_cases.dart' as case10;
+import '../app/artwork_mood_cases.dart' as case1;
+import '../app/selection_contrast_cases.dart' as case2;
+import '../catalog/item_detail_cases.dart' as case3;
+import '../home/hero_playback_actions_cases.dart' as case4;
+import '../library/season_switcher_cases.dart' as case5;
+import '../mobile/detail_route_identity_cases.dart' as case6;
+import '../mobile/phone_detail_redesign_cases.dart' as case7;
+import '../mobile/phone_pages_cases.dart' as case8;
+import '../mobile/tv_shelf_focus_cases.dart' as case9;
+import '../widgets/cupertino_controls_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 1]',
     () => case0.mainShard(0, 6),
   );
-  group('catalog/catalog_controller_test.dart', case1.main);
-  group('catalog/item_detail_test.dart [part 3]', () => case2.mainShard(2, 3));
-  group('home/hero_playback_actions_test.dart', case3.main);
-  group('library/season_switcher_test.dart', case4.main);
-  group('mobile/phone_detail_redesign_test.dart', case5.main);
-  group('mobile/phone_pages_test.dart [part 2]', () => case6.mainShard(1, 3));
-  group('tv/tv_lan_pair_test.dart [part 3]', () => case7.mainShard(2, 3));
-  group('tv/tv_shell_nav_test.dart', case8.main);
-  group('widgets/cupertino_controls_test.dart', case9.main);
-  group('widgets/desktop_back_button_test.dart', case10.main);
+  group('app/artwork_mood_test.dart', case1.main);
+  group('app/selection_contrast_test.dart', case2.main);
+  group('catalog/item_detail_test.dart [part 3]', () => case3.mainShard(2, 3));
+  group('home/hero_playback_actions_test.dart', case4.main);
+  group('library/season_switcher_test.dart', case5.main);
+  group('mobile/detail_route_identity_test.dart', case6.main);
+  group('mobile/phone_detail_redesign_test.dart', case7.main);
+  group('mobile/phone_pages_test.dart [part 2]', () => case8.mainShard(1, 3));
+  group('mobile/tv_shelf_focus_test.dart', case9.main);
+  group('widgets/cupertino_controls_test.dart', case10.main);
 }
