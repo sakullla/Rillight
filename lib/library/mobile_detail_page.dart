@@ -812,22 +812,20 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         final handoff = _imageHandoff(context);
         final pending = item == null && controller.loading;
         final failed = item == null && controller.error != null;
-        final selectedSeason = controller.seasons
-            .where((season) => season.id == controller.seasonId)
-            .firstOrNull;
         // 从海报或横卡点进来时，头图和取色都停在那一张上。加载完成后不改来源，
         // 否则会先看到点中的画面，再换成另一张，颜色变两次。
-        // 只有用户切换季且该季画面已经能绘制时，才改头图和包住整页的取色。
-        final userSeason =
-            item != null &&
-            item.isSeries &&
-            _artworkSeasonId != null &&
-            selectedSeason != null &&
-            selectedSeason.id == _artworkSeasonId;
+        // 已绘制的季只跟 _artworkSeasonId。切季会先公布新的 seasonId，
+        // 新画面还不能画时不能因此退回入口图和入口取色。
+        final paintedSeason = _artworkSeasonId == null
+            ? null
+            : controller.seasons
+                  .where((season) => season.id == _artworkSeasonId)
+                  .firstOrNull;
         final entryItem = handoff?.item ?? item;
-        final seasonArt = userSeason
-            ? seasonArtworkItem(selectedSeason, item)
+        final seasonArt = item != null && item.isSeries && paintedSeason != null
+            ? seasonArtworkItem(paintedSeason, item)
             : null;
+        final userSeason = seasonArt != null;
         final imageSource = failed ? null : seasonArt ?? entryItem;
         // 取色必须和横幅实际绘制的第一张图一致:单集自带背景时把 entryItem
         // 直接交给 ContentTheme 会先解析到剧集海报,和画面错位(T6 评审 P2)。

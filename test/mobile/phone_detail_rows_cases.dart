@@ -1640,6 +1640,123 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
+  testWidgets('a later season change keeps the painted backdrop and palette', (
+    tester,
+  ) async {
+    final hold = Completer<void>();
+    var holdSeasonArt = false;
+    addTearDown(() {
+      if (!hold.isCompleted) hold.complete();
+    });
+    final harness = await _startDetail(
+      tester,
+      width: 390,
+      reduceMotion: true,
+      theme: AppUiTheme.phoneLight(),
+      prepare: (server) {
+        final series = server.items.firstWhere(
+          (item) => item.id == 'series-friends',
+        );
+        series.backdropImageTag = 'bd-series';
+        server.setSeasons('series-friends', const [
+          FakeSeason(
+            id: 'season-friends-1',
+            name: '第 1 季',
+            indexNumber: 1,
+            backdropImageTag: 'bd-s1',
+          ),
+          FakeSeason(
+            id: 'season-friends-2',
+            name: '第 2 季',
+            indexNumber: 2,
+            backdropImageTag: 'bd-s2',
+          ),
+        ]);
+        server.setEpisodes('series-friends', const [
+          FakeEpisode(
+            id: 'episode-s1',
+            name: '第一季试点',
+            seasonId: 'season-friends-1',
+            indexNumber: 1,
+            parentIndexNumber: 1,
+          ),
+          FakeEpisode(
+            id: 'episode-s2',
+            name: '第二季试点',
+            seasonId: 'season-friends-2',
+            indexNumber: 1,
+            parentIndexNumber: 2,
+          ),
+        ]);
+      },
+      intercept: (dio) {
+        fakeEmbyTransport(dio).interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) async {
+              final path = options.uri.path;
+              if (holdSeasonArt &&
+                  path.contains('/Items/season-friends-1/Images/') &&
+                  !hold.isCompleted) {
+                await hold.future;
+              }
+              handler.next(options);
+            },
+          ),
+        );
+      },
+    );
+    MediaImageCache.instance.fetchTimeout = const Duration(seconds: 2);
+    unawaited(harness.router.push('/item/series-friends'));
+    await settle(tester);
+    expect(_backdropItem(tester).id, 'series-friends');
+    expect(_detailThemeItem(tester).id, 'series-friends');
+
+    final second = find.byKey(CatalogKeys.season('season-friends-2'));
+    await tester.ensureVisible(second);
+    await tester.tap(second);
+    await _waitForBackdrop(tester, 'season-friends-2');
+    expect(_detailThemeItem(tester).id, 'season-friends-2');
+    expect(find.text('第二季试点'), findsWidgets);
+    expect(find.text('老友记'), findsWidgets);
+    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(find.byKey(const Key('mobile-detail-play')), findsOneWidget);
+
+    holdSeasonArt = true;
+    final first = find.byKey(CatalogKeys.season('season-friends-1'));
+    await tester.ensureVisible(first);
+    await tester.tap(first);
+    var sawNextEpisodes = false;
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(_backdropItem(tester).id, 'season-friends-2');
+      expect(_detailThemeItem(tester).id, 'season-friends-2');
+      expect(
+        find.descendant(
+          of: find.byKey(PhoneItemBanner.bannerKey),
+          matching: find.byType(SkeletonBlock),
+        ),
+        findsNothing,
+      );
+      if (find.text('第一季试点').evaluate().isNotEmpty) {
+        sawNextEpisodes = true;
+        break;
+      }
+    }
+    expect(sawNextEpisodes, isTrue);
+    expect(find.text('第二季试点'), findsNothing);
+    expect(find.text('老友记'), findsWidgets);
+    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(find.byKey(const Key('mobile-detail-play')), findsOneWidget);
+    expect(_backdropItem(tester).id, 'season-friends-2');
+    expect(_detailThemeItem(tester).id, 'season-friends-2');
+
+    hold.complete();
+    await _waitForBackdrop(tester, 'season-friends-1');
+    expect(_detailThemeItem(tester).id, 'season-friends-1');
+    expect(find.text('第一季试点'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('reduced motion opens detail in place with placeholders', (
     tester,
   ) async {
@@ -2884,6 +3001,20 @@ void _useSurface(WidgetTester tester, double width, double height) {
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPadding);
   addTearDown(tester.view.resetViewPadding);
+}
+
+MediaItem _backdropItem(WidgetTester tester) =>
+    tester.widget<MediaImage>(find.byKey(PhoneItemBanner.handoffImageKey)).item;
+
+MediaItem _detailThemeItem(WidgetTester tester) =>
+    tester.widget<ContentTheme>(find.byType(ContentTheme)).item!;
+
+Future<void> _waitForBackdrop(WidgetTester tester, String id) async {
+  for (var i = 0; i < 40; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    if (_backdropItem(tester).id == id) return;
+  }
+  fail('phone backdrop stayed on ${_backdropItem(tester).id}');
 }
 
 /// 共享季切换器手机标签（`CatalogKeys.season(id)`）是否为选中态。
