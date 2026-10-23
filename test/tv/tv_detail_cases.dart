@@ -4,6 +4,7 @@ import '../helpers/settle.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -194,6 +195,48 @@ void main() {
         app.router.state.uri.queryParameters['episode'],
         'episode-friends-s1e1',
       );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'long seasons offer a range picker and jump the episode row',
+    (tester) async {
+      final server = FakeEmbyServer();
+      server.setEpisodes('series-friends', [
+        for (var index = 1; index <= 130; index++)
+          FakeEpisode(
+            id: 'episode-friends-s1e$index',
+            name: 'Episode $index',
+            seasonId: 'season-friends-1',
+            indexNumber: index,
+            parentIndexNumber: 1,
+          ),
+      ]);
+      final app = await start(tester, server);
+      await login(tester, server);
+      await openItem(tester, app, 'series-friends');
+      final range = find.byKey(
+        const Key('tv-episode-range'),
+        skipOffstage: false,
+      );
+      expect(range, findsOneWidget);
+      expect(find.text('1–50', skipOffstage: false), findsOneWidget);
+      await tester.ensureVisible(range);
+      await tester.pumpAndSettle();
+      await tester.tap(range);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EpisodeRangeBar.chipKey(101)));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(
+          const ValueKey('episode-friends-s1e101'),
+          skipOffstage: false,
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('101–130', skipOffstage: false), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

@@ -15,6 +15,7 @@ import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/season_switcher.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -667,7 +668,14 @@ class MobileSeriesPage extends StatelessWidget {
     required this.onLoadMore,
     required this.onOpenItem,
     required this.onOpenSimilar,
+    this.onJumpToRange,
+    this.episodeHeaderKey,
   });
+
+  /// 平板与横屏（内容宽不小于该值）把分集排成两列，不再拉成一条条超宽长行。
+  static const double twoColumnMinWidth = 600;
+
+  static int columnsFor(double width) => width >= twoColumnMinWidth ? 2 : 1;
 
   static const seasonSummaryKey = Key('phone-season-summary');
 
@@ -699,6 +707,12 @@ class MobileSeriesPage extends StatelessWidget {
   final ValueChanged<String> onOpenItem;
   final VoidCallback? onOpenSimilar;
 
+  /// 长季分段条点选：参数是该段起始集号。为空时不画分段条。
+  final ValueChanged<int>? onJumpToRange;
+
+  /// 分集分区标题的 key，换段后页面据此把列表开头滚进视野。
+  final Key? episodeHeaderKey;
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -725,19 +739,44 @@ class MobileSeriesPage extends StatelessWidget {
   /// Embeds long episode lists in the parent's viewport, so offscreen rows are
   /// never built merely to determine the detail page's total height.
   List<Widget> buildSlivers(BuildContext context) {
-    final content = _content(context);
+    final content = _content(context, autoLoad: true);
     final split = content.indexWhere((child) => child is _EpisodeListSlot);
+    final columns = columnsFor(MediaQuery.sizeOf(context).width);
+    scrollCoordinator?.columns = columns;
     scrollCoordinator?.locate(episodes, focusEpisodeId);
+    final reserve = _reserveOverview;
     return [
       SliverList.list(children: content.sublist(0, split)),
-      SliverList.builder(
-        itemCount: episodes.length,
-        itemBuilder: (context, index) => _episodeWidget(
-          episodes[index],
-          index,
-          reserveOverview: _reserveOverview,
+      if (columns == 1)
+        SliverList.builder(
+          itemCount: episodes.length,
+          itemBuilder: (context, index) =>
+              _episodeWidget(episodes[index], index, reserveOverview: reserve),
+        )
+      else
+        // 两列：每一行是等高的一对分集，行仍按需构建，长季不会一次建完。
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          sliver: SliverList.builder(
+            itemCount: (episodes.length / columns).ceil(),
+            // 分集行本身等高（标题、事实、简介都按固定行数预留），并排时不必再量高。
+            itemBuilder: (context, row) => Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var c = 0; c < columns; c++)
+                  Expanded(
+                    child: row * columns + c < episodes.length
+                        ? _episodeWidget(
+                            episodes[row * columns + c],
+                            row * columns + c,
+                            reserveOverview: reserve,
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+              ],
+            ),
+          ),
         ),
-      ),
       SliverList.list(children: content.sublist(split + 1)),
     ];
   }
@@ -762,7 +801,7 @@ class MobileSeriesPage extends StatelessWidget {
     ),
   );
 
-  List<Widget> _content(BuildContext context) {
+  List<Widget> _content(BuildContext context, {bool autoLoad = false}) {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final showSeasons = seasons.length > 1;
@@ -793,6 +832,7 @@ class MobileSeriesPage extends StatelessWidget {
       ?mediaStreamsSection,
       if (showHeader)
         Padding(
+          key: episodeHeaderKey,
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
             AppSpacing.lg,
@@ -880,6 +920,19 @@ class MobileSeriesPage extends StatelessWidget {
             ),
           ),
         ),
+      if (onJumpToRange != null &&
+          total != null &&
+          EpisodeRanges.show(total) &&
+          episodeError == null)
+        Padding(
+          padding: EdgeInsets.only(top: showSeasons ? AppSpacing.sm : 0),
+          child: EpisodeRangeBar(
+            total: total,
+            activeNumber: episodes.firstOrNull?.indexNumber,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            onSelected: onJumpToRange!,
+          ),
+        ),
       if (episodesLoading && episodes.isEmpty)
         LayoutBuilder(
           builder: (context, constraints) {
@@ -929,6 +982,14 @@ class MobileSeriesPage extends StatelessWidget {
         ),
       if (episodes.isNotEmpty) const SizedBox(height: AppSpacing.xs),
       const _EpisodeListSlot(),
+      if (hasMore && onLoadMore != null && autoLoad && episodeError == null)
+        AutoLoadTrigger(
+          // 滚到分集末尾附近就续载下一页；按钮保留，失败或离线时仍可手动点。
+          token: episodesLoading ? -1 : episodes.length,
+          onTrigger: () {
+            if (!episodesLoading) onLoadMore!();
+          },
+        ),
       if (hasMore && onLoadMore != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -973,6 +1034,9 @@ class EpisodeScrollCoordinator {
   EpisodeScrollCoordinator(this.scroll);
 
   final ScrollController scroll;
+
+  /// 分集列数。两列时每一行放两集，按集号估算偏移要除以列数。
+  int columns = 1;
   final Map<int, BuildContext> _mountedRows = {};
   String? _request;
   int _generation = 0;
@@ -1023,7 +1087,8 @@ class EpisodeScrollCoordinator {
         ? 120.0
         : (heights.reduce((a, b) => a + b) / heights.length).clamp(80.0, 240.0);
     final position = scroll.position;
-    final next = (position.pixels + (target - nearest) * rowHeight).clamp(
+    final rowSpan = (target - nearest) / (columns < 1 ? 1 : columns);
+    final next = (position.pixels + rowSpan * rowHeight).clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
     );

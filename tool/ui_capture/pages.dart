@@ -1,3 +1,4 @@
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/app/startup_failure.dart';
 import 'package:rillight/app/android_bootstrap.dart';
@@ -198,6 +199,28 @@ extension PageCaptures on CaptureSession {
     await advance(300);
     await save('series-season-overflow');
     await modal(CatalogKeys.seasonPicker, 'series-season-picker');
+  }
+
+  /// 日播长季（128 集）：分集上方出现分段条，当前段跟着续播位置。
+  Future<void> captureLongSeason(RillightApp app) async {
+    if (!shouldCapture('series-long-season')) return;
+    app.router.go('/item/series-long?season=season-long-2');
+    await advance(1200);
+    // 打开时会定位到续播集（第 71 集），分段条可能已在视口之上。
+    final bar = find.byKey(EpisodeRangeBar.barKey, skipOffstage: false);
+    final tvRange = find.byKey(
+      const Key('tv-episode-range'),
+      skipOffstage: false,
+    );
+    final target = bar.evaluate().isNotEmpty ? bar : tvRange;
+    expect(
+      target,
+      findsOneWidget,
+      reason: 'A 128-episode season must offer episode ranges',
+    );
+    await Scrollable.ensureVisible(tester.element(target), alignment: .3);
+    await advance(400);
+    await save('series-long-season');
   }
 
   Future<void> pages(
@@ -504,6 +527,7 @@ extension PageCaptures on CaptureSession {
       }
       // 两季时季切换器是并排标签；多季剧放不下时折叠为下拉入口。
       await captureSeasonOverflow(app);
+      await captureLongSeason(app);
       await route(
         app,
         '/item/series-friends?season=season-friends-1',

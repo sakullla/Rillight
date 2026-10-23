@@ -3478,6 +3478,24 @@ abstract class AppLocalizations {
   /// **'码率'**
   String get fileBitrateLabel;
 
+  /// Compact episode range chip for long seasons, e.g. 1–50.
+  ///
+  /// In zh, this message translates to:
+  /// **'{start}–{end}'**
+  String episodeRangeLabel(int start, int end);
+
+  /// Screen reader label for an episode range chip.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {start} 至 {end} 集'**
+  String episodeRangeSemantic(int start, int end);
+
+  /// Label of the episode range bar for long seasons.
+  ///
+  /// In zh, this message translates to:
+  /// **'分段'**
+  String get episodeRangesTitle;
+
   /// Phone season summary: watched episodes among the season's episodes.
   ///
   /// In zh, this message translates to:

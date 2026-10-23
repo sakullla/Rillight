@@ -61,6 +61,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   int? _subtitleStreamIndex;
   final _scroll = ScrollController();
   late final _episodeScrollCoordinator = EpisodeScrollCoordinator(_scroll);
+  final _episodeHeaderKey = GlobalKey();
   var _barSolid = false;
 
   /// 已经能绘制的季头图。新画面画出来之前不改，整页取色也不跟着变。
@@ -702,8 +703,30 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (!mounted || selected == null) {
       return;
     }
-    final start = selected <= 1 ? 0 : selected - 1;
+    await _jumpToEpisodeWindow(selected);
+  }
+
+  /// 换到从第 [number] 集开始的一页，并把分集分区开头滚进视野。
+  ///
+  /// 选集与分段条共用。原来换页后页面停在旧的滚动位置，新的一页可能整个在
+  /// 视口之外，用户以为没反应。
+  Future<void> _jumpToEpisodeWindow(int number) async {
+    final controller = _controller;
+    final seasonId = controller?.seasonId;
+    if (controller == null || seasonId == null) return;
+    final start = number <= 1 ? 0 : number - 1;
     await controller.selectSeason(seasonId, startAt: start);
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final header = _episodeHeaderKey.currentContext;
+      if (!mounted || header == null) return;
+      Scrollable.ensureVisible(
+        header,
+        alignment: .08,
+        duration: AppMotion.durationOf(context),
+        curve: AppMotion.standard,
+      );
+    });
   }
 
   void _openGenre(MediaItem item, String genre) {
@@ -1021,6 +1044,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                 )
                               : null,
                           onPickEpisode: _pickEpisode,
+                          onJumpToRange: controller.seasonId == null
+                              ? null
+                              : (number) =>
+                                    unawaited(_jumpToEpisodeWindow(number)),
+                          episodeHeaderKey: _episodeHeaderKey,
                           onOpenGenre:
                               DetailSourceScope.maybeOf(context) == null
                               ? (genre) => _openGenre(item, genre)
@@ -1596,6 +1624,11 @@ class _ChapterStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
+    // 整片没有章节图时用紧凑时间码胶囊，一屏看到的章节多一倍。
+    final imageless = chapters.every(
+      (chapter) => chapter.imageTag == null || chapter.imageTag!.isEmpty,
+    );
+    // 胶囊与图卡同宽：一屏仍是两张整卡，横滑停靠位置不变。
     final cardWidth = cardWidthOf(MediaQuery.sizeOf(context).width);
     final labelHeight =
         MediaQuery.textScalerOf(context)
@@ -1623,12 +1656,25 @@ class _ChapterStrip extends StatelessWidget {
         ),
         WholeCardStrip(
           key: const Key('phone-chapter-strip'),
-          height: cardWidth * 9 / 16 + AppSpacing.xs + labelHeight + 6,
+          height: imageless
+              ? ChapterTimeChip.heightOf(context)
+              : cardWidth * 9 / 16 + AppSpacing.xs + labelHeight + 6,
           itemCount: chapters.length,
           cardWidth: cardWidth,
           gap: AppSpacing.sm,
           margin: AppSpacing.md,
           itemBuilder: (context, index) {
+            if (imageless) {
+              return ChapterTimeChip(
+                key: CatalogKeys.chapter(index),
+                chapter: chapters[index],
+                index: index,
+                width: cardWidth,
+                onTap: onChapter == null
+                    ? null
+                    : () => onChapter!(chapters[index]),
+              );
+            }
             return _ChapterCard(
               key: CatalogKeys.chapter(index),
               itemId: itemId,

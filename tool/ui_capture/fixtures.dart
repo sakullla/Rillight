@@ -421,6 +421,23 @@ void _addLongSeries(FakeEmbyServer server, List<FakeMediaStream> streams) {
         played: i <= 3,
         dateCreated: added,
       ),
+    // 第 2 季是日播长季：128 集，前 70 集已看。分集超过两屏时出现分段条，
+    // 滚到末尾自动续载（`series-long-season`）。
+    for (var i = 1; i <= 128; i++)
+      FakeEpisode(
+        id: 'episode-long-s2e$i',
+        name: '晨潮 $i',
+        seasonId: 'season-long-2',
+        indexNumber: i,
+        parentIndexNumber: 2,
+        primaryImageTag: 'long-s2e${(i - 1) % 12 + 1}',
+        runtime: const Duration(minutes: 24),
+        premiereDate: DateTime.utc(2009, 1, 5).add(Duration(days: i - 1)),
+        overview: i.isEven ? '退潮后的礁石间，孩子们捡到一只写着旧地址的漂流瓶。' : null,
+        mediaStreams: streams,
+        played: i <= 70,
+        dateCreated: added,
+      ),
   ]);
 }
 

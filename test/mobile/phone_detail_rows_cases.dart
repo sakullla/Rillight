@@ -37,6 +37,7 @@ import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
@@ -67,6 +68,113 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(isolateImageCache);
+
+  void prepareLongSeason(FakeEmbyServer server, {int count = 130}) {
+    server.setSeasons('series-friends', const [
+      FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+    ]);
+    server.setEpisodes('series-friends', [
+      for (var i = 1; i <= count; i++)
+        FakeEpisode(
+          id: 'long-e$i',
+          name: 'Long $i',
+          seasonId: 'season-friends-1',
+          indexNumber: i,
+          parentIndexNumber: 1,
+        ),
+    ]);
+  }
+
+  Finder detailScrollable() => find
+      .descendant(
+        of: find.byType(MobileDetailPage),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+        ),
+      )
+      .first;
+
+  testWidgets('long seasons offer ranges that jump the episode window', (
+    tester,
+  ) async {
+    final harness = await _startDetail(
+      tester,
+      width: 412,
+      prepare: prepareLongSeason,
+    );
+    unawaited(harness.router.push('/item/series-friends'));
+    await settle(tester);
+
+    final bar = find.byKey(EpisodeRangeBar.barKey);
+    await tester.scrollUntilVisible(bar, 300, scrollable: detailScrollable());
+    await Scrollable.ensureVisible(tester.element(bar), alignment: .5);
+    await settle(tester);
+    for (final start in [1, 51, 101]) {
+      expect(find.byKey(EpisodeRangeBar.chipKey(start)), findsOneWidget);
+    }
+    await tester.tap(find.byKey(EpisodeRangeBar.chipKey(101)));
+    await settle(tester);
+
+    // 新窗口从第 101 集开始，分区开头被滚回视野。
+    expect(find.byKey(CatalogKeys.episode('long-e101')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episode('long-e1')), findsNothing);
+    final first = tester.getRect(find.byKey(CatalogKeys.episode('long-e101')));
+    expect(first.top, lessThan(900));
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('scrolling near the end of a season loads the next page', (
+    tester,
+  ) async {
+    final harness = await _startDetail(
+      tester,
+      width: 412,
+      prepare: (server) => prepareLongSeason(server, count: 90),
+    );
+    unawaited(harness.router.push('/item/series-friends'));
+    await settle(tester);
+
+    // 不点「加载更多」，一路滚下去就能看到第一页之后的分集。
+    await tester.scrollUntilVisible(
+      find.byKey(CatalogKeys.episode('long-e80')),
+      600,
+      scrollable: detailScrollable(),
+      maxScrolls: 200,
+    );
+    expect(find.byKey(CatalogKeys.episode('long-e80')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('tablet width lays phone episodes out in two columns', (
+    tester,
+  ) async {
+    final harness = await _startDetail(
+      tester,
+      width: 800,
+      prepare: (server) => prepareLongSeason(server, count: 6),
+    );
+    unawaited(harness.router.push('/item/series-friends'));
+    await settle(tester);
+
+    final firstFinder = find.byKey(CatalogKeys.episode('long-e1'));
+    await tester.scrollUntilVisible(
+      firstFinder,
+      300,
+      scrollable: detailScrollable(),
+    );
+    await settle(tester);
+    final first = tester.getRect(firstFinder);
+    final second = tester.getRect(find.byKey(CatalogKeys.episode('long-e2')));
+    final third = tester.getRect(find.byKey(CatalogKeys.episode('long-e3')));
+    // 当前集没有描边，内容比相邻行高出一像素。
+    expect(second.top, closeTo(first.top, 1.5));
+    expect(second.left, greaterThan(first.right));
+    expect(third.top, greaterThan(first.bottom - 0.5));
+    expect(first.width, lessThan(420));
+    // 短季不出现分段条。
+    expect(find.byKey(EpisodeRangeBar.barKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 
   testWidgets('long episode list builds only rows near the viewport', (
     tester,
@@ -1016,24 +1124,21 @@ void main() {
       await settle(tester);
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
       expect(find.byKey(CatalogKeys.chapter(1)), findsOneWidget);
-      final fallbackPlay = tester.widgetList<Icon>(
-        find.descendant(
-          of: find.byType(ChapterFallbackArt),
-          matching: find.byIcon(AppIcons.play),
-        ),
-      );
-      expect(fallbackPlay, isNotEmpty);
+      // 整片没有章节图：画紧凑时间码胶囊，不再画一排空白 16:9 占位。
+      expect(find.byType(ChapterFallbackArt), findsNothing);
+      expect(find.byType(ChapterTimeChip), findsWidgets);
+      final chip = tester.getRect(find.byKey(CatalogKeys.chapter(0)));
+      expect(chip.height, lessThan(chip.width * 9 / 16 + 24));
       for (final art in tester.widgetList<DecoratedBox>(
         find.descendant(
-          of: find.byType(ChapterFallbackArt),
+          of: find.byType(ChapterTimeChip),
           matching: find.byType(DecoratedBox),
         ),
       )) {
-        expect((art.decoration as BoxDecoration).gradient, isNull);
-      }
-      for (final icon in fallbackPlay) {
-        expect(icon.icon, AppIcons.play);
-        expect(icon.fill, AppIcons.filled);
+        final decoration = art.decoration;
+        if (decoration is BoxDecoration) {
+          expect(decoration.gradient, isNull);
+        }
       }
       expect(find.byKey(CatalogKeys.chapter(2)), findsNothing);
 

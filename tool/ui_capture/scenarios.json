@@ -1266,6 +1266,15 @@
     ]
   },
   {
+    "id": "series-long-season",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
     "id": "server-add",
     "feature": "servers",
     "platforms": [

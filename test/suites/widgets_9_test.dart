@@ -4,14 +4,14 @@ import 'package:flutter_test/flutter_test.dart';
 import '../aggregation/playback_runtime_cases.dart' as case0;
 import '../app/desktop_scroll_cases.dart' as case1;
 import '../auth/provider_connect_dialog_cases.dart' as case2;
-import '../home/library_latest_row_cases.dart' as case3;
+import '../catalog/desktop_provider_filter_cases.dart' as case3;
 import '../library/album_cases.dart' as case4;
 import '../mobile/mobile_flow_cases.dart' as case5;
-import '../mobile/mobile_performance_timing_cases.dart' as case6;
-import '../mobile/phone_detail_rows_cases.dart' as case7;
-import '../player/seek_preview_cases.dart' as case8;
-import '../search/aggregation_search_surface_cases.dart' as case9;
-import '../widgets/artwork_crop_cases.dart' as case10;
+import '../mobile/phone_detail_rows_cases.dart' as case6;
+import '../player/ended_navigation_cases.dart' as case7;
+import '../player/player_cache_status_cases.dart' as case8;
+import '../player/seek_preview_cases.dart' as case9;
+import '../widgets/app_empty_view_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -22,13 +22,13 @@ void main() {
   );
   group('app/desktop_scroll_test.dart', case1.main);
   group('auth/provider_connect_dialog_test.dart', case2.main);
-  group('home/library_latest_row_test.dart', case3.main);
+  group('catalog/desktop_provider_filter_test.dart', case3.main);
   group('library/album_test.dart', case4.main);
   group('mobile/mobile_flow_test.dart [part 1]', () => case5.mainShard(0, 4));
   group('mobile/mobile_flow_test.dart [part 3]', () => case5.mainShard(2, 4));
-  group('mobile/mobile_performance_timing_test.dart', case6.main);
-  group('mobile/phone_detail_rows_test.dart', case7.main);
-  group('player/seek_preview_test.dart', case8.main);
-  group('search/aggregation_search_surface_test.dart', case9.main);
-  group('widgets/artwork_crop_test.dart', case10.main);
+  group('mobile/phone_detail_rows_test.dart', case6.main);
+  group('player/ended_navigation_test.dart', case7.main);
+  group('player/player_cache_status_test.dart', case8.main);
+  group('player/seek_preview_test.dart', case9.main);
+  group('widgets/app_empty_view_test.dart', case10.main);
 }

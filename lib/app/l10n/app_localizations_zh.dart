@@ -1791,6 +1791,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get fileBitrateLabel => '码率';
 
   @override
+  String episodeRangeLabel(int start, int end) {
+    return '$start–$end';
+  }
+
+  @override
+  String episodeRangeSemantic(int start, int end) {
+    return '第 $start 至 $end 集';
+  }
+
+  @override
+  String get episodeRangesTitle => '分段';
+
+  @override
   String seasonWatchedCount(int watched, int total) {
     return '已看 $watched/$total';
   }

@@ -813,7 +813,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     await _jumpToEpisodeNumber(selected);
   }
 
-  Future<void> _jumpToEpisodeNumber(int number) async {
+  /// [reveal] 为 false 时只换窗口、不改当前集（分段条用），定位由分集列表自己做。
+  Future<void> _jumpToEpisodeNumber(int number, {bool reveal = true}) async {
     final seasonId = _seasonId;
     if (seasonId == null) {
       return;
@@ -830,7 +831,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             }
           });
         }
-        _openOrRevealEpisode(episode.id);
+        if (reveal) _openOrRevealEpisode(episode.id);
         return;
       }
     }
@@ -864,7 +865,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _episodeLoadMoreError = null;
         _pendingJumpNumber = null;
       });
-      _openOrRevealEpisode(target.id);
+      if (reveal) _openOrRevealEpisode(target.id);
     } on MediaServerException catch (error) {
       if (!mounted || serial != _jumpSerial || _seasonId != seasonId) {
         return;
@@ -1624,6 +1625,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           onRetryLoadMore: _retryEpisodeContinuation,
           onLoadMore: () => unawaited(_loadMoreEpisodes()),
           summary: episodeSummary,
+          rangeTotal: seasonTotal ?? 0,
+          onJumpToNumber: _seasonId == null
+              ? null
+              : (number) =>
+                    unawaited(_jumpToEpisodeNumber(number, reveal: false)),
           seasonSwitcher: _seasons.length > 1
               ? SeasonSwitcher(
                   seasons: _seasons,
@@ -1883,6 +1889,13 @@ class _ChapterStripState extends State<_ChapterStrip> {
       context,
       theme.textTheme.labelLarge,
     );
+    // Emby 默认不抽章节图。整片都没有章节图时，用紧凑的时间码胶囊代替一排空白 16:9 占位。
+    final imageless = widget.chapters.every(
+      (chapter) => chapter.imageTag == null || chapter.imageTag!.isEmpty,
+    );
+    final stripHeight = imageless
+        ? ChapterTimeChip.heightOf(context)
+        : _ChapterTile.width * 9 / 16 + AppSpacing.xs + labelHeight + 2;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.page,
@@ -1896,8 +1909,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
           Text(l10n.chapters, style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
-            height:
-                _ChapterTile.width * 9 / 16 + AppSpacing.xs + labelHeight + 2,
+            height: stripHeight,
             child: Stack(
               children: [
                 NotificationListener<ScrollMetricsNotification>(
@@ -1917,6 +1929,14 @@ class _ChapterStripState extends State<_ChapterStrip> {
                             const SizedBox(width: AppSpacing.sm),
                         itemBuilder: (context, index) {
                           final chapter = widget.chapters[index];
+                          if (imageless) {
+                            return ChapterTimeChip(
+                              key: CatalogKeys.chapter(index),
+                              chapter: chapter,
+                              index: index,
+                              onTap: () => widget.onSelect(chapter),
+                            );
+                          }
                           return _ChapterTile(
                             key: CatalogKeys.chapter(index),
                             itemId: widget.itemId,

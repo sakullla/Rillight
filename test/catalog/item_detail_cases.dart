@@ -29,6 +29,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/library/poster_card.dart';
@@ -1018,6 +1019,95 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  cases.testWidgets(
+    'long seasons auto-load at the end and ranges scroll without changing the current episode',
+    (tester) async {
+      server.setEpisodes(_series, [
+        for (var i = 1; i <= 130; i++)
+          FakeEpisode(
+            id: 'range-e$i',
+            name: 'Episode $i',
+            seasonId: _season1,
+            indexNumber: i,
+          ),
+      ]);
+      await pumpDetailOnly(tester);
+      final pageScroll = find
+          .descendant(
+            of: find.byType(ItemDetailPage),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      expect(_loadedEpisodeIds(tester), hasLength(80));
+      expect(
+        find.byKey(EpisodeRangeBar.barKey, skipOffstage: false),
+        findsOneWidget,
+      );
+      final current = tester.widget<EpisodeList>(find.byType(EpisodeList));
+      expect(current.currentId, 'range-e1');
+
+      // 滚到第一窗末尾就续载，不需要点「加载更多」。
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('episode-row-range-e130')),
+        800,
+        scrollable: pageScroll,
+        maxScrolls: 200,
+      );
+      await settle(tester);
+      expect(_loadedEpisodeIds(tester), hasLength(130));
+
+      // 点「51–100」：滚到第 51 集，当前集高亮仍是续播目标。
+      final bar = find.byKey(EpisodeRangeBar.barKey, skipOffstage: false);
+      await tester.scrollUntilVisible(bar, -800, scrollable: pageScroll);
+      await Scrollable.ensureVisible(tester.element(bar), alignment: .5);
+      await settle(tester);
+      await tester.tap(find.byKey(EpisodeRangeBar.chipKey(51)));
+      await settle(tester);
+      final target = find.byKey(const ValueKey('episode-row-range-e51'));
+      expect(target, findsOneWidget);
+      final rect = tester.getRect(target);
+      expect(rect.top, greaterThanOrEqualTo(0));
+      expect(rect.bottom, lessThanOrEqualTo(800));
+      expect(
+        tester.widget<EpisodeList>(find.byType(EpisodeList)).currentId,
+        'range-e1',
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets('compact desktop windows keep episodes in two columns', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, [
+      for (var i = 1; i <= 8; i++)
+        FakeEpisode(
+          id: 'compact-e$i',
+          name: '第 $i 集',
+          seasonId: _season1,
+          indexNumber: i,
+          overview: '简介' * 20,
+        ),
+    ]);
+    const view = Size(1024, 768);
+    final app = await pumpApp(tester, viewSize: view);
+    app.router.go(AppRoutes.item(_series, seasonId: _season1));
+    await tester.pumpWidget(app);
+    await settle(tester);
+    final rows = [
+      for (final row in tester.widgetList<EpisodeRow>(find.byType(EpisodeRow)))
+        tester.getRect(find.byKey(ValueKey('episode-row-${row.item.id}'))),
+    ];
+    expect({for (final rect in rows) rect.left.round()}, hasLength(2));
+    // 八集的短季不出现分段条。
+    expect(
+      find.byKey(EpisodeRangeBar.barKey, skipOffstage: false),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 
   cases.testWidgets(
     'episode load-more failure keeps the window and retry appends without duplicates',

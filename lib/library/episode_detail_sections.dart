@@ -2260,3 +2260,155 @@ class ChapterFallbackArt extends StatelessWidget {
     );
   }
 }
+
+/// 无章节图时的紧凑章节胶囊：左侧序号圆钮，右侧「时间码 / 章节名」两行。
+///
+/// Emby 默认不抽取章节图，大多数片子的章节只有名字和起点。整排空白 16:9
+/// 占位既占地方又看不出区别，换成这种胶囊后一屏能看到的章节多一倍，时间码
+/// 也直接读得到。点按从该章节开始播放。
+class ChapterTimeChip extends StatefulWidget {
+  const ChapterTimeChip({
+    super.key,
+    required this.chapter,
+    required this.index,
+    this.onTap,
+    this.width = defaultWidth,
+  });
+
+  final ItemChapter chapter;
+  final int index;
+  final VoidCallback? onTap;
+  final double width;
+
+  static const double defaultWidth = 184;
+  static const double _padV = 10;
+
+  /// 胶囊高度：两行文字加上下内边距，随系统字号缩放。
+  static double heightOf(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    double line(TextStyle? style) {
+      final painter = TextPainter(
+        text: TextSpan(text: '国Ag', style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      final height = painter.height;
+      painter.dispose();
+      return height;
+    }
+
+    final text =
+        line(theme.textTheme.labelMedium) +
+        2 +
+        line(theme.textTheme.labelLarge);
+    return (text > 32 ? text : 32) + _padV * 2 + 2;
+  }
+
+  @override
+  State<ChapterTimeChip> createState() => _ChapterTimeChipState();
+}
+
+class _ChapterTimeChipState extends State<ChapterTimeChip> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final chapter = widget.chapter;
+    final name = chapter.name.trim().isEmpty
+        ? '${widget.index + 1}'
+        : chapter.name.trim();
+    final number = (widget.index + 1).toString().padLeft(2, '0');
+    return SizedBox(
+      width: widget.width,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: AnimatedContainer(
+          duration: AppMotion.durationOf(context, AppMotion.fast),
+          decoration: BoxDecoration(
+            color: _hovered
+                ? scheme.surfaceContainerHigh
+                : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(
+              color: AppEdge.of(scheme.brightness, strong: _hovered),
+            ),
+          ),
+          child: AppSurfaceAction(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: ChapterTimeChip._padV,
+              ),
+              child: Row(
+                children: [
+                  SizedBox.square(
+                    dimension: 32,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: _hovered
+                            ? scheme.primary
+                            : scheme.onSurface.withValues(alpha: .08),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: _hovered
+                            ? Icon(
+                                AppIcons.play,
+                                fill: AppIcons.filled,
+                                size: 16,
+                                color: scheme.onPrimary,
+                              )
+                            : Text(
+                                number,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w700,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          chapterClock(chapter.startPosition),
+                          maxLines: 1,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

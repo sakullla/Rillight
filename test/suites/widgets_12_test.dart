@@ -6,12 +6,12 @@ import '../app/content_theme_cases.dart' as case1;
 import '../app/desktop_performance_host_cases.dart' as case2;
 import '../app/mobile_shell_nav_cases.dart' as case3;
 import '../auth/line_management_cases.dart' as case4;
-import '../auth/provider_connect_routing_cases.dart' as case5;
-import '../home/library_tiles_cases.dart' as case6;
+import '../auth/phone_server_manager_cases.dart' as case5;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case6;
 import '../library/person_works_cases.dart' as case7;
 import '../library/source_detail_route_cases.dart' as case8;
-import '../mobile/search_cached_refresh_cases.dart' as case9;
-import '../tv/tv_detail_cases.dart' as case10;
+import '../mobile/tv_shell_navigation_cases.dart' as case9;
+import '../player/subtitle_menu_cases.dart' as case10;
 import '../tv/tv_home_featured_cases.dart' as case11;
 import '../helpers/suite.dart';
 
@@ -22,14 +22,14 @@ void main() {
   group('app/desktop_performance_host_test.dart', case2.main);
   group('app/mobile_shell_nav_test.dart', case3.main);
   group('auth/line_management_test.dart', case4.main);
-  group('auth/provider_connect_routing_test.dart', case5.main);
-  group('home/library_tiles_test.dart', case6.main);
+  group('auth/phone_server_manager_test.dart', case5.main);
+  group('catalog/shelf_grid_scroll_rebuild_test.dart', case6.main);
   group('library/person_works_test.dart', case7.main);
   group(
     'library/source_detail_route_test.dart [part 3]',
     () => case8.mainShard(2, 3),
   );
-  group('mobile/search_cached_refresh_test.dart', case9.main);
-  group('tv/tv_detail_test.dart [part 2]', () => case10.mainShard(1, 2));
+  group('mobile/tv_shell_navigation_test.dart', case9.main);
+  group('player/subtitle_menu_test.dart', case10.main);
   group('tv/tv_home_featured_test.dart', case11.main);
 }

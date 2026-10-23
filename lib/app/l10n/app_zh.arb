@@ -1898,6 +1898,34 @@
   "@fileBitrateLabel": {
     "description": "Phone detail info row label for the overall media bitrate."
   },
+  "episodeRangeLabel": "{start}–{end}",
+  "@episodeRangeLabel": {
+    "description": "Compact episode range chip for long seasons, e.g. 1–50.",
+    "placeholders": {
+      "start": {
+        "type": "int"
+      },
+      "end": {
+        "type": "int"
+      }
+    }
+  },
+  "episodeRangeSemantic": "第 {start} 至 {end} 集",
+  "@episodeRangeSemantic": {
+    "description": "Screen reader label for an episode range chip.",
+    "placeholders": {
+      "start": {
+        "type": "int"
+      },
+      "end": {
+        "type": "int"
+      }
+    }
+  },
+  "episodeRangesTitle": "分段",
+  "@episodeRangesTitle": {
+    "description": "Label of the episode range bar for long seasons."
+  },
   "seasonWatchedCount": "已看 {watched}/{total}",
   "@seasonWatchedCount": {
     "description": "Phone season summary: watched episodes among the season's episodes.",

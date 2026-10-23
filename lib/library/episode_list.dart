@@ -11,6 +11,7 @@ import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -52,6 +53,12 @@ class EpisodeGridMetrics {
   static double minCardWidthFor(Size viewport) =>
       560 * AppViewport.readingScaleOf(viewport);
 
+  /// 两列时允许的最窄行宽。最小窗口 960 与常见的 1024–1280 笔记本窗口
+  /// 放不下两条 560 的行，过去只能排成单列：每行左侧四成是内容，右侧大片
+  /// 空白。两列放宽到 440；三列仍要求每行不窄于 [minCardWidthFor]。
+  static double compactCardWidthFor(Size viewport) =>
+      440 * AppViewport.readingScaleOf(viewport);
+
   /// 缩略图宽度的设计值（1080p），随阅读缩放放大。
   static double thumbDesignWidthFor(Size viewport) =>
       192 * AppViewport.readingScaleOf(viewport);
@@ -91,9 +98,12 @@ class EpisodeGridMetrics {
 
   static EpisodeGridMetrics of(BuildContext context, double available) {
     final viewport = MediaQuery.sizeOf(context);
-    final min = minCardWidthFor(viewport);
-    var columns = ((available + crossSpacing) / (min + crossSpacing)).floor();
-    if (columns < 1) columns = 1;
+    int fit(double min) =>
+        ((available + crossSpacing) / (min + crossSpacing)).floor();
+    var columns = fit(minCardWidthFor(viewport));
+    if (columns < 2) {
+      columns = fit(compactCardWidthFor(viewport)).clamp(1, 2);
+    }
     if (columns > maxColumns) columns = maxColumns;
     final cardWidth = (available - crossSpacing * (columns - 1)) / columns;
     final thumbWidth = thumbWidthIn(cardWidth, viewport);
@@ -152,6 +162,8 @@ class EpisodeList extends StatefulWidget {
     this.seasonSwitcher,
     this.loadMoreError,
     this.onRetryLoadMore,
+    this.rangeTotal = 0,
+    this.onJumpToNumber,
   });
 
   final List<MediaItem> episodes;
@@ -178,6 +190,11 @@ class EpisodeList extends StatefulWidget {
   /// 与标题、统计同在左侧一组的季切换器;季标签放不下时它自己折叠为下拉。
   final Widget? seasonSwitcher;
 
+  /// 本季集数。超过 [EpisodeRanges.minTotal] 且给了 [onJumpToNumber] 时，
+  /// 标题行下方出现分段条，高亮的是视口里正在看的那一段。
+  final int rangeTotal;
+  final ValueChanged<int>? onJumpToNumber;
+
   @override
   State<EpisodeList> createState() => _EpisodeListState();
 }
@@ -187,11 +204,104 @@ class _EpisodeListState extends State<EpisodeList> {
   final _rows = <String, GlobalKey>{};
   int _seekGeneration = 0;
   EpisodeGridMetrics? _metrics;
+  ScrollPosition? _position;
+
+  /// 视口上部那一集的集号，决定分段条高亮哪一段。
+  int? _visibleNumber;
+
+  bool get _showRanges =>
+      widget.onJumpToNumber != null && EpisodeRanges.show(widget.rangeTotal);
 
   @override
   void initState() {
     super.initState();
     _locate();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final position = Scrollable.maybeOf(context)?.position;
+    if (!identical(position, _position)) {
+      _position?.removeListener(_trackVisible);
+      _position = position;
+      _position?.addListener(_trackVisible);
+    }
+  }
+
+  @override
+  void dispose() {
+    _position?.removeListener(_trackVisible);
+    super.dispose();
+  }
+
+  /// 行等高，视口上部是第几行可以直接算出来，不必遍历已构建的行。
+  void _trackVisible() {
+    if (!_showRanges || widget.episodes.isEmpty) return;
+    final header = _header.currentContext;
+    final metrics = _metrics;
+    final position = _position;
+    if (header == null || metrics == null || position == null) return;
+    final anchor = header.findRenderObject();
+    if (anchor is! RenderBox || !anchor.attached || !anchor.hasSize) return;
+    final start = RenderAbstractViewport.of(anchor)
+        .getOffsetToReveal(anchor, 0)
+        .offset;
+    final gridTop = start + anchor.size.height;
+    final probe = position.pixels + position.viewportDimension * .3;
+    final row =
+        ((probe - gridTop) / (metrics.extent + EpisodeGridMetrics.mainSpacing))
+            .floor();
+    final index = (row * metrics.columns).clamp(0, widget.episodes.length - 1);
+    final number = widget.episodes[index].indexNumber ?? index + 1;
+    final total = widget.rangeTotal;
+    final current = _visibleNumber;
+    if (current != null &&
+        EpisodeRanges.indexOf(total, current) ==
+            EpisodeRanges.indexOf(total, number)) {
+      return;
+    }
+    setState(() => _visibleNumber = number);
+  }
+
+  /// 点了分段、但该段还没载入时记下起始集号，新窗口到达后再滚过去。
+  int? _pendingRange;
+
+  int? _indexAtOrAfter(int number) {
+    for (var i = 0; i < widget.episodes.length; i++) {
+      if ((widget.episodes[i].indexNumber ?? i + 1) >= number) return i;
+    }
+    return null;
+  }
+
+  /// 分段已在列表里就直接滚到该段第一集；没载入就请页面换窗口。
+  /// 只滚动，不改「当前集」高亮——那仍是续播/下一集。
+  void _jumpToRange(int start) {
+    setState(() => _visibleNumber = start);
+    final index = _indexAtOrAfter(start);
+    final loadedFrom = widget.episodes.firstOrNull?.indexNumber ?? 1;
+    if (index != null && loadedFrom <= start) {
+      _pendingRange = null;
+      _seekTo(index);
+      return;
+    }
+    _pendingRange = start;
+    widget.onJumpToNumber?.call(start);
+  }
+
+  void _seekTo(int index) {
+    final generation = ++_seekGeneration;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _seek(index, generation, 0, force: true),
+    );
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  int? get _fallbackNumber {
+    for (final episode in widget.episodes) {
+      if (episode.id == widget.currentId) return episode.indexNumber;
+    }
+    return widget.episodes.firstOrNull?.indexNumber;
   }
 
   @override
@@ -209,6 +319,14 @@ class _EpisodeListState extends State<EpisodeList> {
             )) {
       _locate();
     }
+    final pending = _pendingRange;
+    if (pending != null && !identical(oldWidget.episodes, widget.episodes)) {
+      final index = _indexAtOrAfter(pending);
+      if (index != null) {
+        _pendingRange = null;
+        _seekTo(index);
+      }
+    }
   }
 
   void _locate() {
@@ -224,11 +342,11 @@ class _EpisodeListState extends State<EpisodeList> {
 
   // 网格卡片等高:由目标所在行直接算出偏移,跳过去后再把已构建的目标卡对齐。
   // 定位从不为了量高度而构建整季。
-  void _seek(int target, int generation, int attempt) {
+  void _seek(int target, int generation, int attempt, {bool force = false}) {
     if (!mounted || generation != _seekGeneration || attempt >= 24) return;
     if (target >= widget.episodes.length) return;
     final columns = _metrics?.columns ?? 2;
-    if (widget.revealToken == 0 && target < columns) {
+    if (!force && widget.revealToken == 0 && target < columns) {
       return;
     }
     final id = widget.episodes[target].id;
@@ -258,7 +376,7 @@ class _EpisodeListState extends State<EpisodeList> {
             .clamp(position.minScrollExtent, position.maxScrollExtent);
     position.jumpTo(offset);
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _seek(target, generation, attempt + 1),
+      (_) => _seek(target, generation, attempt + 1, force: force),
     );
     WidgetsBinding.instance.ensureVisualUpdate();
   }
@@ -363,6 +481,14 @@ class _EpisodeListState extends State<EpisodeList> {
                     ],
                   ],
                 ),
+                if (_showRanges && !(error != null && empty)) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  EpisodeRangeBar(
+                    total: widget.rangeTotal,
+                    activeNumber: _visibleNumber ?? _fallbackNumber,
+                    onSelected: _jumpToRange,
+                  ),
+                ],
                 if (error != null && empty)
                   AppErrorView(
                     message: catalogFailureMessage(l10n, error),
@@ -436,29 +562,48 @@ class _EpisodeListState extends State<EpisodeList> {
             },
           ),
         ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(
-              top: AppSpacing.md,
-              bottom: AppSpacing.md,
+        // 末尾放在惰性 SliverList 里：SliverToBoxAdapter 的子节点会立即构建，
+        // 续载触发点就会在首帧触发，把整季一窗一窗全拉下来。
+        SliverList.list(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(
+                top: AppSpacing.md,
+                bottom: AppSpacing.md,
+              ),
+              child: widget.hasMore
+                  ? AutoLoadTrigger(
+                      // 滚到网格末尾附近就续载下一窗；失败后停住，等用户点重试。
+                      token: widget.loadMoreError == null && !widget.loadingMore
+                          ? widget.episodes.length
+                          : -1,
+                      onTrigger: () {
+                        if (widget.loadMoreError == null &&
+                            !widget.loadingMore &&
+                            widget.hasMore) {
+                          widget.onLoadMore();
+                        }
+                      },
+                      child: Center(
+                        child: AppButton(
+                          key: CatalogKeys.episodesLoadMore,
+                          onPressed: widget.loadingMore
+                              ? null
+                              : widget.onLoadMore,
+                          variant: AppButtonVariant.outlined,
+                          child: widget.loadingMore
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CupertinoActivityIndicator(),
+                                )
+                              : Text(l10n.episodesLoadMore),
+                        ),
+                      ),
+                    )
+                  : null,
             ),
-            child: widget.hasMore
-                ? Center(
-                    child: AppButton(
-                      key: CatalogKeys.episodesLoadMore,
-                      onPressed: widget.loadingMore ? null : widget.onLoadMore,
-                      variant: AppButtonVariant.outlined,
-                      child: widget.loadingMore
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CupertinoActivityIndicator(),
-                            )
-                          : Text(l10n.episodesLoadMore),
-                    ),
-                  )
-                : null,
-          ),
+          ],
         ),
       ],
     );

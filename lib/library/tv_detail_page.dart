@@ -18,6 +18,7 @@ import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/episode_range_bar.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/season_switcher.dart';
@@ -499,17 +500,37 @@ class _TvDetailPageState extends State<TvDetailPage> {
             // 一个焦点按钮，按下弹出可聚焦的季列表。标签沿用 `season:<id>`
             // 焦点节点，从按钮行按「下」直接落到这里。
             Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: SeasonSwitcher(
-                  platform: SeasonSwitcherPlatform.tv,
-                  seasons: c.seasons,
-                  currentId: c.seasonId,
-                  tabKey: (id) => ValueKey(id),
-                  focusNodeFor: (id) => _focus.nodeFor('season:$id'),
-                  pickerFocusNode: _focus.nodeFor(_seasonPickerFocus),
-                  onSelected: (id) => c.selectSeason(id),
-                ),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: 1,
+                      child: SeasonSwitcher(
+                        platform: SeasonSwitcherPlatform.tv,
+                        seasons: c.seasons,
+                        currentId: c.seasonId,
+                        tabKey: (id) => ValueKey(id),
+                        focusNodeFor: (id) => _focus.nodeFor('season:$id'),
+                        pickerFocusNode: _focus.nodeFor(_seasonPickerFocus),
+                        onSelected: (id) => c.selectSeason(id),
+                      ),
+                    ),
+                  ),
+                  // 长季分段紧跟在季入口后面，读作「第 2 季 › 51–100」。
+                  if (EpisodeRanges.show(c.episodeTotal) &&
+                      c.seasonId != null) ...[
+                    SizedBox(width: AppSpacing.xs * s),
+                    _TvRangeButton(
+                      total: c.episodeTotal,
+                      activeNumber:
+                          c.episodes.firstOrNull?.indexNumber ??
+                          c.windowStart + 1,
+                      onSelected: (start) =>
+                          c.selectSeason(c.seasonId!, startAt: start - 1),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
@@ -548,14 +569,26 @@ class _TvDetailPageState extends State<TvDetailPage> {
           currentId: _tvEpisodeAnchor(c, target),
           metrics: metrics,
           nodeFor: (episode) => _focus.nodeFor('episode:${episode.id}'),
+          // 遥控器一格一格按到行尾很慢：「更多」卡快进入视野时就自动续载，
+          // 卡片本身保留，失败后仍可按确认重试。
           more: c.hasMore
-              ? TvMoreTile(
-                  key: const Key('tv-episodes-more'),
-                  metrics: metrics,
-                  label: l.mobileLoadMore,
-                  onPressed: c.episodesLoading
-                      ? null
-                      : () => c.selectSeason(c.seasonId!, more: true),
+              ? AutoLoadTrigger(
+                  token: c.episodesLoading || c.episodeError != null
+                      ? -1
+                      : c.episodes.length,
+                  onTrigger: () {
+                    if (!c.episodesLoading && c.hasMore) {
+                      c.selectSeason(c.seasonId!, more: true);
+                    }
+                  },
+                  child: TvMoreTile(
+                    key: const Key('tv-episodes-more'),
+                    metrics: metrics,
+                    label: l.mobileLoadMore,
+                    onPressed: c.episodesLoading
+                        ? null
+                        : () => c.selectSeason(c.seasonId!, more: true),
+                  ),
                 )
               : null,
         ),
@@ -1381,4 +1414,87 @@ ItemMediaSource? _tvSource(MediaItem item, String? id) {
     return null;
   }
   return item.mediaSources.first;
+}
+
+/// TV 长季分段入口：一个焦点按钮写着当前段（如「51–100 ˅」），按下弹出
+/// 可聚焦的分段列表。遥控器上横向分段条要一格格移动，列表更快。
+class _TvRangeButton extends StatelessWidget {
+  const _TvRangeButton({
+    required this.total,
+    required this.activeNumber,
+    required this.onSelected,
+  });
+
+  final int total;
+  final int activeNumber;
+  final ValueChanged<int> onSelected;
+
+  static const buttonKey = Key('tv-episode-range');
+
+  Future<void> _pick(BuildContext context) async {
+    final ranges = EpisodeRanges.of(total);
+    final active = EpisodeRanges.indexOf(total, activeNumber);
+    final picked = await showAppDialog<int>(
+      context: context,
+      useRootNavigator: false,
+      builder: (context) {
+        final l = AppLocalizations.of(context);
+        final s = TvDesign.scaleOf(context);
+        return AppDialog(
+          maxWidth: 360 * s,
+          title: Text(l.episodeRangesTitle),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * .6,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < ranges.length; i++)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: 4 * s),
+                      child: TvChoiceTile(
+                        actionKey: EpisodeRangeBar.chipKey(ranges[i].start),
+                        label: l.episodeRangeLabel(
+                          ranges[i].start,
+                          ranges[i].end,
+                        ),
+                        selected: i == active,
+                        autofocus: i == active,
+                        onPressed: () =>
+                            Navigator.of(context).pop(ranges[i].start),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (picked != null) onSelected(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final range = EpisodeRanges.of(
+      total,
+    )[EpisodeRanges.indexOf(total, activeNumber)];
+    return Semantics(
+      button: true,
+      label: l.episodeRangeSemantic(range.start, range.end),
+      excludeSemantics: true,
+      child: TvAction(
+        key: buttonKey,
+        variant: TvActionVariant.ghost,
+        selected: true,
+        trailing: const Icon(CupertinoIcons.chevron_down),
+        onPressed: () => _pick(context),
+        child: Text(l.episodeRangeLabel(range.start, range.end)),
+      ),
+    );
+  }
 }
