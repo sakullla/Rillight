@@ -963,72 +963,149 @@ void main() {
     });
   }
 
-  for (final outcome in ['commit', 'cancel', 'expire', 'guard revoked']) {
+  test('automatic selection saves while the current line is down', () async {
+    backend.emitEvent(VideoEventKind.error, 'Connection lost');
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(player.disconnected, isTrue);
+    expect(player.state.phase, PlaybackPhase.failed);
+    final opens = backend.opens.length;
+    await player.selectPlaybackLine(const LineSelection.auto());
+    expect(player.playbackLineSelection.isAutomatic, isTrue);
+    expect(
+      (await store.load()).servers.single.lineSelection.isAutomatic,
+      isTrue,
+    );
+    expect(player.disconnected, isTrue);
+    expect(player.state.phase, PlaybackPhase.failed);
+    expect(player.isPlaying, isFalse);
+    expect(player.activeLineId, aId);
+    expect(backend.opens.length, opens);
+  });
+
+  test(
+    'automatic playback tries the last successful line before the others',
+    () async {
+      final runtime = player.runtime!;
+      await player.switchLine(bId);
+      expect(auth.savedServers.single.lastSuccessfulLineId, bId);
+      final server = auth.savedServers.single;
+      await player.disposeAsync();
+      player.dispose();
+      Future<void> save(LineSelection selection) => auth.saveConfiguration(
+        serverId,
+        nickname: server.nickname ?? '',
+        iconId: server.iconId,
+        userAgent: server.userAgent ?? '',
+        lines: server.lines,
+        lineSelection: selection,
+      );
+      await save(LineSelection.fixed(aId));
+      await save(const LineSelection.auto());
+      expect(auth.savedServers.single.activeLineId, aId);
+      expect(auth.savedServers.single.lastSuccessfulLineId, bId);
+      backend = _Backend();
+      player = PlayerController(
+        client: auth.client,
+        itemId: 'movie-up',
+        backend: backend,
+        window: PlayerWindow(),
+        runtime: runtime,
+        autoResume: false,
+        recoveryTimeout: const Duration(seconds: 2),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        settingsStore: MemoryPlayerSettingsStore(),
+      );
+      await player.start();
+      expect(backend.opens, [b.baseUrl.host]);
+      expect(player.activeLineId, bId);
+      expect(player.playbackLineSelection.isAutomatic, isTrue);
+      expect(player.disconnected, isFalse);
+      expect(player.error, isNull);
+      expect(player.state.phase, isNot(PlaybackPhase.failed));
+      expect(player.isPlaying, isTrue);
+    },
+  );
+
+  test('failed automatic start still runs the ordinary open', () async {
+    final runtime = player.runtime!;
+    await player.disposeAsync();
+    player.dispose();
+    await auth.selectLine(serverId, const LineSelection.auto());
+    backend = _Backend();
+    backend.reject.addAll([a.baseUrl.host, b.baseUrl.host]);
+    player = PlayerController(
+      client: auth.client,
+      itemId: 'movie-up',
+      backend: backend,
+      window: PlayerWindow(),
+      runtime: runtime,
+      autoResume: false,
+      recoveryTimeout: const Duration(seconds: 2),
+      snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      settingsStore: MemoryPlayerSettingsStore(),
+    );
+    await player.start();
+    expect(player.state.phase, PlaybackPhase.failed);
+    expect(player.playbackLineSelection.isAutomatic, isTrue);
+    expect(backend.opens.length, greaterThan(2));
+  });
+
+  test(
+    'automatic failure keeps the watch position for retry or line choice',
+    () async {
+      await player.seekTo(const Duration(minutes: 4));
+      await player.selectPlaybackLine(const LineSelection.auto());
+      adapter.offline.add(a.baseUrl.host);
+      adapter.offline.add(b.baseUrl.host);
+      backend.emitEvent(VideoEventKind.error, 'Connection lost');
+      final deadline = DateTime.now().add(const Duration(seconds: 3));
+      while (DateTime.now().isBefore(deadline) &&
+          (!player.disconnected || player.isRecovering)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(player.isRecovering, isFalse);
+      expect(player.position, const Duration(minutes: 4));
+      expect(player.state.phase, PlaybackPhase.failed);
+      expect(player.disconnected, isTrue);
+      expect(player.playbackLineSelection.isAutomatic, isTrue);
+      expect(player.activeLineId, aId);
+      expect(backend.opens.where((host) => host == b.baseUrl.host), isEmpty);
+    },
+  );
+
+  for (final commit in [true, false]) {
     test(
-      'automatic candidate confirmation after fixed failure: $outcome',
+      'automatic recovery asks before a shorter backup commit=$commit',
       () async {
         await player.seekTo(const Duration(minutes: 4));
         b.items.firstWhere((m) => m.id == 'movie-up').runtime = const Duration(
           minutes: 2,
         );
-        backend.emitEvent(VideoEventKind.error, 'Connection lost');
-        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await player.selectPlaybackLine(const LineSelection.auto());
         adapter.offline.add(a.baseUrl.host);
-        final pending = Completer<void>();
-        var valid = true;
-        var settled = false;
-        final work = player.selectPlaybackLineWithConfirmation(
-          const LineSelection.auto(),
-          deadlineUtc: DateTime.now().toUtc().add(
-            Duration(milliseconds: outcome == 'expire' ? 200 : 2000),
-          ),
-          guard: () {
-            if (!valid) throw StateError('Host intent revoked');
-          },
-          onNeedsSelection: () async => pending.complete(),
-        );
-        final result = outcome == 'commit'
-            ? work.then((_) => settled = true)
-            : expectLater(work, throwsA(anything)).then((_) => settled = true);
-        await pending.future.timeout(const Duration(seconds: 1));
-        expect(settled, false);
-        expect(player.switchConfirmation, isNotNull);
-        expect(backend.opens, [a.baseUrl.host]);
-        expect(
-          (await store.load()).servers.single.lineSelection,
-          LineSelection.fixed(aId),
-        );
-        if (outcome == 'commit') {
-          final gate = store.gate = Completer<void>();
-          final entered = store.entered = Completer<void>();
-          final confirmation = player.confirmMediaSourceSwitch(
-            SwitchResumeChoice.beginning,
-          );
-          await entered.future.timeout(const Duration(seconds: 1));
-          expect(settled, false);
-          gate.complete();
-          await confirmation;
-        } else if (outcome == 'cancel') {
-          await player.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
-        } else if (outcome == 'guard revoked') {
-          valid = false;
-          await expectLater(
-            player.confirmMediaSourceSwitch(SwitchResumeChoice.beginning),
-            throwsA(anything),
-          );
+        backend.emitEvent(VideoEventKind.error, 'Connection lost');
+        final deadline = DateTime.now().add(const Duration(seconds: 3));
+        while (DateTime.now().isBefore(deadline) &&
+            (player.switchConfirmation == null || player.isRecovering)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
         }
-        await result.timeout(const Duration(seconds: 1));
+        expect(player.switchConfirmation, isNotNull);
+        expect(player.isRecovering, isFalse);
+        expect(player.position, const Duration(minutes: 4));
+        expect(backend.opens.where((host) => host == b.baseUrl.host), isEmpty);
+        if (commit) {
+          await player.confirmMediaSourceSwitch(SwitchResumeChoice.beginning);
+          expect(player.activeLineId, bId);
+          expect(player.isPlaying, isTrue);
+          expect(player.disconnected, isFalse);
+          expect(player.state.phase, isNot(PlaybackPhase.failed));
+        } else {
+          await player.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
+          expect(player.activeLineId, aId);
+          expect(player.isPlaying, isFalse);
+        }
+        expect(player.playbackLineSelection.isAutomatic, isTrue);
         expect(player.switchConfirmation, isNull);
-        expect(player.isRecovering, false);
-        expect(player.isPlaying, outcome == 'commit');
-        expect(
-          (await store.load()).servers.single.lineSelection,
-          outcome == 'commit'
-              ? const LineSelection.auto()
-              : LineSelection.fixed(aId),
-        );
-        expect(player.activeLineId, outcome == 'commit' ? bId : aId);
-        if (outcome != 'commit') expect(backend.opens, [a.baseUrl.host]);
       },
     );
   }

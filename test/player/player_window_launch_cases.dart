@@ -1,13 +1,37 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/desktop_player_window.dart';
+import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 import '../emby/fake_emby_server.dart';
+import 'fake_player_process_control.dart';
+
+class _SharedLines extends FakeEmbyAdapter {
+  _SharedLines(this.lines) : super(lines);
+  final List<FakeEmbyServer> lines;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? stream,
+    Future<void>? cancel,
+  ) async {
+    final tokens = lines.expand((server) => server.issuedTokens).toList();
+    for (final line in lines) {
+      line.issuedTokens.addAll(tokens);
+    }
+    return super.fetch(options, stream, cancel);
+  }
+}
 
 const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
@@ -153,4 +177,78 @@ void main() {
       );
     });
   });
+
+  test(
+    'automatic desktop open starts playback on the last successful line',
+    () async {
+      final primary = FakeEmbyServer(
+        baseUrl: Uri.parse('http://line-a.test:8096'),
+      );
+      final backup = FakeEmbyServer(
+        serverId: primary.serverId,
+        baseUrl: Uri.parse('http://line-b.test:8096'),
+      );
+      final auth = AuthController(
+        client: EmbyClient(
+          device: _device,
+          dio: dioForFakeEmby(_SharedLines([primary, backup])),
+        ),
+        credentials: MemoryCredentialStore(),
+        servers: MemoryServerListStore(),
+      );
+      HistoryWriter? history;
+      DesktopPlayerWindowHost? host;
+      try {
+        await auth.connect(
+          address: primary.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        history = await HistoryWriter.open(
+          registry: auth.sources,
+          store: MemoryHistoryStore(),
+        );
+        final runtime = PlaybackRuntime(auth: auth, history: history);
+        final process = FakePlayerProcessControl();
+        host = DesktopPlayerWindowHost(
+          auth: auth,
+          runtime: runtime,
+          processControl: process,
+        );
+        final serverId = auth.savedServers.single.id;
+        await auth.addLine(serverId, backup.baseUrl.toString());
+        final saved = auth.savedServers.single;
+        final activeId = saved.lines
+            .firstWhere((line) => line.address.contains('line-a'))
+            .id;
+        final successfulId = saved.lines
+            .firstWhere((line) => line.address.contains('line-b'))
+            .id;
+        await auth.selectLine(serverId, LineSelection.fixed(successfulId));
+        Future<void> save(LineSelection selection) => auth.saveConfiguration(
+          serverId,
+          nickname: saved.nickname ?? '',
+          iconId: saved.iconId,
+          userAgent: saved.userAgent ?? '',
+          lines: saved.lines,
+          lineSelection: selection,
+        );
+        await save(LineSelection.fixed(activeId));
+        await save(const LineSelection.auto());
+        expect(auth.savedServers.single.activeLineId, activeId);
+        expect(auth.savedServers.single.lastSuccessfulLineId, successfulId);
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final launch = PlayerWindowLaunch.fromArguments(
+          process.spawnedArguments.single,
+        );
+        expect(launch.baseUrl, contains('line-b.test'));
+        expect(launch.lineSelection?.isAutomatic, isTrue);
+      } finally {
+        await host?.close();
+        host?.dispose();
+        await history?.close();
+        auth.dispose();
+      }
+    },
+  );
 }

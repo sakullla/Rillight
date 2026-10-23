@@ -29,7 +29,6 @@ class PlaybackLineRecoveryPanel extends StatefulWidget {
   const PlaybackLineRecoveryPanel({
     super.key,
     required this.recovering,
-    required this.tryingAlternative,
     required this.onCancel,
     required this.onChooseLines,
     required this.onRetry,
@@ -40,7 +39,7 @@ class PlaybackLineRecoveryPanel extends StatefulWidget {
     this.retryAfter,
     this.onDismiss,
   });
-  final bool recovering, tryingAlternative;
+  final bool recovering;
   final String? lineName, failure;
   final FocusNode? primaryFocusNode;
   final MediaServerFailureKind? failureKind;
@@ -106,7 +105,6 @@ class _PlaybackLineRecoveryPanelState extends State<PlaybackLineRecoveryPanel> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final recovering = widget.recovering;
-    final tryingAlternative = widget.tryingAlternative;
     final lineName = widget.lineName, failure = widget.failure;
     final retryWait = _retryWait;
     final waiting = retryWait > Duration.zero;
@@ -132,9 +130,7 @@ class _PlaybackLineRecoveryPanelState extends State<PlaybackLineRecoveryPanel> {
                 const SizedBox(height: 12),
                 Text(
                   recovering
-                      ? tryingAlternative
-                            ? l.playbackTryingAlternative
-                            : l.playbackReconnecting
+                      ? l.playbackReconnecting
                       : playbackClassifiedFailureTitle(widget.failureKind, l) ??
                             l.playbackRecoveryStopped,
                   textAlign: TextAlign.center,
@@ -401,11 +397,19 @@ Widget playbackSwitchConfirmation(
   cancelFocusNode: cancelFocusNode,
 );
 
-bool playbackNeedsLineStatus(PlayerController c) =>
-    c.switchConfirmation != null ||
-    (c.playbackLines.isNotEmpty &&
-        !c.sessionExpired &&
-        (c.isRecovering || c.disconnected || c.error == PlayerErrorKind.load));
+bool playbackNeedsLineStatus(PlayerController c) {
+  if (c.switchConfirmation != null) return true;
+  // Trying another saved line is not a blocking "backup line" panel.
+  // Failure still offers retry and line choice once the attempts stop.
+  final tryingAnotherLine =
+      c.isRecovering &&
+      c.pendingLineId != null &&
+      c.pendingLineId != c.activeLineId;
+  if (tryingAnotherLine) return false;
+  return c.playbackLines.isNotEmpty &&
+      !c.sessionExpired &&
+      (c.isRecovering || c.disconnected || c.error == PlayerErrorKind.load);
+}
 
 class PlayerLineStatus extends StatelessWidget {
   const PlayerLineStatus({
@@ -449,9 +453,6 @@ class PlayerLineStatus extends StatelessWidget {
                   failure: c.playbackLineFailure,
                   failureKind: c.loadFailure?.kind,
                   retryAfter: c.playbackRetryAfter,
-                  tryingAlternative:
-                      c.pendingLineId != null &&
-                      c.pendingLineId != c.activeLineId,
                   lineName: pending == null ? null : playbackLineLabel(pending),
                   onCancel: c.cancelLineRecovery,
                   onChooseLines: onChooseLines,

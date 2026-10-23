@@ -210,7 +210,6 @@ void main() {
     Widget panel() => recoveryHarness(
       PlaybackLineRecoveryPanel(
         recovering: false,
-        tryingAlternative: false,
         retryAfter: retryAfter,
         onCancel: () {},
         onChooseLines: () {},
@@ -279,7 +278,7 @@ void main() {
   );
 
   testWidgets(
-    'line recovery provides visible cancel and chooser on small phone and TV canvas',
+    'line recovery provides visible retry and chooser on small phone and TV canvas',
     (tester) async {
       for (final size in [
         const Size(360, 800),
@@ -288,27 +287,28 @@ void main() {
       ]) {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
-        var cancels = 0, selections = 0;
+        var retries = 0, selections = 0;
         await tester.pumpWidget(
           recoveryHarness(
             PlaybackLineRecoveryPanel(
-              recovering: true,
-              tryingAlternative: true,
+              recovering: false,
               lineName: '备用线路 · 一个用于检查换行的较长名称',
-              onCancel: () => cancels++,
+              failure: '连接失败，换条线路试试',
+              onCancel: () {},
               onChooseLines: () => selections++,
-              onRetry: () {},
+              onRetry: () => retries++,
             ),
           ),
         );
         await tester.pump();
-        expect(find.text('正在尝试备用线路…'), findsOneWidget);
+        expect(find.text('正在尝试备用线路…'), findsNothing);
+        expect(find.textContaining('观看位置已保留'), findsOneWidget);
         final choose = find.byKey(const Key('playback-recovery-lines'));
         expect(choose.hitTestable(), findsOneWidget);
         await tester.tap(choose);
-        await tester.tap(find.byKey(const Key('playback-recovery-cancel')));
+        await tester.tap(find.byKey(const Key('playback-recovery-retry')));
         expect(selections, 1);
-        expect(cancels, 1);
+        expect(retries, 1);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
       }
@@ -316,6 +316,35 @@ void main() {
       tester.view.resetDevicePixelRatio();
     },
   );
+
+  test('trying another saved line does not raise the backup panel', () {
+    final controller = PlayerController(
+      client: EmbyClient(device: _device),
+      itemId: 'movie-up',
+      backend: FakeVideoBackend(),
+      window: PlayerWindow(),
+      playbackLineSnapshot: const [
+        ServerLine(id: 'primary', address: 'https://primary.invalid'),
+        ServerLine(id: 'backup', address: 'https://backup.invalid'),
+      ],
+      settingsStore: MemoryPlayerSettingsStore(),
+    );
+    addTearDown(controller.dispose);
+    controller.activeLineId = 'primary';
+    controller.pendingLineId = 'backup';
+    controller.isRecovering = true;
+    controller.loading = true;
+    expect(playbackNeedsLineStatus(controller), isFalse);
+    controller.pendingLineId = 'primary';
+    expect(playbackNeedsLineStatus(controller), isTrue);
+    controller.pendingLineId = 'backup';
+    controller.isRecovering = false;
+    controller.pendingLineId = null;
+    controller.disconnected = true;
+    controller.error = PlayerErrorKind.load;
+    controller.state.phase = PlaybackPhase.failed;
+    expect(playbackNeedsLineStatus(controller), isTrue);
+  });
 
   late RillightApp app;
   late FakeEmbyServer server;

@@ -7,6 +7,27 @@ class _PlaybackContentFailure extends PlaybackRecoveryFailure {
   final PlayerErrorKind error;
 }
 
+/// Last successful line, then the other saved lines on the same server.
+List<ServerLine> automaticPlaybackLineOrder({
+  required List<ServerLine> lines,
+  String? lastSuccessfulLineId,
+  String? activeLineId,
+}) {
+  if (lines.isEmpty) return const [];
+  final preferred = lines.any((line) => line.id == lastSuccessfulLineId)
+      ? lastSuccessfulLineId
+      : activeLineId;
+  if (preferred == null || !lines.any((line) => line.id == preferred)) {
+    return List<ServerLine>.of(lines);
+  }
+  return [
+    for (final line in lines)
+      if (line.id == preferred) line,
+    for (final line in lines)
+      if (line.id != preferred) line,
+  ];
+}
+
 /// Same-server line policy and transactions. Native commands still pass through
 /// the controller's command barrier; configuration commits keep the account lease.
 extension PlayerLineTransactions on PlayerController {
@@ -196,17 +217,16 @@ extension PlayerLineTransactions on PlayerController {
         }
       }
     });
-    final original = server.lines.firstWhere(
-      (l) => l.id == server.activeLineId,
-      orElse: () => server.lines.first,
+    final ordered = automaticPlaybackLineOrder(
+      lines: server.lines,
+      lastSuccessfulLineId: server.lastSuccessfulLineId,
+      activeLineId: server.activeLineId,
     );
     final result = await PlaybackRecoveryCoordinator().run(
-      original: candidate(original),
-      candidates: [
-        for (final line in server.lines)
-          if (line.id != original.id) candidate(line),
-      ],
-      lastSuccessfulLineId: server.lastSuccessfulLineId,
+      original: candidate(ordered.first),
+      candidates: [for (final line in ordered.skip(1)) candidate(line)],
+      // Already ordered. Don't let the coordinator pull another line forward.
+      lastSuccessfulLineId: ordered.first.id,
       budget: budget,
       onAttempt: (line, _) {
         isRecovering = attempts++ > 0;
@@ -215,27 +235,28 @@ extension PlayerLineTransactions on PlayerController {
         _emit();
       },
     );
-    if (revision == _lineRevision && !_disposed && !_revoked) {
+    final currentAttempt = revision == _lineRevision && !_disposed && !_revoked;
+    if (currentAttempt) {
+      final opened = result.status == PlaybackRecoveryStatus.succeeded;
+      final needsChoice =
+          result.status == PlaybackRecoveryStatus.needsSelection;
+      final content =
+          !opened && !needsChoice && _retainContentFailure(result.error);
       isRecovering = false;
       loading = false;
-      if (result.status != PlaybackRecoveryStatus.succeeded) {
-        if (!_retainContentFailure(result.error)) {
-          error = PlayerErrorKind.load;
-          isPlaying = false;
-          disconnected = true;
-          state.phase = PlaybackPhase.failed;
-          playbackLineFailure = _lineFailureText(
-            result.error ?? const PlaybackRecoveryCancelled(),
-          );
-          if (result.error is MediaServerException) {
-            loadFailure = result.error as MediaServerException;
-          }
-        }
-      }
-      if (result.status != PlaybackRecoveryStatus.needsSelection) {
-        pendingLineId = null;
+      if (!needsChoice) pendingLineId = null;
+      // Nothing opened: drop the failed candidate so start() can resolve
+      // and open through the ordinary path.
+      if (!opened && !needsChoice && !content) {
+        origin = null;
+        resolved = null;
       }
       _emit();
+      if (identical(_lineBudget, budget) && _confirmLine == null) {
+        _lineBudget = null;
+      }
+      // A failed automatic pass must not swallow the ordinary open.
+      return opened || needsChoice || content;
     }
     if (identical(_lineBudget, budget) && _confirmLine == null) {
       _lineBudget = null;
@@ -426,6 +447,28 @@ extension PlayerLineTransactions on PlayerController {
     switchConfirmation = null;
     try {
       current();
+      if (selection.isAutomatic) {
+        // The mode is the whole choice. A dead line must not reject the save,
+        // and playback does not have to be running.
+        final savedLine =
+            playbackLines.where(playbackLineIsCurrent).firstOrNull ??
+            _playbackLineById(activeLineId ?? '') ??
+            playbackLines.firstOrNull;
+        if (savedLine == null) {
+          throw StateError('Playback line is not on this server');
+        }
+        await budget.run(
+          () => _persistPlaybackLine(
+            savedLine.id,
+            selection,
+            current,
+            budget: budget,
+          ),
+        );
+        current();
+        _emit();
+        return;
+      }
       final selected = selection.fixedLineId;
       final line = selected == null
           ? playbackLines.where(playbackLineIsCurrent).firstOrNull
@@ -446,30 +489,6 @@ extension PlayerLineTransactions on PlayerController {
         );
         current();
         _emit();
-        return;
-      }
-      if (selection.isAutomatic &&
-          (disconnected ||
-              wasRecovering ||
-              state.phase == PlaybackPhase.failed)) {
-        // The explicit automatic intent is saved only with a successful open.
-        await _recoverPlaybackLines(
-          selection: selection,
-          sharedBudget: budget,
-          intentRevision: revision,
-          intentGuard: current,
-        );
-        current();
-        if (switchConfirmation != null && _lineConfirmationResult != null) {
-          throw const PlaybackRecoveryFailure(
-            PlaybackRecoveryFailureKind.needsSelection,
-          );
-        }
-        if (playbackLineSelection != selection ||
-            disconnected ||
-            state.phase == PlaybackPhase.failed) {
-          throw StateError('Automatic playback line was not saved');
-        }
         return;
       }
       await _attemptPlaybackLine(
@@ -610,6 +629,18 @@ extension PlayerLineTransactions on PlayerController {
         playbackLines.where(playbackLineIsCurrent).firstOrNull ??
         playbackLines.first;
     final lines = List<ServerLine>.of(playbackLines);
+    final preferred = origin == null
+        ? null
+        : runtime?.registry
+              .server(origin!.source.account.configuredServerId)
+              .lastSuccessfulLineId;
+    final ordered = chosen.isAutomatic
+        ? automaticPlaybackLineOrder(
+            lines: lines,
+            lastSuccessfulLineId: preferred,
+            activeLineId: original.id,
+          )
+        : <ServerLine>[original];
     isRecovering = true;
     loading = true;
     controlsVisible = true;
@@ -641,22 +672,18 @@ extension PlayerLineTransactions on PlayerController {
           }
         });
     final work = () async {
+      final first = ordered.first;
       final result = await PlaybackRecoveryCoordinator().run(
-        original: alreadyAttempted.contains(original.id)
-            ? PlaybackRecoveryCandidate(original.id, (_) async => false)
-            : candidate(original),
+        original: alreadyAttempted.contains(first.id)
+            ? PlaybackRecoveryCandidate(first.id, (_) async => false)
+            : candidate(first),
         candidates: [
           if (chosen.isAutomatic)
-            for (final line in lines)
-              if (line.id != original.id && !alreadyAttempted.contains(line.id))
-                candidate(line),
+            for (final line in ordered.skip(1))
+              if (!alreadyAttempted.contains(line.id)) candidate(line),
         ],
         budget: budget,
-        lastSuccessfulLineId: origin == null
-            ? null
-            : runtime?.registry
-                  .server(origin!.source.account.configuredServerId)
-                  .lastSuccessfulLineId,
+        lastSuccessfulLineId: first.id,
         onAttempt: (line, _) {
           pendingLineId = line;
           isRecovering = true;

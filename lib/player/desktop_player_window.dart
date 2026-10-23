@@ -687,23 +687,24 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             : runtime!.registry.server(serverId);
         if (prepared == null &&
             entry == null &&
-            saved?.lineSelection.isAutomatic == true) {
+            saved != null &&
+            saved.lineSelection.isAutomatic &&
+            saved.lines.isNotEmpty) {
           recovery = PlaybackRecoveryBudget();
           _openingRecoveryBudget = recovery;
-          final original = saved!.activeLine;
-          if (original == null) {
-            throw StateError('Playback active line unavailable');
-          }
-          PlaybackRecoveryCandidate candidate(ServerLine line, bool first) =>
+          final ordered = automaticPlaybackLineOrder(
+            lines: saved.lines,
+            lastSuccessfulLineId: saved.lastSuccessfulLineId,
+            activeLineId: saved.activeLineId,
+          );
+          PlaybackRecoveryCandidate candidate(ServerLine line) =>
               PlaybackRecoveryCandidate(line.id, (window) async {
                 final result = await window.run(() async {
-                  final origin = first
-                      ? await runtime!.resolve(request)
-                      : await runtime!.resolveInitialLine(
-                          request,
-                          line.id,
-                          window.remaining,
-                        );
+                  final origin = await runtime!.resolveInitialLine(
+                    request,
+                    line.id,
+                    window.remaining,
+                  );
                   window.check();
                   final preparedLaunch = await prepareLaunch(origin, window);
                   window.check();
@@ -718,18 +719,27 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                 return true;
               });
           final result = await PlaybackRecoveryCoordinator().run(
-            original: candidate(original, true),
-            candidates: [
-              for (final line in saved.lines)
-                if (line.id != original.id) candidate(line, false),
-            ],
-            lastSuccessfulLineId: saved.lastSuccessfulLineId,
+            original: candidate(ordered.first),
+            candidates: [for (final line in ordered.skip(1)) candidate(line)],
+            lastSuccessfulLineId: ordered.first.id,
             budget: recovery,
             onAttempt: (line, _) => attemptedLines.add(line),
           );
+          final superseded =
+              _disposed ||
+              revision != _requestRevision ||
+              result.status == PlaybackRecoveryStatus.cancelled;
           if (result.status != PlaybackRecoveryStatus.succeeded) {
-            throw result.error ??
-                StateError('Playback metadata recovery exhausted');
+            if (superseded) {
+              throw result.error ?? const PlaybackRecoveryCancelled();
+            }
+            // Coordinator failure is not an opened playback. The ordinary
+            // resolve can still start the window.
+            recovery = null;
+            _openingRecoveryBudget = null;
+            attemptedLines.clear();
+            resolvedOrigin = await runtime!.resolve(request);
+            launch = await prepareLaunch(resolvedOrigin, null);
           }
         } else {
           resolvedOrigin = prepared ?? await runtime!.resolve(request);
