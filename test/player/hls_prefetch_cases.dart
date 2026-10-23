@@ -227,10 +227,10 @@ void main() {
         final first = await fixture.start(segments[0]);
         await fixture.nextEntered.future.timeout(const Duration(seconds: 3));
         // The handoff includes its 500 ms header grace and real loopback I/O.
-        // Leave scheduling room in the full suite; the held origin response
-        // below must still be bypassed without releasing its gate.
+        // Each grace slice waits out a 100 ms poll, so a busy suite needs
+        // more wall time than 500 ms before the held response is bypassed.
         expect(
-          await fixture.read(segments[1]).timeout(const Duration(seconds: 3)),
+          await fixture.read(segments[1]).timeout(const Duration(seconds: 8)),
           16 * 1024,
         );
         expect(fixture.nextReleased.isCompleted, isFalse);

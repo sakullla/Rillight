@@ -229,12 +229,16 @@ void main() {
   late FakeHasher hasher;
   late MemoryPlayerSettingsStore store;
 
-  DanmakuController makeController({PlayerSettingsStore? settings}) {
+  DanmakuController makeController({
+    PlayerSettingsStore? settings,
+    DateTime Function()? now,
+  }) {
     return DanmakuController(
       settingsStore: settings ?? store,
       client: client,
       hasher: hasher,
       textMeasurer: (text, fontSize) => text.length * fontSize * 0.6,
+      now: now,
     );
   }
 
@@ -967,24 +971,26 @@ void main() {
     expect(controller.estimatePosition(), const Duration(seconds: 20));
   });
 
-  test('quantized time-pos does not snap the display clock backward', () async {
-    final controller = makeController();
+  test('quantized time-pos does not snap the display clock backward', () {
+    var now = DateTime.utc(2026, 1, 1);
+    final controller = makeController(now: () => now);
     controller.updatePosition(
       const Duration(seconds: 10),
       playing: true,
       rate: 1,
     );
-    await Future<void>.delayed(const Duration(milliseconds: 30));
+    now = now.add(const Duration(milliseconds: 30));
     final mid = controller.estimatePosition();
     expect(mid, greaterThan(const Duration(seconds: 10)));
+    // A busy suite can deliver the same quantized sample long after the
+    // hard-resync window. That delay is not a backward seek.
+    now = now.add(kDanmakuHardResync + const Duration(milliseconds: 80));
     controller.updatePosition(
       const Duration(seconds: 10),
       playing: true,
       rate: 1,
     );
     final after = controller.estimatePosition();
-    // Scheduling may advance the real clock between samples. Only backward
-    // snapping is a regression; forward elapsed time has no 20 ms ceiling.
     expect(
       after,
       greaterThanOrEqualTo(mid),

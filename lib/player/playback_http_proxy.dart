@@ -3890,17 +3890,26 @@ class PlaybackHttpProxy {
           // A healthy high-latency request must not be discarded after 100 ms
           // only to pay the same connection/header latency again. Allow a
           // bounded header grace, extending while bytes actually arrive.
-          final handoff = Stopwatch()..start();
+          // A poll that overruns its delay was blocked with this prefetch, so
+          // count at most one slice. Otherwise a busy suite treats the stall
+          // as header latency and fetches the same segment twice.
+          const poll = Duration(milliseconds: 100);
+          const headerGrace = Duration(milliseconds: 500);
+          const headerLimit = Duration(milliseconds: 2000);
+          var headerWait = Duration.zero;
           do {
+            final slice = Stopwatch()..start();
             await Future.any<void>([
               matching.task,
               read.cancelledFuture,
-              Future<void>.delayed(const Duration(milliseconds: 100)),
+              Future<void>.delayed(poll),
             ]);
+            final elapsed = slice.elapsed;
+            headerWait += elapsed > poll ? poll : elapsed;
             read.check();
           } while (!matching.completed &&
-              handoff.elapsedMilliseconds < 2000 &&
-              (handoff.elapsedMilliseconds < 500 ||
+              headerWait < headerLimit &&
+              (headerWait < headerGrace ||
                   (matching.bufferedBytes > 0 &&
                       matching.progress.elapsedMilliseconds < 250)));
           read.check();

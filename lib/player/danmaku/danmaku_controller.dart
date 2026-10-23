@@ -96,9 +96,11 @@ class DanmakuController extends ChangeNotifier {
     DandanplayClient? client,
     DanmakuStreamHasher? hasher,
     DanmakuTextMeasurer? textMeasurer,
+    DateTime Function()? now,
   }) : _injectedStore = settingsStore,
        _client = client ?? DandanplayClient(),
-       _hasher = hasher ?? DanmakuStreamHasher() {
+       _hasher = hasher ?? DanmakuStreamHasher(),
+       _now = now ?? DateTime.now {
     glyphCache = DanmakuGlyphCache(widthMeasurer: textMeasurer);
     layout = DanmakuLayout(measurer: glyphCache.measure);
     unawaited(_primeSettings());
@@ -107,6 +109,7 @@ class DanmakuController extends ChangeNotifier {
   final PlayerSettingsStore? _injectedStore;
   final DandanplayClient _client;
   final DanmakuStreamHasher _hasher;
+  final DateTime Function() _now;
 
   /// 字形缓存(兼布局测量器);渲染层与布局引擎共享。
   late final DanmakuGlyphCache glyphCache;
@@ -208,7 +211,7 @@ class DanmakuController extends ChangeNotifier {
     if (!playing) {
       return _anchorPosition;
     }
-    final elapsed = DateTime.now().difference(_anchorAt);
+    final elapsed = _now().difference(_anchorAt);
     return _anchorPosition + elapsed * playbackRate;
   }
 
@@ -238,7 +241,7 @@ class DanmakuController extends ChangeNotifier {
     final wasPlaying = this.playing;
     if (wasPlaying && playing && playbackRate != rate) {
       _anchorPosition = estimatePosition();
-      _anchorAt = DateTime.now();
+      _anchorAt = _now();
     }
     this.playing = playing;
     playbackRate = rate;
@@ -258,22 +261,26 @@ class DanmakuController extends ChangeNotifier {
     }
 
     // 播放中不要每个 time-pos 都重锚:mpv 按视频帧量化,200ms 喂一次会把
-    // 滚动弹幕钉成一顿一顿。只在 seek / 严重失步时对齐。
+    // 滚动弹幕钉成一顿一顿。只在 seek / 媒体时钟明显超前时对齐。
+    // 晚到的同一量化位置落在插值时钟后面时,即使两次采样的间隔超过硬同步
+    // 阈值,也不得把显示时钟拽回去。
     final estimate = estimatePosition();
     final drift = position - estimate;
-    if (drift.abs() > kDanmakuSeekThreshold) {
+    if (drift > kDanmakuSeekThreshold ||
+        (drift < -kDanmakuSeekThreshold && position < _anchorPosition)) {
       _rebaseClock(position);
       notifyListeners();
       return;
     }
-    if (drift.abs() > kDanmakuHardResync) {
+    if (drift > kDanmakuHardResync ||
+        (drift < -kDanmakuHardResync && position < _anchorPosition)) {
       _rebaseClock(position);
     }
   }
 
   void _rebaseClock(Duration position) {
     _anchorPosition = position;
-    _anchorAt = DateTime.now();
+    _anchorAt = _now();
   }
 
   /// 开启新会话:重置布局并按 记忆→哈希匹配→标题搜索 降级解析。
