@@ -1576,4 +1576,115 @@ void main() {
     expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.uncertain);
     expect(detail.comparisons.single.decision.confirmed, isTrue);
   });
+
+  test('unnumbered season or episode does not veto a scanned coordinate match', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('series-a', type: 'Series')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
+    final seed = f.query.items.single;
+    f.b.items = (request) async {
+      final params = request.uri.queryParameters;
+      final parent = params['ParentId'];
+      final types = params['IncludeItemTypes'];
+      if (parent == 'series-b' && types == 'Season') {
+        return _page([
+          {
+            'Id': 'season-1',
+            'Name': 'S1',
+            'Type': 'Season',
+            'SeriesId': 'series-b',
+            'IndexNumber': 1,
+          },
+          {
+            'Id': 'season-blank',
+            'Name': 'Unnumbered',
+            'Type': 'Season',
+            'SeriesId': 'series-b',
+          },
+        ], total: 2);
+      }
+      if (parent == 'season-1' && types == 'Episode') {
+        return _page([
+          {
+            'Id': 'e-b',
+            'Name': 'Match',
+            'Type': 'Episode',
+            'SeriesId': 'series-b',
+            'ParentIndexNumber': 1,
+            'IndexNumber': 1,
+          },
+          {
+            'Id': 'combined',
+            'Name': 'Combined',
+            'Type': 'Episode',
+            'SeriesId': 'series-b',
+            'ParentIndexNumber': 1,
+            'IndexNumber': 1,
+            'IndexNumberEnd': 2,
+          },
+          {
+            'Id': 'no-number',
+            'Name': 'No number',
+            'Type': 'Episode',
+            'SeriesId': 'series-b',
+            'ParentIndexNumber': 1,
+          },
+        ], total: 3);
+      }
+      if (parent == 'season-blank' ||
+          (parent == 'series-b' && types == 'Episode')) {
+        fail('unnumbered season must not be scanned or veto the match');
+      }
+      return _page([_movie('series-b', type: 'Series')], total: 1);
+    };
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(origin: seed, scope: QueryScope(serverIds: {'b'}));
+    final episode = EpisodeSource(
+      reference: SourceReference(
+        account: seed.reference.account,
+        itemId: 'origin-e',
+      ),
+      series: seed.reference,
+      season: 1,
+      episode: 1,
+      isSpecial: false,
+      numberingScheme: 'aired',
+    );
+    await detail.lookupEpisode(
+      target: detail.comparisons.single.source,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.confirmed);
+    expect(detail.episodes.single.lookup.source!.reference.itemId, 'e-b');
+    f.b.items = (request) async {
+      final params = request.uri.queryParameters;
+      if (params['IncludeItemTypes'] == 'Season') {
+        return _page([
+          {
+            'Id': 'season-blank',
+            'Name': 'Unnumbered',
+            'Type': 'Season',
+            'SeriesId': 'series-b',
+          },
+        ], total: 1);
+      }
+      if (params['IncludeItemTypes'] == 'Episode') {
+        fail('unmatched unnumbered season must not scan episodes');
+      }
+      return _page([_movie('series-b', type: 'Series')], total: 1);
+    };
+    await detail.lookupEpisode(
+      target: detail.comparisons.single.source,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.uncertain);
+    expect(detail.episodes.single.lookup.source, isNull);
+  });
 }

@@ -4764,6 +4764,22 @@ void main() {
           parentIndexNumber: 1,
         ),
         FakeEmbyItem(
+          id: 'b-episode-unnumbered',
+          name: '没有集号',
+          type: 'Episode',
+          parentId: 'b-season-1',
+          seasonId: 'b-season-1',
+          seriesId: 'series',
+          parentIndexNumber: 1,
+        ),
+        FakeEmbyItem(
+          id: 'b-season-blank',
+          name: '未编号季',
+          type: 'Season',
+          parentId: 'series',
+          seriesId: 'series',
+        ),
+        FakeEmbyItem(
           id: 'b-season-2',
           name: '第 2 季',
           type: 'Season',
@@ -4839,9 +4855,84 @@ void main() {
         f.b.requests.where((request) => request.contains('ParentId=b-season-2')),
         isEmpty,
       );
+      expect(
+        f.b.requests.where(
+          (request) => request.contains('ParentId=b-season-blank'),
+        ),
+        isEmpty,
+      );
       await tester.tap(find.descendant(of: card, matching: find.text('来源 B')));
       await _settle(tester);
       expect(app.router.state.uri.path, '/item/b-episode-1');
+      expect(f.auth.session!.server.id, f.bId);
+      expect(backend.openCount, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'unmatched episode stays explained and still opens the series',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
+      f.a.items = [
+        _Series(),
+        FakeEmbyItem(
+          id: 'episode',
+          name: '合成剧集第一集',
+          type: 'Episode',
+          parentId: 'series',
+          seriesId: 'series',
+          indexNumber: 1,
+          parentIndexNumber: 1,
+        ),
+      ];
+      f.b.items = [
+        _Series(),
+        FakeEmbyItem(
+          id: 'b-season-blank',
+          name: '未编号季',
+          type: 'Season',
+          parentId: 'series',
+          seriesId: 'series',
+        ),
+      ];
+      final backend = FakeVideoBackend();
+      final app = f.app(PresentationEnvironment.desktop, backend: backend);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      final account = await tester.runAsync(
+        () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
+      );
+      app.router.go(
+        '/item/episode',
+        extra: PlayerHostOpenItemCommand(
+          itemId: 'episode',
+          source: SourceReference(account: account!, itemId: 'episode'),
+          libraryId: 'view-tv',
+          accessGeneration: f.auth.sources
+              .permit(account, libraryId: 'view-tv')
+              .accessGeneration,
+        ),
+      );
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('source-selection-open')));
+      await _settle(tester);
+      expect(find.text('正在查找这一集'), findsOneWidget);
+      expect(find.text('这台服务器上没有这一集'), findsNothing);
+      expect(find.text('查找这一集失败，可重试'), findsNothing);
+      expect(find.textContaining('打开这一集'), findsNothing);
+      final series = find.byKey(Key('source-selection-item-${f.bId}-series'));
+      await tester.tap(
+        find.descendant(of: series, matching: find.text('来源 B')),
+      );
+      await _settle(tester);
+      expect(app.router.state.uri.path, '/item/series');
       expect(f.auth.session!.server.id, f.bId);
       expect(backend.openCount, 0);
       expect(tester.takeException(), isNull);

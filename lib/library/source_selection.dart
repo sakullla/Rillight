@@ -771,8 +771,9 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       result.lookup.status == EpisodeLookupStatus.queryFailed;
 
   /// Confirmed series or movie. From an episode, the target is that episode
-  /// once it matches; a missing episode opens the series instead. Unconfirmed
-  /// servers and an unfinished episode lookup do not open.
+  /// once it matches. A missing episode, or one that is still unmatched,
+  /// opens the series. Unconfirmed servers and a failed or unfinished
+  /// episode lookup do not open.
   QueryItem? _openableItem(SourceComparison comparison) {
     if (!comparison.decision.confirmed) return null;
     final current = episode;
@@ -803,7 +804,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         ),
       );
     }
-    if (result.lookup.status == EpisodeLookupStatus.missing) {
+    if (result.lookup.status == EpisodeLookupStatus.missing ||
+        result.lookup.status == EpisodeLookupStatus.uncertain) {
       return comparison.source;
     }
     return null;
@@ -832,6 +834,9 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     }
     if (result.lookup.status == EpisodeLookupStatus.missing) {
       return Text(l.aggregationMissingEpisode, style: muted);
+    }
+    if (result.lookup.status == EpisodeLookupStatus.uncertain) {
+      return Text(l.sourceSelectionFindingEpisode, style: muted);
     }
     return null;
   }

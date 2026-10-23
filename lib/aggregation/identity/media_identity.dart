@@ -509,17 +509,22 @@ EpisodeLookup locateEpisode({
     matches[candidate.reference] = candidate;
   }
   if (conflict) return const EpisodeLookup(EpisodeLookupStatus.conflict);
-  if (uncertain || !complete) {
-    return const EpisodeLookup(EpisodeLookupStatus.uncertain);
-  }
+  // One coordinate hit is confirmed even when another row has no number or
+  // the season list is incomplete. Those gaps only keep an empty scan from
+  // being reported as missing.
   if (matches.length > 1) {
     return const EpisodeLookup(EpisodeLookupStatus.ambiguous);
   }
-  if (matches.isEmpty) return const EpisodeLookup(EpisodeLookupStatus.missing);
-  return EpisodeLookup(
-    EpisodeLookupStatus.confirmed,
-    source: matches.values.single,
-  );
+  if (matches.length == 1) {
+    return EpisodeLookup(
+      EpisodeLookupStatus.confirmed,
+      source: matches.values.single,
+    );
+  }
+  if (uncertain || !complete) {
+    return const EpisodeLookup(EpisodeLookupStatus.uncertain);
+  }
+  return const EpisodeLookup(EpisodeLookupStatus.missing);
 }
 
 /// Null when [origin] has no reliable provider id, or none of [available]
