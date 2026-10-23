@@ -289,6 +289,29 @@ class _Series extends FakeEmbyItem {
   };
 }
 
+class _HoldSeasonLookup extends FakeEmbyAdapter {
+  _HoldSeasonLookup(super.servers);
+  final gate = Completer<void>();
+  bool entered = false;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final parent = options.uri.queryParameters['ParentId'];
+    final types = options.uri.queryParameters['IncludeItemTypes'];
+    if (options.uri.host == 'b.test' &&
+        parent == 'series' &&
+        types == 'Season') {
+      entered = true;
+      await gate.future;
+    }
+    return super.fetch(options, requestStream, cancelFuture);
+  }
+}
+
 class _BlockingCatalogAdapter extends FakeEmbyAdapter {
   _BlockingCatalogAdapter(super.servers);
   String? blockedAuthority;
@@ -340,11 +363,14 @@ class _Fixture {
   late HistoryWriter history;
   late PlaybackRuntime runtime;
   late String aId, bId;
+  final List<String> extraIds = [];
   Future<void> open({
     HistoryStore? historyStore,
     FakeEmbyAdapter? sourceAdapter,
+    List<FakeEmbyServer> extraServers = const [],
   }) async {
-    adapter = sourceAdapter ?? FakeEmbyAdapter([a, b]);
+    extraIds.clear();
+    adapter = sourceAdapter ?? FakeEmbyAdapter([a, b, ...extraServers]);
     final credentials = MemoryCredentialStore();
     final servers = MemoryServerListStore();
     MediaServerClient client() => _PresentationClient(
@@ -368,7 +394,7 @@ class _Fixture {
       servers: servers,
       sources: sources,
     );
-    for (final server in [a, b]) {
+    for (final server in [a, b, ...extraServers]) {
       await auth.connect(
         address: server.baseUrl.toString(),
         username: 'alice',
@@ -376,8 +402,10 @@ class _Fixture {
       );
       if (server == a) {
         aId = auth.session!.server.id;
-      } else {
+      } else if (server == b) {
         bId = auth.session!.server.id;
+      } else {
+        extraIds.add(auth.session!.server.id);
       }
     }
     await auth.switchTo(aId);
@@ -3029,6 +3057,13 @@ void main() {
       );
       expect(find.textContaining('请核对影片详情'), findsOneWidget);
       expect(find.text('已确认是同一作品'), findsNothing);
+      await tester.tap(
+        find.byKey(Key('source-selection-item-${f.bId}-candidate')),
+      );
+      await tester.pump();
+      expect(app.router.state.uri.path, '/item/shared-id');
+      expect(f.auth.session!.server.id, f.aId);
+      expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
       expect(find.textContaining('音轨'), findsNothing);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _settle(tester);
@@ -3059,7 +3094,8 @@ void main() {
         ),
       ];
       f.b.items = [_Series()];
-      final app = f.app(PresentationEnvironment.desktop);
+      final backend = FakeVideoBackend();
+      final app = f.app(PresentationEnvironment.desktop, backend: backend);
       await tester.pumpWidget(app);
       await _settle(tester);
       final account = await tester.runAsync(
@@ -3082,6 +3118,16 @@ void main() {
       expect(find.text('查找此集'), findsNothing);
       expect(find.text('已核对，按季与集对应'), findsNothing);
       expect(find.text('这台服务器上没有这一集'), findsOneWidget);
+      expect(find.textContaining('打开这一集'), findsNothing);
+      final series = find.byKey(Key('source-selection-item-${f.bId}-series'));
+      await tester.tap(
+        find.descendant(of: series, matching: find.text('来源 B')),
+      );
+      await _settle(tester);
+      expect(app.router.state.uri.path, '/item/series');
+      expect(f.auth.session!.server.id, f.bId);
+      expect(backend.openCount, 0);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -4616,6 +4662,256 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     app.router.dispose();
   }, tags: ['integration']);
+
+  cases.testWidgets(
+    'source comparison shows one server before another finishes',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      final held = Completer<void>();
+      final c = FakeEmbyServer(
+        serverId: 'c',
+        serverName: '来源 C',
+        baseUrl: Uri.parse('http://c.test'),
+        items: [_Movie()],
+      );
+      await tester.runAsync(() => f.open(extraServers: [c]));
+      addTearDown(() {
+        if (!held.isCompleted) held.complete();
+      });
+      addTearDown(() => _drive(tester, f.close()));
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
+      f.b.holdItems = held;
+      await tester.tap(find.byKey(const Key('source-selection-open')));
+      final arrived = find.byKey(
+        Key('source-selection-item-${f.extraIds.single}-shared-id'),
+      );
+      for (var i = 0; i < 40 && arrived.evaluate().isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      expect(arrived, findsOneWidget);
+      expect(
+        find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
+        findsNothing,
+      );
+      expect(find.byKey(Key('source-selection-server-${f.bId}')), findsNothing);
+      held.complete();
+      await _settle(tester);
+      expect(
+        find.byKey(Key('source-selection-item-${f.bId}-shared-id')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'episode source row opens the matched episode and does not autoplay',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      final adapter = _HoldSeasonLookup([f.a, f.b]);
+      await tester.runAsync(() => f.open(sourceAdapter: adapter));
+      addTearDown(() {
+        if (!adapter.gate.isCompleted) adapter.gate.complete();
+      });
+      addTearDown(() => _drive(tester, f.close()));
+      f.a.items = [
+        _Series(),
+        FakeEmbyItem(
+          id: 'episode',
+          name: '合成剧集第一集',
+          type: 'Episode',
+          parentId: 'series',
+          seriesId: 'series',
+          indexNumber: 1,
+          parentIndexNumber: 1,
+        ),
+      ];
+      f.b.items = [
+        _Series(),
+        FakeEmbyItem(
+          id: 'b-season-1',
+          name: '第 1 季',
+          type: 'Season',
+          parentId: 'series',
+          seriesId: 'series',
+          indexNumber: 1,
+        ),
+        FakeEmbyItem(
+          id: 'b-episode-1',
+          name: '同一集',
+          type: 'Episode',
+          parentId: 'b-season-1',
+          seasonId: 'b-season-1',
+          seriesId: 'series',
+          indexNumber: 1,
+          parentIndexNumber: 1,
+        ),
+        FakeEmbyItem(
+          id: 'b-season-2',
+          name: '第 2 季',
+          type: 'Season',
+          parentId: 'series',
+          seriesId: 'series',
+          indexNumber: 2,
+        ),
+        FakeEmbyItem(
+          id: 'b-episode-other',
+          name: '另一季的第一集',
+          type: 'Episode',
+          parentId: 'b-season-2',
+          seasonId: 'b-season-2',
+          seriesId: 'series',
+          indexNumber: 1,
+          parentIndexNumber: 2,
+        ),
+      ];
+      final backend = FakeVideoBackend();
+      final app = f.app(PresentationEnvironment.desktop, backend: backend);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      final account = await tester.runAsync(
+        () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
+      );
+      app.router.go(
+        '/item/episode',
+        extra: PlayerHostOpenItemCommand(
+          itemId: 'episode',
+          source: SourceReference(account: account!, itemId: 'episode'),
+          libraryId: 'view-tv',
+          accessGeneration: f.auth.sources
+              .permit(account, libraryId: 'view-tv')
+              .accessGeneration,
+        ),
+      );
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('source-selection-open')));
+      final card = find.byKey(Key('source-selection-item-${f.bId}-series'));
+      for (
+        var i = 0;
+        i < 40 && (card.evaluate().isEmpty || !adapter.entered);
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      expect(card, findsOneWidget);
+      expect(find.text('正在查找这一集'), findsOneWidget);
+      expect(find.textContaining('打开这一集'), findsNothing);
+      expect(adapter.entered, isTrue);
+      await tester.tap(find.descendant(of: card, matching: find.text('来源 B')));
+      await tester.pump();
+      expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
+      expect(app.router.state.uri.path, '/item/episode');
+      expect(f.auth.session!.server.id, f.aId);
+      adapter.gate.complete();
+      await _settle(tester);
+      expect(find.text('正在查找这一集'), findsNothing);
+      expect(find.textContaining('打开这一集'), findsNothing);
+      expect(find.text('这台服务器上没有这一集'), findsNothing);
+      expect(
+        f.b.requests.where(
+          (request) =>
+              request.contains('ParentId=series') &&
+              request.contains('IncludeItemTypes=Episode'),
+        ),
+        isEmpty,
+      );
+      expect(
+        f.b.requests.where((request) => request.contains('ParentId=b-season-2')),
+        isEmpty,
+      );
+      await tester.tap(find.descendant(of: card, matching: find.text('来源 B')));
+      await _settle(tester);
+      expect(app.router.state.uri.path, '/item/b-episode-1');
+      expect(f.auth.session!.server.id, f.bId);
+      expect(backend.openCount, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'unreachable source stays on its row and another source still opens',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      final c = FakeEmbyServer(
+        serverId: 'c',
+        serverName: '来源 C',
+        baseUrl: Uri.parse('http://c.test'),
+        items: [_Movie()],
+      );
+      await tester.runAsync(() => f.open(extraServers: [c]));
+      addTearDown(() => _drive(tester, f.close()));
+      final backend = FakeVideoBackend();
+      final app = f.app(PresentationEnvironment.desktop, backend: backend);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
+      await tester.tap(find.byKey(const Key('source-selection-open')));
+      await _settle(tester);
+      final failed = find.byKey(Key('source-selection-item-${f.bId}-shared-id'));
+      final other = find.byKey(
+        Key('source-selection-item-${f.extraIds.single}-shared-id'),
+      );
+      expect(failed, findsOneWidget);
+      expect(other, findsOneWidget);
+      f.b.itemStatus = 503;
+      await tester.tap(find.descendant(of: failed, matching: find.text('来源 B')));
+      await _settle(tester);
+      const unreachable = '这台服务器暂时连不上，当前连接不受影响。';
+      expect(find.text(unreachable), findsOneWidget);
+      expect(
+        find.descendant(of: failed, matching: find.text(unreachable)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: other, matching: find.text(unreachable)),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
+      expect(f.auth.session!.server.id, f.aId);
+      expect(app.router.state.uri.path, '/item/shared-id');
+      expect(backend.openCount, 0);
+      await tester.tap(find.descendant(of: other, matching: find.text('来源 C')));
+      await _settle(tester);
+      expect(f.auth.session!.server.id, f.extraIds.single);
+      expect(app.router.state.uri.path, '/item/shared-id');
+      expect(find.byKey(const Key('source-selection-title')), findsNothing);
+      expect(backend.openCount, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
 }
 
 String _posterServer(WidgetTester tester, String shelfKey) {

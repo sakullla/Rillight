@@ -88,6 +88,7 @@ class _HttpSource {
 class _Fixture {
   final a = _HttpSource('a');
   final b = _HttpSource('b');
+  List<_HttpSource> extras = const [];
   late ServerAccessController access;
   late SourceSessionRegistry registry;
   late HistoryWriter history;
@@ -95,16 +96,21 @@ class _Fixture {
   Future<void> open({
     bool privateB = false,
     Duration timeout = const Duration(seconds: 2),
+    List<_HttpSource> extras = const [],
   }) async {
+    this.extras = extras;
     await a.open();
     await b.open();
+    for (final source in extras) {
+      await source.open();
+    }
     access = TestServerAccessController(passwords: {if (privateB) 'b': '1234'});
     registry = SourceSessionRegistry(
       access: access,
       store: MemoryServerListStore(
         ServerListSnapshot(
           servers: [
-            for (final source in [a, b])
+            for (final source in [a, b, ...extras])
               SavedServer(
                 id: source.id,
                 name: source.id,
@@ -116,7 +122,7 @@ class _Fixture {
         ),
       ),
       credentials: MemoryCredentialStore({
-        for (final source in [a, b])
+        for (final source in [a, b, ...extras])
           source.id: StoredCredentials(
             accessToken: 'token-${source.id}',
             userId: 'user-${source.id}',
@@ -150,6 +156,9 @@ class _Fixture {
     await history.close();
     await a.server.close(force: true);
     await b.server.close(force: true);
+    for (final source in extras) {
+      await source.server.close(force: true);
+    }
   }
 }
 
@@ -940,21 +949,34 @@ void main() {
         final entered = Completer<void>();
         final release = Completer<void>();
         f.b.items = (r) async {
-          if (r.uri.queryParameters['ParentId'] != 'target') {
-            return _page([_movie('target', type: 'Series')], total: 1);
+          final parent = r.uri.queryParameters['ParentId'];
+          final types = r.uri.queryParameters['IncludeItemTypes'];
+          if (types == 'Season' && parent == 'target') {
+            return _page([
+              {
+                'Id': 'target-s1',
+                'Name': 'S1',
+                'Type': 'Season',
+                'SeriesId': 'target',
+                'IndexNumber': 1,
+              },
+            ], total: 1);
           }
-          if (!entered.isCompleted) entered.complete();
-          if (inFlight) await release.future;
-          return _page([
-            {
-              'Id': 'target-e1',
-              'Name': 'E1',
-              'Type': 'Episode',
-              'SeriesId': 'target',
-              'ParentIndexNumber': 1,
-              'IndexNumber': 1,
-            },
-          ], total: 1);
+          if (types == 'Episode') {
+            if (!entered.isCompleted) entered.complete();
+            if (inFlight) await release.future;
+            return _page([
+              {
+                'Id': 'target-e1',
+                'Name': 'E1',
+                'Type': 'Episode',
+                'SeriesId': 'target',
+                'ParentIndexNumber': 1,
+                'IndexNumber': 1,
+              },
+            ], total: 1);
+          }
+          return _page([_movie('target', type: 'Series')], total: 1);
         };
         final detail = SameSourceQueryController(
           registry: f.registry,
@@ -1200,16 +1222,29 @@ void main() {
     );
     expect(short.episodes.single.lookup.status, EpisodeLookupStatus.missing);
     failed.complete();
-    f.b.items = (_) async => _page([
-      {
-        'Id': 'e1-b',
-        'Name': 'E',
-        'Type': 'Episode',
-        'SeriesId': 'series-b',
-        'ParentIndexNumber': 1,
-        'IndexNumber': 1,
-      },
-    ], total: 1);
+    f.b.items = (request) async {
+      if (request.uri.queryParameters['IncludeItemTypes'] == 'Season') {
+        return _page([
+          {
+            'Id': 'season-b',
+            'Name': 'S1',
+            'Type': 'Season',
+            'SeriesId': 'series-b',
+            'IndexNumber': 1,
+          },
+        ], total: 1);
+      }
+      return _page([
+        {
+          'Id': 'e1-b',
+          'Name': 'E',
+          'Type': 'Episode',
+          'SeriesId': 'series-b',
+          'ParentIndexNumber': 1,
+          'IndexNumber': 1,
+        },
+      ], total: 1);
+    };
     await detail.lookupEpisode(target: target, episode: episode);
     expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.uncertain);
     await detail.lookupEpisode(
@@ -1237,5 +1272,308 @@ void main() {
     );
     expect(detail.comparisons, isEmpty);
     expect(detail.origin, seed);
+  });
+
+  test('provider episode hit does not query seasons', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('series-a', type: 'Series')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
+    final seed = f.query.items.single;
+    f.b.items = (request) async {
+      final params = request.uri.queryParameters;
+      if (params.containsKey('AnyProviderIdEquals') &&
+          params['IncludeItemTypes'] == 'Episode') {
+        return _page([
+          {
+            'Id': 'by-provider',
+            'Name': 'By provider',
+            'Type': 'Episode',
+            'SeriesId': 'series-b',
+            'ParentIndexNumber': 9,
+            'IndexNumber': 9,
+            'ProviderIds': {'Tmdb': '555'},
+          },
+        ], total: 1);
+      }
+      if (params['IncludeItemTypes'] == 'Season') {
+        fail('provider hit must not query seasons');
+      }
+      return _page([_movie('series-b', type: 'Series')], total: 1);
+    };
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(
+      origin: seed,
+      scope: QueryScope(serverIds: {'b'}),
+    );
+    final target = detail.comparisons.single.source;
+    await detail.lookupEpisode(
+      target: target,
+      episode: EpisodeSource(
+        reference: SourceReference(
+          account: seed.reference.account,
+          itemId: 'origin-e',
+        ),
+        series: seed.reference,
+        season: 1,
+        episode: 1,
+        isSpecial: false,
+        numberingScheme: 'aired',
+        providerIds: const {'Tmdb': '555'},
+      ),
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(
+      detail.episodes.single.lookup.status,
+      EpisodeLookupStatus.confirmed,
+    );
+    expect(
+      detail.episodes.single.lookup.source!.reference.itemId,
+      'by-provider',
+    );
+  });
+
+  test('known-season lookup shows that server before the episode scan or other servers', () async {
+    final c = _HttpSource('c');
+    final cGate = Completer<void>();
+    await f.open(extras: [c]);
+    f.a.items = (_) async =>
+        _page([_movie('series-a', type: 'Series')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
+    final seed = f.query.items.single;
+    final seasonGate = Completer<void>();
+    var seasonEntered = false;
+    f.b.items = (request) async {
+      final params = request.uri.queryParameters;
+      final parent = params['ParentId'];
+      final types = params['IncludeItemTypes'];
+      if (params.containsKey('AnyProviderIdEquals') && types == 'Episode') {
+        return _page([], total: 0);
+      }
+      if (parent == 'series-b' && types == 'Season') {
+        seasonEntered = true;
+        final start = params['StartIndex'] ?? '0';
+        if (start == '0') {
+          await seasonGate.future;
+          return _page([
+            {
+              'Id': 'season-2',
+              'Name': 'S2',
+              'Type': 'Season',
+              'SeriesId': 'series-b',
+              'IndexNumber': 2,
+            },
+          ], total: 2);
+        }
+        return _page([
+          {
+            'Id': 'season-1',
+            'Name': 'S1',
+            'Type': 'Season',
+            'SeriesId': 'series-b',
+            'IndexNumber': 1,
+          },
+        ], total: 2);
+      }
+      if (parent == 'season-1' && types == 'Episode') {
+        final start = params['StartIndex'] ?? '0';
+        if (start == '0') {
+          return _page([
+            {
+              'Id': 'other',
+              'Name': 'Other',
+              'Type': 'Episode',
+              'SeriesId': 'series-b',
+              'ParentIndexNumber': 1,
+              'IndexNumber': 1,
+            },
+          ], total: 2);
+        }
+        return _page([
+          {
+            'Id': 'e-b',
+            'Name': 'Match',
+            'Type': 'Episode',
+            'SeriesId': 'series-b',
+            'ParentIndexNumber': 1,
+            'IndexNumber': 3,
+          },
+        ], total: 2);
+      }
+      if (parent == 'season-2' || (parent == 'series-b' && types == 'Episode')) {
+        fail('lookup scanned outside the known season');
+      }
+      return _page([_movie('series-b', type: 'Series')], total: 1);
+    };
+    c.items = (_) async {
+      await cGate.future;
+      return _page([_movie('series-c', type: 'Series')], total: 1);
+    };
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(() {
+      if (!seasonGate.isCompleted) seasonGate.complete();
+      if (!cGate.isCompleted) cGate.complete();
+      detail.dispose();
+    });
+    final started = detail.start(
+      origin: seed,
+      scope: QueryScope(serverIds: {'b', 'c'}, pageSize: 1),
+    );
+    await _until(
+      () => detail.comparisons.any(
+        (item) => item.source.reference.itemId == 'series-b',
+      ),
+    );
+    expect(
+      detail.comparisons.any(
+        (item) => item.source.reference.account.configuredServerId == 'c',
+      ),
+      isFalse,
+    );
+    final target = detail.comparisons
+        .firstWhere((item) => item.source.reference.itemId == 'series-b')
+        .source;
+    final lookup = detail.lookupEpisode(
+      target: target,
+      episode: EpisodeSource(
+        reference: SourceReference(
+          account: seed.reference.account,
+          itemId: 'origin-e',
+        ),
+        series: seed.reference,
+        season: 1,
+        episode: 3,
+        isSpecial: false,
+        numberingScheme: 'aired',
+        providerIds: const {'Tmdb': '555'},
+      ),
+      verifiedNumberingScheme: 'aired',
+    );
+    await _until(() => seasonEntered);
+    expect(detail.episodes.single.status, SourceQueryStatus.loading);
+    expect(
+      detail.comparisons.any(
+        (item) => item.source.reference.itemId == 'series-b',
+      ),
+      isTrue,
+    );
+    seasonGate.complete();
+    cGate.complete();
+    await started;
+    await lookup;
+    expect(
+      detail.episodes.single.lookup.status,
+      EpisodeLookupStatus.confirmed,
+    );
+    expect(detail.episodes.single.lookup.source!.reference.itemId, 'e-b');
+    expect(
+      f.b.itemRequests.where(
+        (uri) =>
+            uri.queryParameters['ParentId'] == 'series-b' &&
+            uri.queryParameters['IncludeItemTypes'] == 'Episode' &&
+            !uri.queryParameters.containsKey('AnyProviderIdEquals'),
+      ),
+      isEmpty,
+    );
+    expect(
+      f.b.itemRequests.where(
+        (uri) => uri.queryParameters['ParentId'] == 'season-2',
+      ),
+      isEmpty,
+    );
+    expect(
+      f.b.itemRequests.where(
+        (uri) => uri.queryParameters.containsKey('AnyProviderIdEquals'),
+      ),
+      isNotEmpty,
+    );
+  });
+
+  test('missing known season does not scan episodes from other seasons', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('series-a', type: 'Series')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
+    final seed = f.query.items.single;
+    f.b.items = (request) async {
+      final params = request.uri.queryParameters;
+      if (params['IncludeItemTypes'] == 'Season') {
+        return _page([
+          {
+            'Id': 'season-2',
+            'Name': 'S2',
+            'Type': 'Season',
+            'SeriesId': 'series-b',
+            'IndexNumber': 2,
+          },
+        ], total: 1);
+      }
+      if (params['IncludeItemTypes'] == 'Episode') {
+        fail('missing season must not scan episodes');
+      }
+      return _page([_movie('series-b', type: 'Series')], total: 1);
+    };
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(origin: seed, scope: QueryScope(serverIds: {'b'}));
+    await detail.lookupEpisode(
+      target: detail.comparisons.single.source,
+      episode: EpisodeSource(
+        reference: SourceReference(
+          account: seed.reference.account,
+          itemId: 'origin-e',
+        ),
+        series: seed.reference,
+        season: 1,
+        episode: 1,
+        isSpecial: false,
+        numberingScheme: 'aired',
+      ),
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(detail.comparisons, isNotEmpty);
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.missing);
+    expect(detail.episodes.single.lookup.source, isNull);
+  });
+
+  test('unknown season number stays uncertain without a series scan', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('series-a', type: 'Series')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'a'}, types: {'Series'}));
+    final seed = f.query.items.single;
+    f.b.items = (_) async =>
+        _page([_movie('series-b', type: 'Series')], total: 1);
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(origin: seed, scope: QueryScope(serverIds: {'b'}));
+    final before = f.b.itemRequests.length;
+    await detail.lookupEpisode(
+      target: detail.comparisons.single.source,
+      episode: EpisodeSource(
+        reference: SourceReference(
+          account: seed.reference.account,
+          itemId: 'origin-e',
+        ),
+        series: seed.reference,
+        episode: 1,
+      ),
+    );
+    expect(f.b.itemRequests.length, before);
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.uncertain);
+    expect(detail.comparisons.single.decision.confirmed, isTrue);
   });
 }

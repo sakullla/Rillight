@@ -19,6 +19,13 @@ class SourceComparison {
   /// The original DTO holds known versions/streams. Missing fields stay null.
 }
 
+class _KnownSeasonEpisodes {
+  const _KnownSeasonEpisodes({required this.available, required this.complete});
+
+  final List<EpisodeSource> available;
+  final bool complete;
+}
+
 class EpisodeComparison {
   const EpisodeComparison(
     this.target,
@@ -231,10 +238,6 @@ class SameSourceQueryController extends ChangeNotifier {
     notifyListeners();
     if (!owns()) return;
     OperationPermit? permit;
-    var cursor = 0;
-    int? total;
-    final available = <EpisodeSource>[];
-    var uncertainRows = false;
     try {
       permit = permitForItem(target);
       final wanted = {
@@ -290,66 +293,27 @@ class SameSourceQueryController extends ChangeNotifier {
           }
         }
       }
-      while (true) {
-        if (!owns()) return;
-        final page = await permit
-            .dispatch(
-              (client) => client.queryItems(
-                parentId: target.reference.itemId,
-                includeItemTypes: 'Episode',
-                recursive: true,
-                startIndex: cursor,
-                limit: query.scope!.pageSize,
-                fields: MediaServerClient.gridFields,
-              ),
-            )
-            .timeout(query.timeout);
-        if (!owns() || !permit.isValid) return;
-        cursor += page.items.length;
-        total = page.totalRecordCount;
-        // Unexpected or missing item type is unknown, not proof of a missing
-        // target episode. Other incomplete coordinates are handled by T2.
-        uncertainRows |= page.items.any((item) => !item.isEpisode);
-        _episodes[target.reference] = EpisodeComparison(
-          target.reference,
-          SourceQueryStatus.loading,
-          const EpisodeLookup(EpisodeLookupStatus.uncertain),
-          cursor: cursor,
-          total: total,
-        );
-        notifyListeners();
-        available.addAll(
-          page.items
-              .where((i) => i.isEpisode)
-              .map(
-                (i) => EpisodeSource.fromMediaItem(
-                  SourceReference(
-                    account: target.reference.account,
-                    itemId: i.id,
-                  ),
-                  i,
-                  numberingScheme: verifiedNumberingScheme,
-                ),
-              ),
-        );
-        if (!page.hasMore(fetched: cursor, pageSize: query.scope!.pageSize)) {
-          break;
-        }
-      }
-      if (!owns()) return;
+      // Provider miss: read only the already-known season. A full-series
+      // episode scan must not delay this comparison row.
+      final known = await _episodesInKnownSeason(
+        permit: permit,
+        target: target,
+        episode: episode,
+        verifiedNumberingScheme: verifiedNumberingScheme,
+        owns: owns,
+      );
+      if (known == null || !owns()) return;
       final lookup = locateEpisode(
         series: _confirmedGroup(target.reference)!,
         origin: episode,
         targetAccount: target.reference.account,
-        available: available,
-        complete: !uncertainRows,
+        available: known.available,
+        complete: known.complete,
       );
       _episodes[target.reference] = EpisodeComparison(
         target.reference,
         SourceQueryStatus.available,
         lookup,
-        cursor: cursor,
-        total: total,
       );
     } catch (error) {
       if (!owns()) return;
@@ -357,11 +321,98 @@ class SameSourceQueryController extends ChangeNotifier {
         target.reference,
         classifyQueryFailure(error, expired: permit != null && !permit.isValid),
         const EpisodeLookup(EpisodeLookupStatus.queryFailed),
-        cursor: cursor,
-        total: total,
       );
     }
     if (owns()) notifyListeners();
+  }
+
+  /// Episodes whose season index is already known on [episode]. Does not page
+  /// the rest of the series. Null means this attempt no longer owns the lookup.
+  Future<_KnownSeasonEpisodes?> _episodesInKnownSeason({
+    required OperationPermit permit,
+    required QueryItem target,
+    required EpisodeSource episode,
+    required String? verifiedNumberingScheme,
+    required bool Function() owns,
+  }) async {
+    final seasonNumber = episode.season;
+    if (seasonNumber == null) {
+      return const _KnownSeasonEpisodes(available: [], complete: true);
+    }
+    final pageSize = query.scope!.pageSize;
+    final seasons = <MediaItem>[];
+    var cursor = 0;
+    var uncertainRows = false;
+    while (true) {
+      if (!owns()) return null;
+      final page = await permit
+          .dispatch(
+            (client) => client.queryItems(
+              parentId: target.reference.itemId,
+              includeItemTypes: 'Season',
+              startIndex: cursor,
+              limit: pageSize,
+              fields: MediaServerClient.gridFields,
+            ),
+          )
+          .timeout(query.timeout);
+      if (!owns() || !permit.isValid) return null;
+      cursor += page.items.length;
+      uncertainRows |= page.items.any((item) => !item.isSeason);
+      seasons.addAll(page.items.where((item) => item.isSeason));
+      if (!page.hasMore(fetched: cursor, pageSize: pageSize)) break;
+    }
+    final known = [
+      for (final season in seasons)
+        if (season.indexNumber == seasonNumber) season,
+    ];
+    final unindexed = seasons.any((season) => season.indexNumber == null);
+    if (known.isEmpty) {
+      return _KnownSeasonEpisodes(
+        available: const [],
+        complete: !uncertainRows && !unindexed,
+      );
+    }
+    final available = <EpisodeSource>[];
+    for (final season in known) {
+      var episodeCursor = 0;
+      while (true) {
+        if (!owns()) return null;
+        final page = await permit
+            .dispatch(
+              (client) => client.queryItems(
+                parentId: season.id,
+                includeItemTypes: 'Episode',
+                startIndex: episodeCursor,
+                limit: pageSize,
+                fields: MediaServerClient.gridFields,
+              ),
+            )
+            .timeout(query.timeout);
+        if (!owns() || !permit.isValid) return null;
+        episodeCursor += page.items.length;
+        uncertainRows |= page.items.any((item) => !item.isEpisode);
+        available.addAll(
+          page.items
+              .where((item) => item.isEpisode)
+              .map(
+                (item) => EpisodeSource.fromMediaItem(
+                  SourceReference(
+                    account: target.reference.account,
+                    itemId: item.id,
+                  ),
+                  item,
+                  numberingScheme: verifiedNumberingScheme,
+                ),
+              ),
+        );
+        if (!page.hasMore(fetched: episodeCursor, pageSize: pageSize)) break;
+      }
+    }
+    return _KnownSeasonEpisodes(
+      available: available,
+      complete: !uncertainRows && !unindexed,
+    );
   }
 
   void _changed() {

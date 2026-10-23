@@ -495,6 +495,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   bool _busy = false;
   bool _resolved = false;
   String? _error;
+  final Map<SourceReference, String> _rowErrors = {};
   String? _resolution;
   String? _range;
   String? _video;
@@ -659,7 +660,10 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     }
   }
 
-  Future<void> _openTarget(QueryItem item) async {
+  Future<void> _openTarget(
+    QueryItem item, {
+    required SourceReference row,
+  }) async {
     if (_busy || controller.origin == null) return;
     final runtime = PlayerScope.of(context).runtime;
     if (runtime == null) return;
@@ -672,7 +676,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     ServerEntryTicket? entry = controller.entryFor(serverId);
     setState(() {
       _busy = true;
-      _error = null;
+      _rowErrors.remove(row);
     });
     try {
       if (entry == null && auth.session?.server.id != serverId) {
@@ -697,12 +701,20 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         return;
       }
       if (entry != null) {
-        await entry.prepareCommit();
+        try {
+          await entry.prepareCommit();
+        } catch (_) {
+          entry.cancel();
+          rethrow;
+        }
         if (!mounted || controller.origin == null) {
           entry.cancel();
           return;
         }
-        if (!entry.commit()) throw StateError('Target entry revoked');
+        if (!entry.commit()) {
+          entry.cancel();
+          throw StateError('Target entry revoked');
+        }
       }
       final generation = auth.serverAccess.generation(serverId);
       final destination = PlayerHostOpenItemCommand(
@@ -713,6 +725,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       );
       // Entering B can revoke the detail hosting this dialog. Navigation uses
       // the captured router, never that soon-to-be-unmounted A context.
+      // Detail only: the source list never starts playback.
       if (navigator.mounted && route?.isCurrent == true) navigator.pop();
       overlay?.close();
       router.go(
@@ -722,10 +735,10 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     } catch (_) {
       entry?.cancel();
       if (mounted) {
-        setState(
-          () =>
-              _error = AppLocalizations.of(context).sourceSelectionUnreachable,
-        );
+        setState(() {
+          _rowErrors[row] =
+              AppLocalizations.of(context).sourceSelectionUnreachable;
+        });
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -746,79 +759,110 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     }
   }
 
-  Widget? _episodeLookupAction(
-    AppLocalizations l,
-    SourceComparison comparison,
-  ) {
+  EpisodeComparison? _episodeResult(SourceComparison comparison) {
+    for (final item in controller.episodes) {
+      if (item.target == comparison.source.reference) return item;
+    }
+    return null;
+  }
+
+  bool _episodeLookupFailed(EpisodeComparison result) =>
+      result.status != SourceQueryStatus.available ||
+      result.lookup.status == EpisodeLookupStatus.queryFailed;
+
+  /// Confirmed series or movie. From an episode, the target is that episode
+  /// once it matches; a missing episode opens the series instead. Unconfirmed
+  /// servers and an unfinished episode lookup do not open.
+  QueryItem? _openableItem(SourceComparison comparison) {
+    if (!comparison.decision.confirmed) return null;
+    final current = episode;
+    if (current == null || !comparison.source.item.isSeries) {
+      return comparison.source;
+    }
+    final result = _episodeResult(comparison);
+    if (result == null ||
+        result.status == SourceQueryStatus.loading ||
+        _episodeLookupFailed(result)) {
+      return null;
+    }
+    final found = result.lookup.source;
+    if (result.lookup.status == EpisodeLookupStatus.confirmed &&
+        found != null) {
+      return QueryItem(
+        found.reference,
+        comparison.source.libraryId,
+        MediaItem(
+          id: found.reference.itemId,
+          name: found.name?.trim().isNotEmpty == true
+              ? found.name!
+              : comparison.source.item.name,
+          type: 'Episode',
+          seriesId: comparison.source.reference.itemId,
+          parentIndexNumber: found.season,
+          indexNumber: found.episode,
+        ),
+      );
+    }
+    if (result.lookup.status == EpisodeLookupStatus.missing) {
+      return comparison.source;
+    }
+    return null;
+  }
+
+  Widget? _episodeStatus(AppLocalizations l, SourceComparison comparison) {
     final current = episode;
     if (current == null ||
         !comparison.decision.confirmed ||
         !comparison.source.item.isSeries) {
       return null;
     }
-    final result = controller.episodes
-        .where((item) => item.target == comparison.source.reference)
-        .firstOrNull;
+    final result = _episodeResult(comparison);
+    final muted = TextStyle(
+      color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
+    );
     if (result == null || result.status == SourceQueryStatus.loading) {
-      return Text(
-        l.sourceSelectionFindingEpisode,
-        style: TextStyle(
-          color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      );
+      return Text(l.sourceSelectionFindingEpisode, style: muted);
     }
-    final found = result.lookup.source;
-    if (result.lookup.status == EpisodeLookupStatus.confirmed &&
-        found != null) {
-      final where = found.season != null && found.episode != null
-          ? '第${found.season}季第${found.episode}集'
-          : null;
-      return AppButton(
-        onPressed: _busy
-            ? null
-            : () => _openFoundEpisode(comparison.source, found),
-        variant: AppButtonVariant.tinted,
-        child: Text(
-          where == null
-              ? l.sourceSelectionOpenEpisode
-              : '${l.sourceSelectionOpenEpisode} · $where',
-        ),
-      );
-    }
-    if (result.lookup.status == EpisodeLookupStatus.missing) {
-      return Text(
-        l.aggregationMissingEpisode,
-        style: TextStyle(
-          color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      );
-    }
-    if (result.lookup.status == EpisodeLookupStatus.queryFailed) {
+    if (_episodeLookupFailed(result)) {
       return AppButton(
         onPressed: _busy ? null : () => _lookupEpisode(comparison.source),
         variant: AppButtonVariant.tinted,
         child: Text(l.aggregationEpisodeFailed),
       );
     }
+    if (result.lookup.status == EpisodeLookupStatus.missing) {
+      return Text(l.aggregationMissingEpisode, style: muted);
+    }
     return null;
   }
 
-  void _openFoundEpisode(QueryItem series, EpisodeSource found) {
-    _openTarget(
-      QueryItem(
-        found.reference,
-        series.libraryId,
-        MediaItem(
-          id: found.reference.itemId,
-          name:
-              found.name ??
-              AppLocalizations.of(context).sourceSelectionOpenEpisode,
-          type: 'Episode',
-          seriesId: series.reference.itemId,
-          parentIndexNumber: found.season,
-          indexNumber: found.episode,
-        ),
+  Widget _sourceCard(
+    AppLocalizations l,
+    SourceComparison comparison,
+    String? Function(String id) serverName,
+    Map<String, String> badges,
+  ) {
+    final openItem = _openableItem(comparison);
+    final reference = comparison.source.reference;
+    return _SourceCard(
+      cardKey: ValueKey(
+        'source-selection-item-${reference.account.configuredServerId}-${reference.itemId}',
       ),
+      serverName: serverName(reference.account.configuredServerId) ?? '',
+      meta: _sourceMeta(l, comparison.source.item),
+      caution: comparison.decision.confirmed
+          ? null
+          : l.sourceSelectionCheckDetails,
+      faces: _versionFaces(comparison.source.item),
+      badges: [
+        for (var i = 0; i < _versionFaces(comparison.source.item).length; i++)
+          badges[_versionKey(comparison, i)],
+      ],
+      onOpen: _busy || openItem == null
+          ? null
+          : () => _openTarget(openItem, row: reference),
+      lookup: _episodeStatus(l, comparison),
+      error: _rowErrors[reference],
     );
   }
 
@@ -1266,31 +1310,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                 ),
               ),
             for (final comparison in shown)
-              _SourceCard(
-                cardKey: ValueKey(
-                  'source-selection-item-${comparison.source.reference.account.configuredServerId}-${comparison.source.reference.itemId}',
-                ),
-                serverName:
-                    serverName(
-                      comparison.source.reference.account.configuredServerId,
-                    ) ??
-                    '',
-                meta: _sourceMeta(l, comparison.source.item),
-                caution: comparison.decision.confirmed
-                    ? null
-                    : l.sourceSelectionCheckDetails,
-                faces: _versionFaces(comparison.source.item),
-                badges: [
-                  for (
-                    var i = 0;
-                    i < _versionFaces(comparison.source.item).length;
-                    i++
-                  )
-                    badges[_versionKey(comparison, i)],
-                ],
-                onOpen: _busy ? null : () => _openTarget(comparison.source),
-                lookup: _episodeLookupAction(l, comparison),
-              ),
+              _sourceCard(l, comparison, serverName, badges),
             if (failed)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -1963,6 +1983,7 @@ class _SourceCard extends StatefulWidget {
     required this.onOpen,
     this.caution,
     this.lookup,
+    this.error,
   });
 
   final Key cardKey;
@@ -1973,6 +1994,7 @@ class _SourceCard extends StatefulWidget {
   final List<String?> badges;
   final VoidCallback? onOpen;
   final Widget? lookup;
+  final String? error;
 
   @override
   State<_SourceCard> createState() => _SourceCardState();
@@ -2072,6 +2094,14 @@ class _SourceCardState extends State<_SourceCard> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 8, 8),
                   child: widget.lookup,
+                ),
+              ),
+            if (widget.error != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Text(
+                  widget.error!,
+                  style: TextStyle(color: scheme.error),
                 ),
               ),
           ],
