@@ -646,24 +646,49 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  /// Asks emby_ext_domains for more lines of the signed-in Emby server.
+  /// Returns how many new lines were saved for [id].
   ///
-  /// Returns how many new lines were saved. `-1` means this server is not the
-  /// current Emby session, so the extension token cannot be checked.
+  /// `-1` means saved Emby credentials are missing or rejected, so discovery
+  /// cannot run. Non-Emby servers are not probed and return 0. Uses a fresh
+  /// client and does not enter [id] or change the browsing session.
   Future<int> discoverExtendedLines(String id, {bool force = false}) async {
-    final current = _session;
-    if (current?.server.id != id || _client is! EmbyClient) return -1;
-    if (!force && !_extendedDomainChecks.add(id)) return 0;
+    final server = _serverById(id);
+    if (server == null || server.serviceType != MediaServerType.emby) {
+      return 0;
+    }
+    if (!force && _extendedDomainChecks.contains(id)) return 0;
+    StoredCredentials? stored;
+    try {
+      stored = await credentials.read(id);
+    } on Object {
+      return 0;
+    }
+    if (stored == null || !_savedEmbyCredentials(server, stored)) return -1;
+    final line = server.activeLine ?? server.lines.firstOrNull;
+    if (line == null) return 0;
     _extendedDomainChecks.add(id);
+    final probe = _discoveryClient();
+    if (probe == null) return 0;
     var added = 0;
     try {
-      final domains = await (_client as EmbyClient).loadExtendedServerDomains(
+      probe.attachSession(
+        baseUrl: normalizeServerAddress(line.address),
+        accessToken: stored.accessToken,
+        userId: stored.userId,
+        userAgent: server.userAgent,
+      );
+      final domains = await probe.loadExtendedServerDomains(
         plainSidecar: force,
         probeTimeout: force
             ? const Duration(seconds: 3)
             : const Duration(seconds: 2),
       );
-      if (_session?.server.id != id) return added;
+      final rejected =
+          domains.isEmpty &&
+          (probe.extendedDomainLoginRejected ||
+              (probe.extendedDomainProbeStarted &&
+                  await _embyLoginRejected(probe.getUser(), stored.userId)));
+      if (rejected) return -1;
       for (final domain in domains) {
         try {
           if (await addLine(id, domain.url.toString(), nickname: domain.name)) {
@@ -676,8 +701,61 @@ class AuthController extends ChangeNotifier {
       }
     } on Object {
       // Unsupported extension endpoint: keep the configured lines untouched.
+    } finally {
+      _discardDiscoveryClient(probe);
     }
     return added;
+  }
+
+  bool _savedEmbyCredentials(SavedServer server, StoredCredentials? stored) {
+    if (stored == null || stored.serviceType != MediaServerType.emby) {
+      return false;
+    }
+    return stored.accessToken.isNotEmpty &&
+        stored.userId.isNotEmpty &&
+        stored.cloudAccountId == server.cloudAccountId &&
+        stored.homeUserId == server.homeUserId &&
+        stored.cloudCredentialRef == server.cloudCredentialRef &&
+        stored.resourceCredentialRef == server.resourceCredentialRef;
+  }
+
+  EmbyClient? _discoveryClient() {
+    final created = createProviderClient(MediaServerType.emby);
+    final live = identical(created, _client) || identical(created, client);
+    final probe = live ? created.createDetached() : created;
+    if (probe is! EmbyClient ||
+        identical(probe, _client) ||
+        identical(probe, client)) {
+      if (!identical(probe, _client) && !identical(probe, client)) {
+        probe.clearSession();
+      }
+      return null;
+    }
+    probe.onSessionExpired = null;
+    probe.onRefreshSession = null;
+    return probe;
+  }
+
+  void _discardDiscoveryClient(MediaServerClient probe) {
+    if (identical(probe, _client) || identical(probe, client)) return;
+    probe.onSessionExpired = null;
+    probe.onRefreshSession = null;
+    probe.clearSession();
+  }
+
+  Future<bool> _embyLoginRejected(
+    Future<MediaUser> pending,
+    String userId,
+  ) async {
+    try {
+      return (await pending).id != userId;
+    } on MediaServerException catch (error) {
+      return error.kind == MediaServerFailureKind.sessionExpired ||
+          error.kind == MediaServerFailureKind.invalidCredentials ||
+          error.kind == MediaServerFailureKind.authorizationExpired;
+    } on Object {
+      return false;
+    }
   }
 
   Future<void> logout() async {

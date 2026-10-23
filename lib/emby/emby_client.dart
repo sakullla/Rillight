@@ -420,54 +420,61 @@ class EmbyClient
   /// Callers keep the existing Emby mark instead of guessing a path.
   Future<Uint8List?> loadBrandingLogo() async => null;
 
+  bool _extendedDomainProbeStarted = false;
+  bool _extendedDomainLoginRejected = false;
+
+  /// True after this client has started an extended-domain probe.
+  bool get extendedDomainProbeStarted => _extendedDomainProbeStarted;
+
+  /// True when a probe answered HTTP 401.
+  bool get extendedDomainLoginRejected => _extendedDomainLoginRejected;
+
   /// Lines published by [emby_ext_domains](https://github.com/uhdnow/emby_ext_domains).
   ///
   /// The extension is a separate process. It is reachable when a reverse
   /// proxy mounts it on the Emby host, and by default at `host:52143`
-  /// (`GET /emby/System/Ext/ServerDomains`). A missing extension or a closed
-  /// port returns an empty list.
+  /// (`GET /emby/System/Ext/ServerDomains`). Candidate addresses are probed
+  /// together. Each keeps [probeTimeout]; an address that does not answer is
+  /// omitted and the others are still merged. A missing extension or a closed
+  /// port returns an empty list. HTTP 401 is remembered in
+  /// [extendedDomainLoginRejected] so an empty list can be told apart from a
+  /// rejected login.
   Future<List<ExtendedServerDomain>> loadExtendedServerDomains({
     bool plainSidecar = false,
     Duration probeTimeout = const Duration(seconds: 2),
   }) async {
+    _extendedDomainProbeStarted = false;
+    _extendedDomainLoginRejected = false;
     if (!hasSession) return const [];
     final base = _baseUrl;
     if (base == null) return const [];
-    final found = <ExtendedServerDomain>[];
-    final seen = <String>{};
-    void take(List<ExtendedServerDomain> items) {
-      for (final item in items) {
-        if (seen.add(item.url.toString())) found.add(item);
-      }
-    }
-
-    take(
-      await _readExtendedDomains(
-        joinEmbyApiPath(base, '/System/Ext/ServerDomains'),
-        probeTimeout,
-      ),
-    );
+    final uris = <Uri>[joinEmbyApiPath(base, '/System/Ext/ServerDomains')];
     if (base.port != 52143) {
-      take(
-        await _readExtendedDomains(
-          joinEmbyApiPath(
-            base.replace(port: 52143, path: '', query: ''),
-            '/System/Ext/ServerDomains',
-          ),
-          probeTimeout,
+      uris.add(
+        joinEmbyApiPath(
+          base.replace(port: 52143, path: '', query: ''),
+          '/System/Ext/ServerDomains',
         ),
       );
     }
     if (plainSidecar && base.scheme == 'https') {
-      take(
-        await _readExtendedDomains(
-          joinEmbyApiPath(
-            base.replace(scheme: 'http', port: 52143, path: '', query: ''),
-            '/System/Ext/ServerDomains',
-          ),
-          probeTimeout,
+      uris.add(
+        joinEmbyApiPath(
+          base.replace(scheme: 'http', port: 52143, path: '', query: ''),
+          '/System/Ext/ServerDomains',
         ),
       );
+    }
+    _extendedDomainProbeStarted = true;
+    final batches = await Future.wait(
+      uris.map((uri) => _readExtendedDomains(uri, probeTimeout)),
+    );
+    final found = <ExtendedServerDomain>[];
+    final seen = <String>{};
+    for (final items in batches) {
+      for (final item in items) {
+        if (seen.add(item.url.toString())) found.add(item);
+      }
     }
     return found;
   }
@@ -514,6 +521,11 @@ class EmbyClient
         }
       }
       return result;
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) {
+        _extendedDomainLoginRejected = true;
+      }
+      return const [];
     } on Object {
       return const [];
     }

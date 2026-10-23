@@ -9,6 +9,17 @@ import 'server_ui.dart';
 import 'source_sessions.dart';
 import '../media_server/errors.dart';
 
+/// Timeout, offline and identity failures stay on the row. Only a revoked
+/// authorization makes the whole line page unable to keep checking.
+bool _pageLevelCheckFailure(Object failure) {
+  if (failure is MediaServerException &&
+      failure.kind == MediaServerFailureKind.authorizationExpired) {
+    return true;
+  }
+  final message = failure is StateError ? failure.message.toLowerCase() : '';
+  return message.contains('revoked');
+}
+
 class ServerLineSelector extends StatefulWidget {
   const ServerLineSelector({
     super.key,
@@ -31,16 +42,25 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
   final Map<String, ManualCheckResult> checks = {};
   final Set<String> checking = {};
   int revision = 0;
+  int _checksTicket = 0;
 
   bool get idle => busy == null && !discovering && !testing;
+
+  void _stopChecks() {
+    _checksTicket++;
+    widget.auth.sources.cancelChecks(widget.serverId);
+  }
+
   @override
   void dispose() {
     revision++;
+    _stopChecks();
     super.dispose();
   }
 
   void back() {
     revision++;
+    _stopChecks();
     widget.onBack();
   }
 
@@ -91,7 +111,7 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
       if (!mounted) return;
       setState(() {
         notice = added < 0
-            ? l.serversDiscoverNeedCurrent
+            ? l.serversCheckLogin
             : added == 0
             ? l.serversDiscoverNone
             : l.serversDiscoverAdded(added);
@@ -108,39 +128,79 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
     final lines = List<ServerLine>.of(
       widget.auth.sources.server(widget.serverId).lines,
     );
+    final ticket = _checksTicket;
     setState(() {
       testing = true;
       error = null;
       notice = null;
+      checking.addAll(lines.map((line) => line.id));
     });
     try {
-      for (final line in lines) {
-        if (!mounted) return;
-        await check(line);
-      }
+      await Future.wait(
+        lines.map((line) => _runCheck(line, ticket)),
+        eagerError: false,
+      );
     } finally {
-      if (mounted) setState(() => testing = false);
+      if (mounted && ticket == _checksTicket) {
+        setState(() => testing = false);
+      }
     }
   }
 
   Future<void> check(ServerLine line) async {
-    final l = AppLocalizations.of(context);
+    if (!idle) return;
+    final ticket = _checksTicket;
     setState(() {
       busy = line.id;
       checking.add(line.id);
       error = null;
     });
     try {
-      checks[line.id] = await widget.auth.sources.check(
+      await _runCheck(line, ticket);
+    } finally {
+      if (mounted && ticket == _checksTicket && busy == line.id) {
+        setState(() => busy = null);
+      }
+    }
+  }
+
+  Future<void> _runCheck(ServerLine line, int ticket) async {
+    try {
+      final result = await widget.auth.sources.check(
         widget.serverId,
         lineId: line.id,
       );
+      if (!mounted || ticket != _checksTicket) return;
+      setState(() {
+        checks[line.id] = result;
+        checking.remove(line.id);
+        if (busy == line.id) busy = null;
+      });
       await widget.auth.refreshServers();
     } catch (failure) {
-      error = serverOperationFailure(l, failure);
+      if (!mounted ||
+          ticket != _checksTicket ||
+          !_pageLevelCheckFailure(failure)) {
+        return;
+      }
+      final l = AppLocalizations.of(context);
+      setState(() {
+        error = serverOperationFailure(
+          l,
+          failure,
+          fallback: l.serversSaveFailed,
+        );
+      });
     } finally {
-      checking.remove(line.id);
-      if (mounted) setState(() => busy = null);
+      if (!mounted || ticket != _checksTicket) {
+        checking.remove(line.id);
+        return;
+      }
+      if (!checking.contains(line.id) && busy != line.id) return;
+      setState(() {
+        checking.remove(line.id);
+        if (busy == line.id) busy = null;
+      });
     }
   }
 
@@ -290,7 +350,7 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
                         : null,
                     onDetails: () {},
                     onCheck: idle ? () => check(line) : null,
-                    checking: busy == line.id && checking.contains(line.id),
+                    checking: checking.contains(line.id),
                   ),
               ],
             ),

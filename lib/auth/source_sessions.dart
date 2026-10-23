@@ -298,6 +298,37 @@ class SourceSessionRegistry {
     return client;
   }
 
+  bool _sessionOwns(MediaServerClient candidate) =>
+      _sessions.values.any((session) => identical(session.client, candidate));
+
+  /// A line check must not reuse the browsing session's client. When the
+  /// factory hands that instance back, detach a second one instead of failing
+  /// the whole page.
+  MediaServerClient _independentCheckClient(MediaServerType type) {
+    final created = _clientFor(type);
+    if (!_sessionOwns(created)) return created;
+    final detached = created.createDetached()
+      ..onSessionExpired = null
+      ..onRefreshSession = null
+      ..clearSession();
+    if (identical(detached, created) || _sessionOwns(detached)) {
+      throw StateError('Check client must be independent');
+    }
+    return detached;
+  }
+
+  String _checkKey(String id, String lineId) => jsonEncode([id, lineId]);
+
+  /// Forget in-flight manual checks for [id] before their results are saved.
+  void cancelChecks(String id) {
+    final server = _servers.where((server) => server.id == id).firstOrNull;
+    if (server == null) return;
+    for (final line in server.lines) {
+      final key = _checkKey(id, line.id);
+      _checkAttempts[key] = (_checkAttempts[key] ?? 0) + 1;
+    }
+  }
+
   bool _credentialsMatch(SavedServer server, StoredCredentials value) =>
       value.serviceType == server.serviceType &&
       value.cloudAccountId == server.cloudAccountId &&
@@ -2309,13 +2340,13 @@ class SourceSessionRegistry {
         ? server.activeLine
         : server.lines.where((line) => line.id == lineId).firstOrNull;
     if (line == null) throw StateError('Unknown check line');
-    final checkKey = jsonEncode([id, line.id]);
+    final checkKey = _checkKey(id, line.id);
     final scope = _authorizations[id] ?? 0;
     final generation = access.generation(server.id);
     _requireCurrent(server, scope, generation);
-    final client = _clientFor(server.serviceType);
+    final client = _independentCheckClient(server.serviceType);
     client.setUserAgent(server.userAgent);
-    if (_sessions.values.any((s) => identical(s.client, client))) {
+    if (_sessionOwns(client)) {
       throw StateError('Check client must be independent');
     }
     final attempt = (_checkAttempts[checkKey] ?? 0) + 1;
