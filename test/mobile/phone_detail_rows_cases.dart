@@ -1551,6 +1551,11 @@ void main() {
   );
 
   testWidgets('two seasons can switch to the second season', (tester) async {
+    final episodes = Completer<void>();
+    var holdSeason = false;
+    addTearDown(() {
+      if (!episodes.isCompleted) episodes.complete();
+    });
     final harness = await _startDetail(
       tester,
       width: 390,
@@ -1579,13 +1584,38 @@ void main() {
           ),
         ]);
       },
+      intercept: (dio) {
+        fakeEmbyTransport(dio).interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) async {
+              final query = options.uri.queryParameters;
+              if (holdSeason &&
+                  query['IncludeItemTypes'] == 'Episode' &&
+                  query['ParentId'] == 'season-friends-2' &&
+                  !episodes.isCompleted) {
+                await episodes.future;
+              }
+              handler.next(options);
+            },
+          ),
+        );
+      },
     );
     unawaited(harness.router.push('/item/series-friends'));
     await settle(tester);
     expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
+    holdSeason = true;
     final second = find.byKey(CatalogKeys.season('season-friends-2'));
     await tester.ensureVisible(second);
     await tester.tap(second);
+    await tester.pump();
+    expect(find.text('老友记'), findsWidgets);
+    expect(find.text('第一季试点'), findsWidgets);
+    expect(find.text('第二季试点'), findsNothing);
+    expect(find.byKey(const Key('mobile-detail-play')), findsOneWidget);
+    expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
+    expect(find.byKey(const Key('phone-detail-pending-header')), findsNothing);
+    episodes.complete();
     await settle(tester);
     expect(_seasonSelected(tester, 'season-friends-2'), isTrue);
     expect(find.text('第二季试点'), findsOneWidget);
@@ -2312,7 +2342,11 @@ void main() {
           .any((raw) => raw.image != null),
       isTrue,
     );
-    expect(tester.widget<MediaImage>(backdrop).item.id, 'season-friends-2');
+    expect(tester.widget<MediaImage>(backdrop).item.id, 'series-friends');
+    expect(
+      tester.widget<ContentTheme>(find.byType(ContentTheme)).item?.id,
+      isNot('season-friends-2'),
+    );
     gate.complete();
     await settle(tester);
     expect(tester.widget<MediaImage>(backdrop).item.id, 'season-friends-2');

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
@@ -17,6 +18,7 @@ import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
+import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -100,8 +102,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   List<String> _sectionGenres = const [];
   ({String itemId, List<String> tags})? _sectionAlbum;
 
-  /// 打开剧集时头图保持剧集自己的海报。点选某一季之后才换成那一季的图。
+  /// 点选某一季并且该季头图已经能绘制后才为真。绘制前继续用剧集或上一张季图。
   var _applySeasonArtwork = false;
+
+  /// 当前头图对应的季。为空时头图仍是剧集自己的海报。
+  String? _paintedSeasonId;
+
+  /// 已显示分集所属的季。切季后、新分集到达前仍是上一季。
+  String? _episodesForSeason;
   List<MediaItem> _seasons = const [];
   List<MediaItem> _episodes = const [];
   List<MediaItem> _similar = const [];
@@ -300,6 +308,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _loadingMore = false;
         _seasons = const [];
         _episodes = const [];
+        _episodesForSeason = null;
+        _applySeasonArtwork = false;
+        _paintedSeasonId = null;
         _similar = const [];
         _seasonId = null;
         _seriesId = null;
@@ -547,6 +558,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     int start = 0,
     int limit = _episodePageSize,
     MediaItem? current,
+    void Function()? onApplied,
   }) async {
     try {
       final cached = await repository.cachedEpisodes(
@@ -562,6 +574,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           cached == null) {
         return;
       }
+      // 空缓存不能把还在屏幕上的上一季擦掉。
+      if (cached.items.isEmpty && _episodes.isNotEmpty) return;
       setState(
         () => _applyWindow(
           _EpisodeWindow(
@@ -573,6 +587,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           ),
         ),
       );
+      if (cached.items.isNotEmpty) onApplied?.call();
     } catch (_) {
       // Cached episodes are optional; the network owns errors and completion.
     }
@@ -696,7 +711,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     _episodes = window.items;
     _episodeTotal = window.total;
     _episodeWindowEnd = window.end;
+    _episodesForSeason = _seasonId;
   }
+
+  bool _episodesBelongTo(String? seasonId) =>
+      seasonId != null && _episodesForSeason == seasonId;
 
   /// 追加当前窗口之后的下一窗分集(按 id 去重)。
   Future<void> _loadMoreEpisodes() async {
@@ -900,29 +919,66 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     _showItem(id);
   }
 
-  /// 切季:失败时分区内联显示错误与重试,而不是静默留下空列表。
+  /// 切季:分集和头图留到新分集(或缓存)并且新头图能绘制。失败只在分集区。
   Future<void> _selectSeason(String seasonId) async {
     final serial = ++_jumpSerial;
     final gen = _loadGen;
+    final paintedBefore = _paintedSeasonId;
+    final applyBefore = _applySeasonArtwork;
+    final heroWidth = _heroRequestWidth();
+    final artwork = _seasonArtwork(seasonId);
     setState(() {
-      _applySeasonArtwork = true;
       _seasonId = seasonId;
       _focusedEpisodeId = null;
-      _episodes = const [];
       _episodeError = null;
       _episodeLoadMoreError = null;
       _pendingJumpNumber = null;
       _episodesLoading = true;
       _loadingMore = false;
-      _episodeTotal = 0;
-      _episodeWindowEnd = 0;
+      // 旧窗口不能拿去请求新季的下一页。
+      if (_episodes.isNotEmpty && _episodeWindowEnd < _episodeTotal) {
+        _episodeWindowEnd = _episodeTotal;
+      }
     });
+    final paintReady = artwork == null
+        ? Future<bool>.value(false)
+        : _seasonArtworkReady(
+            artwork,
+            maxWidth: heroWidth,
+            current: () =>
+                mounted &&
+                gen == _loadGen &&
+                serial == _jumpSerial &&
+                _seasonId == seasonId,
+          );
+    var failed = false;
+    void publishArtwork() {
+      if (failed || !mounted || gen != _loadGen || serial != _jumpSerial) {
+        return;
+      }
+      if (_seasonId != seasonId || _episodeError != null) return;
+      if (!_episodesBelongTo(seasonId)) return;
+      unawaited(() async {
+        final ready = await paintReady;
+        if (failed || !mounted || gen != _loadGen || serial != _jumpSerial) {
+          return;
+        }
+        if (!ready || _seasonId != seasonId || _episodeError != null) return;
+        if (!_episodesBelongTo(seasonId)) return;
+        setState(() {
+          _applySeasonArtwork = true;
+          _paintedSeasonId = seasonId;
+        });
+      }());
+    }
+
     unawaited(
       _showCachedEpisodes(
         _repository(DetailSourceScope.clientOf(context)),
         seasonId,
         gen,
         serial,
+        onApplied: publishArtwork,
       ),
     );
     try {
@@ -940,6 +996,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _applyWindow(window);
         _episodesLoading = false;
       });
+      publishArtwork();
     } on MediaServerException catch (error) {
       if (!mounted ||
           gen != _loadGen ||
@@ -947,11 +1004,103 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           _seasonId != seasonId) {
         return;
       }
+      failed = true;
       setState(() {
         _episodeError = error;
         _episodesLoading = false;
+        _applySeasonArtwork = applyBefore;
+        _paintedSeasonId = paintedBefore;
       });
     }
+  }
+
+  MediaItem? _seasonArtwork(String seasonId) {
+    final item = _item;
+    if (item == null || !item.isSeries) return null;
+    final season = _seasons
+        .where((entry) => entry.id == seasonId)
+        .firstOrNull;
+    if (season == null) return null;
+    return seasonArtworkItem(season, item);
+  }
+
+  int _heroRequestWidth() {
+    final media = MediaQuery.of(context);
+    return mediaBackdropRequestWidth(
+      layoutWidth: media.size.width,
+      devicePixelRatio: media.devicePixelRatio,
+    );
+  }
+
+  /// 与详情头图同一条加载路径。字节进缓存后,可见头图才能在换源的第一帧画上。
+  Future<bool> _seasonArtworkReady(
+    MediaItem artwork, {
+    required int maxWidth,
+    required bool Function() current,
+  }) async {
+    if (!current()) return false;
+    final auth = AuthScope.maybeOf(context);
+    final policy = DetailSourceScope.imagePolicyOf(context);
+    final scope = policy != null
+        ? (policy.isValid ? policy.scope : null)
+        : mediaImageAccountScope(auth);
+    if (scope == null) return false;
+    final client =
+        DetailSourceScope.maybeOf(context)?.client ?? auth?.imageClient;
+    if (client == null) return false;
+    final candidates = artwork.imageCandidates(preferBackdrop: true);
+    for (final candidate in candidates) {
+      if (!current()) return false;
+      final peeked = MediaImageCache.instance.peek(
+        serverId: scope,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      );
+      if (peeked != null && peeked.isNotEmpty) return true;
+      if (MediaImageCache.instance.isNegativeCached(
+        serverId: scope,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      )) {
+        continue;
+      }
+      CancelToken? token;
+      try {
+        final bytes = await MediaImageCache.instance.load(
+          policy: policy,
+          serverId: scope,
+          itemId: candidate.itemId,
+          type: candidate.type,
+          tag: candidate.tag,
+          maxWidth: maxWidth,
+          isCurrent: current,
+          inViewport: current,
+          fetch: () async {
+            if (!current()) return null;
+            token = CancelToken();
+            final data = await client.getItemImage(
+              candidate.itemId,
+              type: candidate.type,
+              tag: candidate.tag,
+              maxWidth: maxWidth,
+              cancelToken: token,
+            );
+            if (data.isEmpty) return null;
+            return Uint8List.fromList(data);
+          },
+          onAbort: () => token?.cancel('season-artwork'),
+        );
+        if (!current()) return false;
+        if (bytes != null && bytes.isNotEmpty) return true;
+      } catch (_) {
+        // 下一张候选仍可能画得出来。
+      }
+    }
+    return false;
   }
 
   Future<void> _openPlayer(
@@ -1306,8 +1455,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final showSimilar = _similar.isNotEmpty || _similarError != null;
     final playTarget = _playTarget(item);
     final season = _seasons.where((s) => s.id == _seasonId).firstOrNull;
-    final artwork = item.isSeries && _applySeasonArtwork && season != null
-        ? seasonArtworkItem(season, item)
+    final painted = _seasons
+        .where((entry) => entry.id == _paintedSeasonId)
+        .firstOrNull;
+    final artwork = item.isSeries && _applySeasonArtwork && painted != null
+        ? seasonArtworkItem(painted, item)
         : item;
     final shared = _sharedBackdrop ?? artwork;
     final backdrop = item.isEpisode
@@ -1459,7 +1611,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
       if (item.isSeries) ...[
         EpisodeList(
-          episodes: _episodes,
+          episodes: _episodeError != null && !_episodesBelongTo(_seasonId)
+              ? const <MediaItem>[]
+              : _episodes,
           currentId: _focusedEpisodeId ?? playTarget?.id,
           revealToken: _episodeReveal,
           loading: _episodesLoading,
@@ -2499,6 +2653,7 @@ class _DetailHeader extends StatelessWidget {
             key: const ValueKey('detail-hero'),
             contributesToTheme: true,
             smartCrop: true,
+            retainVisibleFrame: true,
             item: themeArtwork,
             preferBackdrop: !item.isEpisode,
             preferParentBackdrop: item.isEpisode,
@@ -2688,13 +2843,15 @@ class _DetailPoster extends StatelessWidget {
           width: width,
           height: height,
           child: MediaImage(
-            key: ValueKey('detail-poster-${item.id}'),
+            key: const ValueKey('detail-poster'),
             item: item,
             // 海报卡只作识别;氛围始终来自规范 backdrop。
+            // 稳定 key 才能在换季时把旧画面留到新图第一帧。
             width: width,
             height: height,
             preferThumb: episode,
             fit: BoxFit.cover,
+            retainVisibleFrame: true,
             maxWidth: episode ? 720 : 480,
           ),
         ),

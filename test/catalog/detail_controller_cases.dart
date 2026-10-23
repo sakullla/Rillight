@@ -290,4 +290,101 @@ void main() {
       expect(controller.episodes.map((item) => item.id), ['episode-new']);
     },
   );
+
+  test('switching season keeps shown episodes until the next page', () async {
+    final server = FakeEmbyServer();
+    server.setSeasons('series-friends', const [
+      FakeSeason(id: 'season-a', name: 'A', indexNumber: 1),
+      FakeSeason(id: 'season-b', name: 'B', indexNumber: 2),
+    ]);
+    server.setEpisodes('series-friends', const [
+      FakeEpisode(
+        id: 'episode-a',
+        name: 'A1',
+        seasonId: 'season-a',
+        indexNumber: 1,
+      ),
+      FakeEpisode(
+        id: 'episode-b',
+        name: 'B1',
+        seasonId: 'season-b',
+        indexNumber: 1,
+      ),
+    ]);
+    final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
+    final held = Completer<void>();
+    addTearDown(() {
+      if (!held.isCompleted) held.complete();
+    });
+    fakeEmbyTransport(dio).interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final query = options.uri.queryParameters;
+          if (query['IncludeItemTypes'] == 'Episode' &&
+              query['ParentId'] == 'season-b' &&
+              !held.isCompleted) {
+            await held.future;
+          }
+          handler.next(options);
+        },
+      ),
+    );
+    final client = EmbyClient(
+      device: const ClientDeviceInfo(
+        clientName: '灯川 Rillight',
+        deviceName: 'test',
+        deviceId: 'detail-season-hold',
+        version: '0.1.0',
+      ),
+      dio: dio,
+    );
+    final auth = AuthController(
+      client: client,
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final cache = CatalogCache()
+      ..debugSetDiskStore(null)
+      ..attachSession(serverId: server.serverId, userId: client.userId!);
+    final controller = DetailController(
+      auth: auth,
+      cache: cache,
+      itemId: 'series-friends',
+    );
+    addTearDown(controller.dispose);
+    await controller.load();
+    final ready = Completer<void>();
+    void onReady() {
+      if (controller.episodes.any((item) => item.id == 'episode-a') &&
+          !controller.episodesLoading &&
+          !ready.isCompleted) {
+        ready.complete();
+      }
+    }
+
+    controller.addListener(onReady);
+    onReady();
+    await ready.future.timeout(const Duration(seconds: 5));
+    controller.removeListener(onReady);
+    final emptied = <bool>[];
+    controller.addListener(() => emptied.add(controller.episodes.isEmpty));
+    final pending = controller.selectSeason('season-b');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.seasonId, 'season-b');
+    expect(controller.episodesLoading, isTrue);
+    expect(controller.episodeError, isNull);
+    expect(controller.episodes.map((item) => item.id), ['episode-a']);
+    held.complete();
+    await pending;
+    expect(controller.episodesLoading, isFalse);
+    expect(controller.episodeError, isNull);
+    expect(controller.episodes.map((item) => item.id), ['episode-b']);
+    expect(emptied, isNot(contains(true)));
+  });
 }

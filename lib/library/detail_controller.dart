@@ -259,38 +259,41 @@ class DetailController extends ChangeNotifier {
     final revision = ++_seasonRevision;
     final identity = _identity;
     final start = more ? _offset : startAt;
+    // 换季先改季号和分页起点,已显示的分集留到新的一页或缓存页到达。
+    // 失败也不发空列表,错误由 episodeError 落在分集区。
+    final switching = !more && seasonId != id;
     if (!more) {
       _offset = 0;
       hasMore = false;
       windowStart = startAt;
     }
-    if (seasonId != id) {
-      episodes = const [];
-      resumeBeyondPage = null;
-    }
+    if (switching) resumeBeyondPage = null;
     seasonId = id;
     episodesLoading = true;
     episodeError = null;
     notifyListeners();
     final network = repository.episodes(id, start: start);
-    if (!more && episodes.isEmpty) {
+    var settled = false;
+    if (!more && (episodes.isEmpty || switching)) {
       unawaited(() async {
         try {
           final cached = await repository.cachedEpisodes(id, start: start);
           if (_disposed ||
               revision != _seasonRevision ||
-              identity != _identity) {
+              identity != _identity ||
+              settled) {
             return;
           }
-          if (cached != null && episodes.isEmpty && episodesLoading) {
-            episodes = cached.items;
-            _offset = start + cached.items.length;
-            episodeTotal = cached.totalRecordCount ?? _offset;
-            hasMore = cached.totalRecordCount == null
-                ? cached.items.length == 50
-                : _offset < cached.totalRecordCount!;
-            notifyListeners();
-          }
+          if (cached == null || !episodesLoading) return;
+          // 空缓存不能把还在屏幕上的上一季擦掉。
+          if (cached.items.isEmpty && episodes.isNotEmpty) return;
+          episodes = cached.items;
+          _offset = start + cached.items.length;
+          episodeTotal = cached.totalRecordCount ?? _offset;
+          hasMore = cached.totalRecordCount == null
+              ? cached.items.length == 50
+              : _offset < cached.totalRecordCount!;
+          notifyListeners();
         } catch (_) {
           // A damaged cache entry does not prevent live episodes from loading.
         }
@@ -301,6 +304,7 @@ class DetailController extends ChangeNotifier {
       if (_disposed || revision != _seasonRevision || identity != _identity) {
         return;
       }
+      settled = true;
       episodes = {
         for (final episode in [
           ...(more ? episodes : <MediaItem>[]),
@@ -317,6 +321,7 @@ class DetailController extends ChangeNotifier {
       if (_disposed || revision != _seasonRevision || identity != _identity) {
         return;
       }
+      settled = true;
       episodeError = _failure(failure);
     }
     if (_disposed || revision != _seasonRevision) return;

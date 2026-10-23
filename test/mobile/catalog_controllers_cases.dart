@@ -535,9 +535,11 @@ void main() {
     addTearDown(detail.dispose);
     await loadDetailReady(detail);
     expect(detail.hasMore, isTrue);
+    final keptIds = detail.episodes.map((episode) => episode.id).toList();
     server.itemsStatus = 503;
     await detail.selectSeason('season-friends-2');
     expect(detail.episodeError, isNotNull);
+    expect(detail.episodes.map((episode) => episode.id), keptIds);
     expect(detail.hasMore, isFalse);
     server.itemsStatus = null;
     final count = server.requests.length;

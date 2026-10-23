@@ -671,7 +671,7 @@ void main() {
   );
 
   cases.testWidgets(
-    'many seasons fold into a picker; switching shows a skeleton then retry',
+    'many seasons fold into a picker; switching keeps the header then retries',
     (tester) async {
       server.setSeasons(_series, [
         for (var i = 1; i <= 8; i++)
@@ -694,11 +694,13 @@ void main() {
       expect(picker, findsOneWidget);
       expect(find.byKey(CatalogKeys.seasonTab(_season1)), findsNothing);
 
-      // 切季加载中:列表区是骨架,头部(季切换)保留。
+      // 切季加载中:已显示的分集和头部留在屏幕上,不换成整页或分集骨架。
       final gate = server.episodeHolds['season-5'] = Completer<void>();
       addTearDown(() {
         if (!gate.isCompleted) gate.complete();
       });
+      final hero = find.byKey(const ValueKey('detail-hero'));
+      final heroId = tester.widget<MediaImage>(hero).item.id;
       await tester.ensureVisible(picker);
       await tester.tap(picker);
       await settle(tester);
@@ -707,10 +709,17 @@ void main() {
         await tester.pump(const Duration(milliseconds: 50));
       }
       final row = find.byKey(CatalogKeys.episodesRow);
+      final list = tester.widget<EpisodeList>(find.byType(EpisodeList));
+      expect(list.loading, isTrue);
+      expect(list.error, isNull);
+      expect(list.episodes.map((episode) => episode.id), ['first']);
       expect(
         find.descendant(of: row, matching: find.byType(EpisodeListSkeleton)),
-        findsOneWidget,
+        findsNothing,
       );
+      expect(find.byKey(ItemDetailPage.titleKey), findsOneWidget);
+      expect(find.byKey(ItemDetailPage.actionRowKey), findsOneWidget);
+      expect(tester.widget<MediaImage>(hero).item.id, heroId);
       expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
       gate.complete();
       await settle(tester);

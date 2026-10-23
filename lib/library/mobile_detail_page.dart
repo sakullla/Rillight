@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
@@ -62,8 +63,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   late final _episodeScrollCoordinator = EpisodeScrollCoordinator(_scroll);
   var _barSolid = false;
 
-  /// 用户点中的季。自动落到的第一季不写这里，头图就保持打开时的那一张。
+  /// 已经能绘制的季头图。新画面画出来之前不改，整页取色也不跟着变。
+  /// 自动落到的第一季不写这里，头图就保持打开时的那一张。
   String? _artworkSeasonId;
+  int _artworkSerial = 0;
 
   @override
   void initState() {
@@ -123,8 +126,124 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   Future<void> _changeSeason(String id, {bool more = false}) async {
     final controller = _controller;
     if (controller == null) return;
-    if (!more && id != controller.seasonId) _artworkSeasonId = id;
-    await controller.selectSeason(id, more: more);
+    if (more) {
+      await controller.selectSeason(id, more: true);
+      return;
+    }
+    final previousArtwork = _artworkSeasonId;
+    final serial = ++_artworkSerial;
+    unawaited(_revealSeasonArtwork(id, serial));
+    await controller.selectSeason(id);
+    if (!mounted || serial != _artworkSerial) return;
+    if (controller.episodeError != null &&
+        _artworkSeasonId != previousArtwork) {
+      setState(() => _artworkSeasonId = previousArtwork);
+    }
+  }
+
+  /// 新季横图能绘制之后才改头图和包住整页的取色。加载失败则留在切换前。
+  Future<void> _revealSeasonArtwork(String seasonId, int serial) async {
+    final controller = _controller;
+    final item = controller?.item;
+    if (controller == null || item == null || !item.isSeries) return;
+    final season = controller.seasons
+        .where((entry) => entry.id == seasonId)
+        .firstOrNull;
+    if (season == null || !mounted) return;
+    final width = _seasonHeroWidth();
+    final ready = await _seasonArtworkReady(
+      seasonArtworkItem(season, item),
+      maxWidth: width,
+      current: () {
+        final active = _controller;
+        return mounted &&
+            serial == _artworkSerial &&
+            active?.seasonId == seasonId;
+      },
+    );
+    if (!mounted || serial != _artworkSerial || !ready) return;
+    final current = _controller;
+    if (current == null || current.seasonId != seasonId) return;
+    if (current.episodeError != null) return;
+    setState(() => _artworkSeasonId = seasonId);
+  }
+
+  /// 和 [PhoneItemBanner] 切季后的请求宽度一致，缓存才能在第一帧命中。
+  int _seasonHeroWidth() {
+    final handoff = _imageHandoff(context);
+    final entryBackdrop = handoff?.preferBackdrop ?? true;
+    final entryWidth = handoff?.maxWidth ?? PhoneMotion.pageRequestWidth;
+    return entryBackdrop ? entryWidth : PhoneMotion.pageRequestWidth;
+  }
+
+  Future<bool> _seasonArtworkReady(
+    MediaItem artwork, {
+    required int maxWidth,
+    required bool Function() current,
+  }) async {
+    if (!current()) return false;
+    final auth = AuthScope.maybeOf(context);
+    final policy = DetailSourceScope.imagePolicyOf(context);
+    final scope = policy != null
+        ? (policy.isValid ? policy.scope : null)
+        : mediaImageAccountScope(auth);
+    if (scope == null) return false;
+    final client =
+        DetailSourceScope.maybeOf(context)?.client ?? auth?.imageClient;
+    if (client == null) return false;
+    final candidates = artwork.imageCandidates(preferBackdrop: true);
+    for (final candidate in candidates) {
+      if (!current()) return false;
+      final peeked = MediaImageCache.instance.peek(
+        serverId: scope,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      );
+      if (peeked != null && peeked.isNotEmpty) return true;
+      if (MediaImageCache.instance.isNegativeCached(
+        serverId: scope,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      )) {
+        continue;
+      }
+      CancelToken? token;
+      try {
+        final bytes = await MediaImageCache.instance.load(
+          policy: policy,
+          serverId: scope,
+          itemId: candidate.itemId,
+          type: candidate.type,
+          tag: candidate.tag,
+          maxWidth: maxWidth,
+          isCurrent: current,
+          inViewport: current,
+          fetch: () async {
+            if (!current()) return null;
+            token = CancelToken();
+            final data = await client.getItemImage(
+              candidate.itemId,
+              type: candidate.type,
+              tag: candidate.tag,
+              maxWidth: maxWidth,
+              cancelToken: token,
+            );
+            if (data.isEmpty) return null;
+            return Uint8List.fromList(data);
+          },
+          onAbort: () => token?.cancel('season-artwork'),
+        );
+        if (!current()) return false;
+        if (bytes != null && bytes.isNotEmpty) return true;
+      } catch (_) {
+        // 下一张候选仍可能画得出来。
+      }
+    }
+    return false;
   }
 
   Future<void> _openPreferredPlayer() async {
@@ -695,7 +814,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             .firstOrNull;
         // 从海报或横卡点进来时，头图和取色都停在那一张上。加载完成后不改来源，
         // 否则会先看到点中的画面，再换成另一张，颜色变两次。
-        // 只有用户切换季时才换成该季的画面，旧图留到新图第一帧。
+        // 只有用户切换季且该季画面已经能绘制时，才改头图和包住整页的取色。
         final userSeason =
             item != null &&
             item.isSeries &&
