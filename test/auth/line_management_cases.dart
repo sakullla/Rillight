@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import '../mobile/tv_server_test_helpers.dart';
 
@@ -33,6 +32,7 @@ import 'package:rillight/auth/server_management_widgets.dart';
 import 'server_ui_harness.dart';
 
 import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/jellyfin/jellyfin_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -1638,7 +1638,9 @@ void main() {
       expect(find.textContaining('这个地址属于另一台服务器'), findsWidgets);
       expect(find.text('未保存，请检查输入或连接后重试。'), findsNothing);
       expect(
-        tester.state<ServerLineSelectorState>(find.byType(ServerLineSelector)).error,
+        tester
+            .state<ServerLineSelectorState>(find.byType(ServerLineSelector))
+            .error,
         isNull,
       );
       final lines = auth.savedServers.single.lines;
@@ -1721,9 +1723,7 @@ void main() {
         if (fastLine.latencyMs != null) break;
         await tester.pump(const Duration(milliseconds: 20));
       }
-      final lines = auth.sources
-          .server(auth.savedServers.single.id)
-          .lines;
+      final lines = auth.sources.server(auth.savedServers.single.id).lines;
       expect(
         lines
             .firstWhere((line) => line.address == fast.baseUrl.toString())
@@ -1740,7 +1740,9 @@ void main() {
       expect(find.textContaining('正在检查'), findsWidgets);
       expect(find.textContaining('ms'), findsWidgets);
       expect(
-        tester.state<ServerLineSelectorState>(find.byType(ServerLineSelector)).error,
+        tester
+            .state<ServerLineSelectorState>(find.byType(ServerLineSelector))
+            .error,
         isNull,
       );
       expect(auth.client.baseUrl, base);
@@ -1810,174 +1812,189 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
-  test(
-    'domain probes run together and keep addresses that answer',
-    () async {
-      final remote = FakeEmbyServer(
-        baseUrl: Uri.parse('http://domains.test:8096'),
-      );
-      final sidecar = FakeEmbyServer(
-        serverId: remote.serverId,
-        baseUrl: remote.baseUrl.replace(port: 52143),
-      );
-      sidecar.extendedDomains = [
-        {'name': '外网', 'url': 'http://line-wan.test:8096'},
-      ];
-      sidecar.issuedTokens.add('token-domains');
-      final gate = _DomainProbeGate([remote, sidecar]);
-      addTearDown(() {
-        if (!gate.gate.isCompleted) gate.gate.complete();
-      });
-      final client = EmbyClient(
-        device: _device,
-        dio: dioForFakeEmby(gate),
-      );
-      client.attachSession(
-        baseUrl: remote.baseUrl,
-        accessToken: 'token-domains',
-        userId: 'user-alice',
-      );
-      final pending = client.loadExtendedServerDomains();
-      try {
-        await gate.both.future;
-        expect(gate.domainStarts, greaterThanOrEqualTo(2));
-        gate.failHeld = true;
-        gate.gate.complete();
-        final domains = await pending;
-        expect(
-          domains.map((domain) => domain.url.toString()),
-          ['http://line-wan.test:8096'],
-        );
-        expect(domains.single.name, '外网');
-      } finally {
-        if (!gate.gate.isCompleted) gate.gate.complete();
-        await pending;
-      }
-    },
-  );
-
-  test('non-Emby discovery does not probe, but saved lines can be checked', () async {
-    final host = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final paths = <String>[];
-    host.listen((request) async {
-      paths.add(request.uri.path);
-      request.response.headers.contentType = ContentType.json;
-      if (request.uri.path.endsWith('/System/Info/Public')) {
-        request.response.write(
-          jsonEncode({
-            'Id': 'jelly-1',
-            'ServerName': 'Jellyfin',
-            'Version': '10.9.0',
-          }),
-        );
-      } else if (request.uri.path.endsWith('/Users/Me')) {
-        request.response.write(
-          jsonEncode({'Id': 'user-jelly', 'Name': 'alice'}),
-        );
-      } else {
-        request.response.statusCode = 404;
-      }
-      await request.response.close();
-    });
-    addTearDown(() => host.close(force: true));
-    final backing = MemoryServerListStore();
-    final credentials = MemoryCredentialStore();
-    final auth = AuthController(
-      client: EmbyClient(device: _device),
-      credentials: credentials,
-      servers: backing,
-    );
-    addTearDown(auth.dispose);
-    const id = 'jelly-1';
-    await backing.save(
-      ServerListSnapshot(
-        servers: [
-          SavedServer(
-            id: id,
-            name: 'Jellyfin',
-            username: 'alice',
-            serviceType: MediaServerType.jellyfin,
-            activeLineId: 'line-jelly',
-            lines: [
-              ServerLine(
-                id: 'line-jelly',
-                address: 'http://127.0.0.1:${host.port}',
-              ),
-            ],
-          ),
-        ],
-        lastServerId: id,
-      ),
-    );
-    await credentials.write(
-      id,
-      const StoredCredentials(
-        serviceType: MediaServerType.jellyfin,
-        accessToken: 'jelly-token',
-        userId: 'user-jelly',
-        username: 'alice',
-      ),
-    );
-    await auth.sources.load();
-    await auth.reloadSavedServers();
-    expect(await auth.discoverExtendedLines(id, force: true), 0);
-    expect(paths, isEmpty);
-    expect(auth.session, isNull);
-    final checked = await auth.sources.check(id, lineId: 'line-jelly');
-    expect(checked.status.name, 'available');
-    expect(checked.latencyMs, isNotNull);
-    expect(paths, containsAll(['/System/Info/Public', '/Users/Me']));
-    expect(
-      paths.where((path) => path.contains('ServerDomains')),
-      isEmpty,
-    );
-    expect(auth.session, isNull);
-  });
-
-  test('a cancelled check is not saved and leaves the session client', () async {
+  test('domain probes run together and keep addresses that answer', () async {
     final remote = FakeEmbyServer(
-      baseUrl: Uri.parse('http://cancel-line.test:8096'),
+      baseUrl: Uri.parse('http://domains.test:8096'),
     );
-    final gate = _PublicInfoGate([remote]);
+    final sidecar = FakeEmbyServer(
+      serverId: remote.serverId,
+      baseUrl: remote.baseUrl.replace(port: 52143),
+    );
+    sidecar.extendedDomains = [
+      {'name': '外网', 'url': 'http://line-wan.test:8096'},
+    ];
+    sidecar.issuedTokens.add('token-domains');
+    final gate = _DomainProbeGate([remote, sidecar]);
     addTearDown(() {
       if (!gate.gate.isCompleted) gate.gate.complete();
     });
-    final auth = AuthController.memory(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(gate)),
+    final client = EmbyClient(device: _device, dio: dioForFakeEmby(gate));
+    client.attachSession(
+      baseUrl: remote.baseUrl,
+      accessToken: 'token-domains',
+      userId: 'user-alice',
     );
-    addTearDown(auth.dispose);
-    await auth.connect(
-      address: remote.baseUrl.toString(),
-      username: 'alice',
-      password: 'correct-horse',
-    );
-    final id = auth.session!.server.id;
-    final lineId = auth.session!.server.activeLineId!;
-    final token = auth.session!.accessToken;
-    final sessionClient = auth.client;
-    gate.holdHost = remote.baseUrl.host;
-    final pending = auth.sources.check(id, lineId: lineId);
-    await gate.startedAll.future;
-    auth.sources.cancelChecks(id);
-    gate.gate.complete();
-    await expectLater(
-      pending,
-      throwsA(
-        isA<StateError>().having(
-          (error) => error.message,
-          'message',
-          'Check superseded',
-        ),
-      ),
-    );
-    final line = auth.savedServers.single.lines.single;
-    expect(line.latencyMs, isNull);
-    expect(line.checkedAt, isNull);
-    expect(auth.client, same(sessionClient));
-    expect(auth.client.baseUrl, remote.baseUrl);
-    expect(auth.session!.accessToken, token);
-    expect(auth.client.hasSession, isTrue);
+    final pending = client.loadExtendedServerDomains();
+    try {
+      await gate.both.future;
+      expect(gate.domainStarts, greaterThanOrEqualTo(2));
+      gate.failHeld = true;
+      gate.gate.complete();
+      final domains = await pending;
+      expect(domains.map((domain) => domain.url.toString()), [
+        'http://line-wan.test:8096',
+      ]);
+      expect(domains.single.name, '外网');
+    } finally {
+      if (!gate.gate.isCompleted) gate.gate.complete();
+      await pending;
+    }
   });
+
+  test(
+    'non-Emby discovery does not probe, but saved lines can be checked',
+    () async {
+      final remote = _JellyfinLineDouble();
+      final dio = dioForFakeEmby(remote);
+      final backing = MemoryServerListStore();
+      final credentials = MemoryCredentialStore();
+      final auth = AuthController(
+        client: EmbyClient(device: _device, dio: dio),
+        credentials: credentials,
+        servers: backing,
+        providerClientFactory: (type) => type == MediaServerType.jellyfin
+            ? JellyfinClient(device: _device, dio: dio)
+            : EmbyClient(device: _device, dio: dio),
+      );
+      addTearDown(auth.dispose);
+      const id = 'jelly-1';
+      await backing.save(
+        ServerListSnapshot(
+          servers: [
+            SavedServer(
+              id: id,
+              name: 'Jellyfin',
+              username: 'alice',
+              serviceType: MediaServerType.jellyfin,
+              activeLineId: 'line-jelly',
+              lines: const [
+                ServerLine(
+                  id: 'line-jelly',
+                  address: 'http://jelly-saved.test:8096',
+                ),
+              ],
+            ),
+          ],
+          lastServerId: id,
+        ),
+      );
+      await credentials.write(
+        id,
+        const StoredCredentials(
+          serviceType: MediaServerType.jellyfin,
+          accessToken: 'jelly-token',
+          userId: 'user-jelly',
+          username: 'alice',
+        ),
+      );
+      await auth.sources.load();
+      await auth.reloadSavedServers();
+      expect(await auth.discoverExtendedLines(id, force: true), 0);
+      expect(remote.paths, isEmpty);
+      expect(auth.session, isNull);
+      final checked = await auth.sources.check(id, lineId: 'line-jelly');
+      expect(checked.status.name, 'available');
+      expect(checked.latencyMs, isNotNull);
+      expect(remote.paths, containsAll(['/System/Info/Public', '/Users/Me']));
+      expect(
+        remote.paths.where((path) => path.contains('ServerDomains')),
+        isEmpty,
+      );
+      expect(auth.session, isNull);
+    },
+  );
+
+  test(
+    'a cancelled check is not saved and leaves the session client',
+    () async {
+      final remote = FakeEmbyServer(
+        baseUrl: Uri.parse('http://cancel-line.test:8096'),
+      );
+      final gate = _PublicInfoGate([remote]);
+      addTearDown(() {
+        if (!gate.gate.isCompleted) gate.gate.complete();
+      });
+      final auth = AuthController.memory(
+        client: EmbyClient(device: _device, dio: dioForFakeEmby(gate)),
+      );
+      addTearDown(auth.dispose);
+      await auth.connect(
+        address: remote.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final id = auth.session!.server.id;
+      final lineId = auth.session!.server.activeLineId!;
+      final token = auth.session!.accessToken;
+      final sessionClient = auth.client;
+      gate.holdHost = remote.baseUrl.host;
+      final pending = auth.sources.check(id, lineId: lineId);
+      await gate.startedAll.future;
+      auth.sources.cancelChecks(id);
+      gate.gate.complete();
+      await expectLater(
+        pending,
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            'Check superseded',
+          ),
+        ),
+      );
+      final line = auth.savedServers.single.lines.single;
+      expect(line.latencyMs, isNull);
+      expect(line.checkedAt, isNull);
+      expect(auth.client, same(sessionClient));
+      expect(auth.client.baseUrl, remote.baseUrl);
+      expect(auth.session!.accessToken, token);
+      expect(auth.client.hasSession, isTrue);
+    },
+  );
+}
+
+/// Same in-process transport as the other line checks. This file already
+/// registers widget tests, so a dart:io server would never see the request.
+class _JellyfinLineDouble extends FakeEmbyAdapter {
+  final paths = <String>[];
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    paths.add(options.uri.path);
+    final Object? body = switch (options.uri.path) {
+      final path when path.endsWith('/System/Info/Public') => {
+        'Id': 'jelly-1',
+        'ServerName': 'Jellyfin',
+        'Version': '10.9.0',
+      },
+      final path when path.endsWith('/Users/Me') => {
+        'Id': 'user-jelly',
+        'Name': 'alice',
+      },
+      _ => null,
+    };
+    return ResponseBody.fromString(
+      jsonEncode(body ?? {'error': 'not found'}),
+      body == null ? 404 : 200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
 }
 
 class _PublicInfoGate extends _SameServerAdapter {
