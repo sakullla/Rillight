@@ -1758,6 +1758,7 @@ class EmbyClient
       userId: userId,
       token: token,
       clientName: _configuredClientName,
+      clientVersion: _customUserAgent == null ? null : _configuredClientVersion,
     );
     return {
       'Authorization': authorization,

@@ -448,6 +448,7 @@ void main() {
     await emby.getPublicInfo(server.baseUrl);
     expect(server.lastUserAgent, 'LineUA/9');
     expect(server.lastAuthorization, contains('Client="LineUA"'));
+    expect(server.lastAuthorization, contains('Version="9"'));
     expect(server.lastAuthorization, isNot(contains('LineUA/9')));
 
     final auth = await emby.authenticateByName(
@@ -484,6 +485,28 @@ void main() {
     expect(emby.customUserAgent, isNull);
     expect(emby.userAgent, 'Rillight/0.1.0');
   });
+
+  test(
+    'Hills User-Agent derives client and version for authorization',
+    () async {
+      final emby = client()..setUserAgent('Hills/1.10.1 (android; 16)');
+
+      await emby.getPublicInfo(server.baseUrl);
+
+      expect(server.lastUserAgent, 'Hills/1.10.1 (android; 16)');
+      expect(server.lastAuthorization, contains('Client="Hills"'));
+      expect(server.lastAuthorization, contains('Version="1.10.1"'));
+      expect(server.lastAuthorization, contains('Device="test"'));
+      expect(
+        server.requests.single,
+        startsWith(
+          'GET /emby/System/Info/Public?X-Emby-Client=Hills&'
+          'X-Emby-Device-Name=test&X-Emby-Device-Id=device-test&'
+          'X-Emby-Client-Version=1.10.1',
+        ),
+      );
+    },
+  );
 
   test('logout revokes the current token', () async {
     final emby = client();
