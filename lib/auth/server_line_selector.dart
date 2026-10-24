@@ -117,7 +117,15 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
             : l.serversDiscoverAdded(added);
       });
     } catch (failure) {
-      if (mounted) setState(() => error = serverOperationFailure(l, failure));
+      if (mounted) {
+        setState(
+          () => error = serverOperationFailure(
+            l,
+            failure,
+            fallback: l.serversActionFailed,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => discovering = false);
     }
@@ -473,10 +481,14 @@ class ServerLineChoice extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 4),
+          // 失败原因与检查时间可能放不下一行：折成两行，圆点对齐首行，
+          // 不把「检查于 10/24 12:54」截成半截时间。
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (statusTone == null)
                 Container(
+                  margin: const EdgeInsets.only(top: 4.5),
                   width: 7,
                   height: 7,
                   decoration: BoxDecoration(
@@ -485,12 +497,15 @@ class ServerLineChoice extends StatelessWidget {
                   ),
                 )
               else
-                ServerStatusDot(tone: statusTone, size: 7),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.5),
+                  child: ServerStatusDot(tone: statusTone, size: 7),
+                ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   checking ? l.serversCheckingNow : status,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: statusColor,

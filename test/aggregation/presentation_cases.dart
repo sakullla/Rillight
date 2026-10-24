@@ -2348,7 +2348,18 @@ void main() {
           findsOneWidget,
         );
         expectOriginalAccess();
-        expect(find.textContaining('1080p'), findsOneWidget);
+        final targetCard = find.byKey(
+          Key('source-selection-item-${f.bId}-shared-id'),
+        );
+        // Each version shows its release name with spec labels below it.
+        expect(
+          find.descendant(of: targetCard, matching: find.text('剧场版 1080p')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: targetCard, matching: find.text('1080p')),
+          findsOneWidget,
+        );
         expect(find.text('共 3 个版本'), findsNothing);
         expect(find.textContaining('音轨 1 条'), findsNothing);
         expect(find.textContaining('查找完成'), findsNothing);
@@ -2986,10 +2997,7 @@ void main() {
           ),
           findsNothing,
         );
-        final action = find.widgetWithText(
-          AppButton,
-          failure ? '部分来源加载失败，重试' : '继续查找',
-        );
+        final action = find.widgetWithText(AppButton, failure ? '重试' : '继续查找');
         expect(action, findsOneWidget);
         if (failure) {
           f.b.itemsStatus = null;
@@ -4762,6 +4770,30 @@ void main() {
           seriesId: 'series',
           indexNumber: 1,
           parentIndexNumber: 1,
+          mediaStreams: const [
+            FakeMediaStream(
+              index: 0,
+              type: 'Video',
+              codec: 'hevc',
+              width: 3840,
+              height: 2160,
+            ),
+          ],
+          extraSources: const [
+            FakeMediaSource(
+              id: 'b-episode-1-1080p',
+              name: 'Show.S01E01.1080p.WEB-DL-GRP.mkv',
+              mediaStreams: [
+                FakeMediaStream(
+                  index: 0,
+                  type: 'Video',
+                  codec: 'h264',
+                  width: 1920,
+                  height: 1080,
+                ),
+              ],
+            ),
+          ],
         ),
         FakeEmbyItem(
           id: 'b-episode-unnumbered',
@@ -4843,6 +4875,29 @@ void main() {
       expect(find.text('正在查找这一集'), findsNothing);
       expect(find.textContaining('打开这一集'), findsNothing);
       expect(find.text('这台服务器上没有这一集'), findsNothing);
+      // The row shows that episode's versions like a movie row: the release
+      // name without its extension, and spec labels. A version named only
+      // after the episode adds nothing and shows no release line.
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.text('Show.S01E01.1080p.WEB-DL-GRP'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('4K')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('1080p')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.textContaining('同一集')),
+        findsOneWidget,
+        reason: 'Only the meta line names the matched episode',
+      );
       expect(
         f.b.requests.where(
           (request) =>
@@ -4943,6 +4998,94 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+  ]) {
+    cases.testWidgets(
+      '${environment.isDesktop ? 'desktop' : 'phone'} version row opens the target detail with that version selected',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        f.b.items = [_ComparisonMovie()];
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
+        final backend = FakeVideoBackend();
+        final app = f.app(environment, backend: backend);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        await _openOwnedDetail(
+          tester,
+          f,
+          app,
+          serverId: f.aId,
+          itemId: 'shared-id',
+        );
+        final entry = find.byKey(const Key('source-selection-open'));
+        await tester.ensureVisible(entry);
+        await tester.tap(entry);
+        await _settle(tester);
+        final card = find.byKey(
+          Key('source-selection-item-${f.bId}-shared-id'),
+        );
+        final version = find.descendant(
+          of: card,
+          matching: find.byKey(
+            const ValueKey('source-selection-version-internal-version-1'),
+          ),
+        );
+        expect(version, findsOneWidget);
+        await tester.ensureVisible(version);
+        await tester.tap(version);
+        await _settle(tester);
+        expect(find.byKey(const Key('source-selection-title')), findsNothing);
+        expect(f.auth.session!.server.id, f.bId);
+        expect(app.router.state.uri.path, '/item/shared-id');
+        expect(
+          app.router.state.uri.queryParameters['version'],
+          'internal-version-1',
+        );
+        expect(backend.openCount, 0, reason: 'Opening a version never plays');
+        // The detail shows the chosen version, not the default first one.
+        final detailType = environment.isDesktop
+            ? ItemDetailPage
+            : MobileDetailPage;
+        final detail = find.byType(detailType);
+        expect(
+          find.descendant(of: detail, matching: find.text('收藏版 4K')),
+          findsWidgets,
+        );
+        expect(
+          find.descendant(of: detail, matching: find.textContaining('剧场版')),
+          findsNothing,
+        );
+        if (!environment.isDesktop) {
+          // The routed choice is explicit: the first playback pins it.
+          final play = find.descendant(of: detail, matching: find.text('播放'));
+          await tester.ensureVisible(play.first);
+          await tester.tap(play.first);
+          for (
+            var i = 0;
+            i < 20 && app.router.state.extra is! PlayerOpenRequest;
+            i++
+          ) {
+            await tester.pump(const Duration(milliseconds: 50));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 10)),
+            );
+          }
+          final request = app.router.state.extra as PlayerOpenRequest;
+          expect(request.itemId, 'shared-id');
+          expect(request.mediaSourceId, 'internal-version-1');
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
 
   cases.testWidgets(
     'unreachable source stays on its row and another source still opens',

@@ -301,6 +301,7 @@ GoRouter createAppRouter({
                     itemId: state.pathParameters['itemId']!,
                     initialSeasonId: state.uri.queryParameters['season'],
                     initialEpisodeId: state.uri.queryParameters['episode'],
+                    initialMediaSourceId: state.uri.queryParameters['version'],
                   ),
                 ),
               ),
@@ -431,6 +432,7 @@ GoRouter createAppRouter({
                     itemId: state.pathParameters['itemId']!,
                     initialSeasonId: state.uri.queryParameters['season'],
                     initialEpisodeId: state.uri.queryParameters['episode'],
+                    initialMediaSourceId: state.uri.queryParameters['version'],
                   ),
                 ),
                 environment,
@@ -526,6 +528,7 @@ GoRouter createAppRouter({
                   ItemDetailPage(
                     itemId: state.pathParameters['itemId'] ?? '',
                     initialSeasonId: state.uri.queryParameters['season'],
+                    initialMediaSourceId: state.uri.queryParameters['version'],
                   ),
                 ),
               ),

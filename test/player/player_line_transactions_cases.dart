@@ -602,6 +602,78 @@ void main() {
     },
   );
 
+  test(
+    'cancelling a line confirmation leaves no stale confirm-me failure',
+    () async {
+      await player.seekTo(const Duration(minutes: 4));
+      b.items.firstWhere((m) => m.id == 'movie-up').runtime = const Duration(
+        minutes: 2,
+      );
+      await expectLater(player.switchLine(bId), throwsA(anything));
+      expect(player.switchConfirmation, isNotNull);
+      // 确认面板本身就是提示，不再叠一条「请确认后继续」。
+      expect(player.playbackLineFailure, isNull);
+      await player.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
+      expect(player.switchConfirmation, isNull);
+      expect(player.playbackLineFailure, isNull);
+      expect(player.switchingLineId, isNull);
+      expect(player.isPlaying, true);
+    },
+  );
+
+  test(
+    'a secondary subtitle the target lacks is dropped, not a dead-end',
+    () async {
+      const tracks = [
+        FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+        FakeMediaStream(index: 1, type: 'Audio', codec: 'aac', language: 'jpn'),
+        FakeMediaStream(
+          index: 2,
+          type: 'Subtitle',
+          codec: 'subrip',
+          language: 'zho',
+          isTextSubtitleStream: true,
+        ),
+        FakeMediaStream(
+          index: 3,
+          type: 'Subtitle',
+          codec: 'subrip',
+          language: 'eng',
+          isTextSubtitleStream: true,
+        ),
+      ];
+      a.items.firstWhere((m) => m.id == 'movie-up').mediaStreams = tracks;
+      b.items.firstWhere((m) => m.id == 'movie-up').mediaStreams = tracks
+          .take(3)
+          .toList();
+      await player.start();
+      await player.setSubtitle(2);
+      await player.setSecondarySubtitle(3);
+      expect(player.secondarySubtitleStreamIndex, 3);
+      await player.switchLine(bId);
+      expect(player.activeLineId, bId);
+      expect(player.client.baseUrl, b.baseUrl);
+      expect(player.subtitleStreamIndex, 2);
+      expect(player.secondarySubtitleStreamIndex, isNull);
+      expect(player.switchConfirmation, isNull);
+      expect(player.playbackLineFailure, isNull);
+      expect(player.isPlaying, true);
+    },
+  );
+
+  test('a line switch reports the tapped line while it is checked', () async {
+    adapter.gatedHost = b.baseUrl.host;
+    adapter.gate = Completer<void>();
+    final work = player.switchLine(bId);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    // 预检还在等网络：点下去马上就有「正在切换」，不是没反应。
+    expect(player.switchingLineId, bId);
+    adapter.gate!.complete();
+    await work;
+    expect(player.switchingLineId, isNull);
+    expect(player.activeLineId, bId);
+  });
+
   test('cancel during persistence rolls back disk and rejects late target receipt', () async {
     final gate = store.gate = Completer<void>();
     final entered = store.entered = Completer<void>();

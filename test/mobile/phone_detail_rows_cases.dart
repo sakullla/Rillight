@@ -1162,12 +1162,17 @@ void main() {
         await tester.fling(strip, Offset(-width, 0), 2000);
         await settle(tester);
       }
+      // An odd count never leaves a lone card on the right: the last page is
+      // still a full, left-aligned page ending at the final chapter.
       final last = tester.getRect(find.byKey(CatalogKeys.chapter(4)));
       _expectOnScreen(last, width, 900);
       expect(last.right, closeTo(width - first.left, 1));
       _expectInside(tester.getRect(find.text('Chapter 4')), last);
       _expectInside(tester.getRect(find.text('04:00')), last);
-      expect(find.byKey(CatalogKeys.chapter(3)), findsNothing);
+      final previous = tester.getRect(find.byKey(CatalogKeys.chapter(3)));
+      _expectOnScreen(previous, width, 900);
+      expect(previous.left, closeTo(first.left, 1));
+      expect(last.left, greaterThanOrEqualTo(previous.right - 0.5));
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
 

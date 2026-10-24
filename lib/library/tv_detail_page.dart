@@ -34,10 +34,15 @@ class TvDetailPage extends StatefulWidget {
     required this.itemId,
     this.initialSeasonId,
     this.initialEpisodeId,
+    this.initialMediaSourceId,
   });
   final String itemId;
   final String? initialSeasonId;
   final String? initialEpisodeId;
+
+  /// 片源选择里点中的版本（路由 `version` 参数）。条目有这个版本时
+  /// 打开后预选它，并作为首次播放的明确选择。
+  final String? initialMediaSourceId;
   @override
   State<TvDetailPage> createState() => _TvDetailPageState();
 }
@@ -76,6 +81,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
       initialEpisodeId: widget.initialEpisodeId,
+      initialMediaSourceId: widget.initialMediaSourceId,
     )..load();
     _focus.noteRoute(
       ModalRoute.of(context)?.isCurrent ?? true,

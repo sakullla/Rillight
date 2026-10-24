@@ -5320,29 +5320,77 @@ abstract class AppLocalizations {
   /// **'暂未找到其他来源'**
   String get sourceSelectionEmpty;
 
-  /// No description provided for @sourceSelectionRetry.
-  ///
-  /// In zh, this message translates to:
-  /// **'部分来源加载失败，重试'**
-  String get sourceSelectionRetry;
-
   /// No description provided for @sourceSelectionMore.
   ///
   /// In zh, this message translates to:
   /// **'继续查找'**
   String get sourceSelectionMore;
 
+  /// No description provided for @sourceSelectionClose.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get sourceSelectionClose;
+
+  /// No description provided for @sourceSelectionCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前'**
+  String get sourceSelectionCurrent;
+
+  /// No description provided for @sourceSelectionCurrentSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在使用'**
+  String get sourceSelectionCurrentSection;
+
+  /// No description provided for @sourceSelectionOtherSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他服务器'**
+  String get sourceSelectionOtherSection;
+
+  /// No description provided for @sourceSelectionLockedSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要解锁'**
+  String get sourceSelectionLockedSection;
+
+  /// No description provided for @sourceSelectionLockedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁后一起查找'**
+  String get sourceSelectionLockedHint;
+
+  /// No description provided for @sourceSelectionFailedServers.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 台服务器暂时连不上'**
+  String sourceSelectionFailedServers(int count);
+
+  /// No description provided for @sourceSelectionRetryAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试'**
+  String get sourceSelectionRetryAction;
+
+  /// No description provided for @sourceSelectionVersionCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个版本'**
+  String sourceSelectionVersionCount(int count);
+
+  /// No description provided for @sourceSelectionEmptyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已解锁的服务器上都没有这部作品。'**
+  String get sourceSelectionEmptyHint;
+
   /// No description provided for @sourceSelectionCheckDetails.
   ///
   /// In zh, this message translates to:
   /// **'请核对影片详情'**
   String get sourceSelectionCheckDetails;
-
-  /// No description provided for @sourceSelectionHint.
-  ///
-  /// In zh, this message translates to:
-  /// **'点开后进入那一台服务器上的详情，可以再播放。'**
-  String get sourceSelectionHint;
 
   /// No description provided for @sourceSelectionUnreachable.
   ///
@@ -5481,12 +5529,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{days} 天前看过'**
   String sourceSelectionWatchedDays(int days);
-
-  /// No description provided for @sourceSelectionEpisodeCount.
-  ///
-  /// In zh, this message translates to:
-  /// **'共 {count} 集'**
-  String sourceSelectionEpisodeCount(int count);
 
   /// No description provided for @sourceSelectionPasswordTitle.
   ///
@@ -5949,6 +5991,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'添加'**
   String get serversAddShort;
+
+  /// No description provided for @copyAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'复制'**
+  String get copyAction;
+
+  /// No description provided for @copiedText.
+  ///
+  /// In zh, this message translates to:
+  /// **'已复制：{text}'**
+  String copiedText(String text);
 }
 
 class _AppLocalizationsDelegate

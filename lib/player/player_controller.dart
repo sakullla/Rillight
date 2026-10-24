@@ -241,6 +241,10 @@ class PlayerController extends ChangeNotifier {
   PlaybackOrigin? activeOrigin;
   String? activeLineId;
   String? pendingLineId;
+
+  /// 用户点了这条线路、切换还在进行（含开流前的预检）。只给界面显示
+  /// 进度、挡住重复点击用；不参与「实际在用哪条线路」的判断。
+  String? switchingLineId;
   List<ServerLine> playbackLineSnapshot;
   String? verifiedPlaybackServerId;
 
@@ -443,6 +447,7 @@ class PlayerController extends ChangeNotifier {
         ++_lineRevision;
         _lineBudget?.cancel();
         _confirmLine = null;
+        switchingLineId = null;
         if (_sourceRenewalOperation != null) {
           _sourceRenewalOperation = null;
           _sourceRenewalRequired = false;

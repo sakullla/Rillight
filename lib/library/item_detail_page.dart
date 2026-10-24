@@ -42,12 +42,21 @@ import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 class ItemDetailPage extends StatefulWidget {
-  const ItemDetailPage({super.key, required this.itemId, this.initialSeasonId});
+  const ItemDetailPage({
+    super.key,
+    required this.itemId,
+    this.initialSeasonId,
+    this.initialMediaSourceId,
+  });
 
   final String itemId;
 
   /// 打开剧集时预选的季;单集标题链接带入所属季,避免落到第一季。
   final String? initialSeasonId;
+
+  /// 片源选择里点中的版本（路由 `version` 参数）。条目有这个版本时
+  /// 打开后预选它，并作为首次播放的明确选择。
+  final String? initialMediaSourceId;
 
   /// 加载完成后的头部根节点,供测试比对骨架/真实头部高度。
   static const headerKey = Key('detail-header');
@@ -66,6 +75,9 @@ class ItemDetailPage extends StatefulWidget {
 
   /// 头部播放选项行：片源/音轨/字幕当前值下拉与「其他来源」。
   static const optionRowKey = Key('detail-option-row');
+
+  /// 相邻集预览期间，替还没回来的选项行占位。
+  static const optionRowPlaceholderKey = Key('detail-option-row-placeholder');
 
   /// 头部最小高度(不含顶栏叠加),骨架与真实头部共用同一算法。
   static double headerHeightFor(double width, double viewportHeight) {
@@ -142,6 +154,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   bool _loadingMore = false;
   String? _mediaSourceId;
   bool _pickedMediaSource = false;
+
+  /// 切到相邻一集时先用分集列表里的条目预览；列表条目不带完整片源与
+  /// 音轨/字幕，播放选项行要等详情回来才出现。上一集有这一行时预览
+  /// 期间先占住它的高度，详情回来后再按实际内容收放，头部不上下跳。
+  bool _holdOptionRow = false;
+
+  /// 路由预选的版本已被手动改选或一次播放用掉，之后不再套用。
+  bool _routeVersionConsumed = false;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   int _loadGen = 0;
@@ -271,8 +291,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       }
     }
     final shown = preview;
+    final before = _item;
+    final holdOptionRow =
+        _holdOptionRow ||
+        (before != null && _hasOptionRow(before, _mediaSourceId));
     if (shown != null && mounted) {
       setState(() {
+        _holdOptionRow = holdOptionRow;
         _syncDetailSections(shown, holdMissing: true);
         _item = shown;
         _episodeReveal++;
@@ -320,6 +345,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _nextEpisode = null;
         _mediaSourceId = null;
         _pickedMediaSource = false;
+        _holdOptionRow = false;
         _audioStreamIndex = null;
         _subtitleStreamIndex = null;
         _episodeTotal = 0;
@@ -366,11 +392,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       setState(() {
         _syncDetailSections(item, holdMissing: false);
         _item = item;
+        _holdOptionRow = false;
         _loading = false;
         _error = null;
         _episodesLoading = (item.isSeries || item.isEpisode) && !reuseCatalog;
-        _mediaSourceId = item.mediaSources.firstOrNull?.id;
-        _pickedMediaSource = false;
+        final routed = _routeVersion(item);
+        _mediaSourceId = routed ?? item.mediaSources.firstOrNull?.id;
+        _pickedMediaSource = routed != null;
         _audioStreamIndex = _defaultAudio(item, _mediaSourceId);
         _subtitleStreamIndex = _defaultSubtitle(item, _mediaSourceId);
       });
@@ -1102,6 +1130,18 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return false;
   }
 
+  /// 路由要求的版本：只对路由打开的那个条目、且条目确有这个版本时生效。
+  String? _routeVersion(MediaItem item) {
+    final wanted = widget.initialMediaSourceId;
+    if (wanted == null ||
+        _routeVersionConsumed ||
+        item.id != widget.itemId ||
+        !item.mediaSources.any((source) => source.id == wanted)) {
+      return null;
+    }
+    return wanted;
+  }
+
   Future<void> _openPlayer(
     String itemId, {
     Duration? startPosition,
@@ -1129,6 +1169,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           startPosition: startPosition,
         ),
       );
+      _routeVersionConsumed = true;
     } catch (error) {
       if (!mounted) {
         return;
@@ -1511,11 +1552,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 },
           busyPlayed: _busyPlayed,
           genres: genres,
+          holdOptionRow: _holdOptionRow,
           mediaSourceId: _mediaSourceId,
           audioStreamIndex: _audioStreamIndex,
           subtitleStreamIndex: _subtitleStreamIndex,
           onMediaSource: (id) {
             setState(() {
+              _routeVersionConsumed = true;
               _pickedMediaSource = true;
               _mediaSourceId = id;
               _audioStreamIndex = _defaultAudio(item, id);
@@ -2589,10 +2632,12 @@ class _DetailHeader extends StatelessWidget {
     this.overview,
     this.overviewWidget,
     this.genres = const [],
+    this.holdOptionRow = false,
   });
 
   final MediaItem item;
   final List<String> genres;
+  final bool holdOptionRow;
   final MediaItem? artworkItem;
   final MediaItem? backdropItem;
   final String? runtime;
@@ -2780,6 +2825,7 @@ class _DetailHeader extends StatelessWidget {
                             onMediaSource: onMediaSource,
                             onAudio: onAudio,
                             onSubtitle: onSubtitle,
+                            holdOptionRow: holdOptionRow,
                           ),
                         ),
                       ),
@@ -3177,11 +3223,15 @@ class _DetailActions extends StatelessWidget {
     this.onSubtitle,
     this.busyFavorite = false,
     this.onFavoriteChanged,
+    this.holdOptionRow = false,
   });
 
   final MediaItem item;
   final bool busyPlayed;
   final ValueChanged<bool> onPlayedChanged;
+
+  /// 选项行暂无内容时仍占一行高度（相邻集预览，详情未到）。
+  final bool holdOptionRow;
   final VoidCallback? onPlay;
   final VoidCallback? onPlayFromStart;
   final VoidCallback? onOpenPreviousEpisode;
@@ -3377,6 +3427,24 @@ class _DetailActions extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: actions,
         ),
+        if (choices.isEmpty && holdOptionRow) ...[
+          const SizedBox(height: AppSpacing.md),
+          // 不可见、不可点、不进读屏，只占一枚选项胶囊的高度。
+          const Visibility(
+            key: ItemDetailPage.optionRowPlaceholderKey,
+            visible: false,
+            maintainSize: true,
+            maintainAnimation: true,
+            maintainState: true,
+            child: _DetailOptionChip(
+              icon: AppIcons.mediaSource,
+              value: ' ',
+              tooltip: ' ',
+              semanticLabel: '',
+              onPressed: null,
+            ),
+          ),
+        ],
         if (choices.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           Semantics(
@@ -3395,6 +3463,12 @@ class _DetailActions extends StatelessWidget {
     );
   }
 }
+
+/// 头部是否画播放选项行（多版本、多音轨或有字幕）。
+bool _hasOptionRow(MediaItem item, String? sourceId) =>
+    item.mediaSources.length > 1 ||
+    _audioSelectable(_audioChoices(item, sourceId)) ||
+    _subtitleSelectable(_subtitleChoices(item, sourceId));
 
 /// 音轨多于一条时才在播放设置行提供选择。
 bool _audioSelectable(List<ItemMediaStream> audios) => audios.length > 1;

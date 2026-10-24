@@ -267,6 +267,11 @@ void main() {
     testWidgets('chips follow artwork and preserve focus in $brightness', (
       tester,
     ) async {
+      // Desktop keyboard focus: the ring is drawn in traditional highlight mode.
+      final strategy = FocusManager.instance.highlightStrategy;
+      FocusManager.instance.highlightStrategy =
+          FocusHighlightStrategy.alwaysTraditional;
+      addTearDown(() => FocusManager.instance.highlightStrategy = strategy);
       ContentTheme.debugClear();
       final focus = FocusNode();
       addTearDown(focus.dispose);

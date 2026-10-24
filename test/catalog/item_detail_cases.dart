@@ -941,6 +941,66 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
+  cases.testWidgets(
+    'switching episodes holds the option row so the header does not jump',
+    (tester) async {
+      const first = 'episode-friends-s1e1';
+      const second = 'episode-friends-s1e2';
+      for (final item in server.items) {
+        if (item.id == first || item.id == second) {
+          item.mediaStreams = const [
+            FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+          ];
+          item.extraSources = const [
+            FakeMediaSource(id: 'alt-4k', name: '2160p'),
+          ];
+        }
+      }
+      // 分集列表不带片源：切集预览时还不知道有两个版本。
+      server.omitListMediaSources = true;
+
+      final app = await pumpApp(tester, viewSize: const Size(1440, 900));
+      await openItem(tester, app, first);
+      final header = find.byKey(ItemDetailPage.headerKey);
+      expect(find.byKey(CatalogKeys.mediaSource), findsOneWidget);
+      final height = tester.getSize(header).height;
+      final title = tester.getTopLeft(find.byKey(CatalogKeys.playedToggle)).dy;
+
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      server.holdItemGet = gate;
+      final card = find.byKey(CatalogKeys.episode(second));
+      await tester.ensureVisible(card);
+      await tester.pump();
+      await tester.tap(card);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // 预览期间片源下拉还没有，但占位让头部保持原高、按钮不动。
+      expect(find.text('The One with the Sonogram'), findsWidgets);
+      expect(find.byKey(CatalogKeys.mediaSource), findsNothing);
+      expect(
+        find.byKey(ItemDetailPage.optionRowPlaceholderKey),
+        findsOneWidget,
+      );
+      expect(tester.getSize(header).height, closeTo(height, .5));
+      expect(
+        tester.getTopLeft(find.byKey(CatalogKeys.playedToggle)).dy,
+        closeTo(title, .5),
+      );
+
+      gate.complete();
+      await settle(tester);
+      expect(find.byKey(CatalogKeys.mediaSource), findsOneWidget);
+      expect(find.byKey(ItemDetailPage.optionRowPlaceholderKey), findsNothing);
+      expect(tester.getSize(header).height, closeTo(height, .5));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
   for (final explicit in [false, true]) {
     cases.testWidgets(
       'series opens ${explicit ? 'requested' : 'resuming'} season with specials first',

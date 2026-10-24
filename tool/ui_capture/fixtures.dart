@@ -642,6 +642,13 @@ class CaptureAdapter extends FakeEmbyAdapter {
           if (value['Id'] == 'series-friends') {
             value['BackdropImageTags'] = ['capture-still-2'];
           }
+          // 第二台服务器上的同一作品是另一批发布文件：片源选择要能把
+          // 文件名、分辨率、HDR、帧率、体积与码率并排比较。
+          if (options.uri.host == 'capture-mirror.test' &&
+              value['MediaSources'] is List) {
+            final mirrored = _mirrorSources(value);
+            if (mirrored != null) value['MediaSources'] = mirrored;
+          }
           for (final child in value.values) {
             addAlbum(child);
           }
@@ -663,6 +670,150 @@ class CaptureAdapter extends FakeEmbyAdapter {
     }
     return response;
   }
+}
+
+Map<String, Object> _captureStream(
+  int index,
+  String type,
+  String codec, {
+  int? width,
+  int? height,
+  int? bitRate,
+  String? range,
+  String? rangeType,
+  double? fps,
+  int? channels,
+  String? language,
+  String? title,
+}) => {
+  'Index': index,
+  'Type': type,
+  'Codec': codec,
+  'Width': ?width,
+  'Height': ?height,
+  'BitRate': ?bitRate,
+  'VideoRange': ?range,
+  'VideoRangeType': ?rangeType,
+  'AverageFrameRate': ?fps,
+  'Channels': ?channels,
+  'Language': ?language,
+  'DisplayTitle': ?title,
+};
+
+Map<String, Object> _captureSource({
+  required String id,
+  required String name,
+  required int width,
+  required int height,
+  required int size,
+  required int bitrate,
+  required List<Map<String, Object>> streams,
+}) => {
+  'Id': id,
+  'Name': name,
+  'Container': 'mkv',
+  'Size': size,
+  'Bitrate': bitrate,
+  'Width': width,
+  'Height': height,
+  'MediaStreams': streams,
+};
+
+List<Map<String, Object>>? _mirrorSources(Map<String, dynamic> item) {
+  final id = item['Id']?.toString() ?? '';
+  final chinese = _captureStream(
+    3,
+    'Subtitle',
+    'ass',
+    language: 'chi',
+    title: '简体中文',
+  );
+  if (id == 'movie-up') {
+    return [
+      _captureSource(
+        id: 'mirror-up-remux',
+        name: 'Up.2009.2160p.UHD.BluRay.REMUX.HEVC.DV.TrueHD.Atmos-FraMeSToR',
+        width: 3840,
+        height: 2160,
+        size: 58400000000,
+        bitrate: 68400000,
+        streams: [
+          _captureStream(
+            0,
+            'Video',
+            'hevc',
+            width: 3840,
+            height: 2160,
+            range: 'HDR',
+            rangeType: 'DOVIWithHDR10',
+            fps: 23.976,
+          ),
+          _captureStream(
+            1,
+            'Audio',
+            'truehd',
+            channels: 8,
+            language: 'eng',
+            title: 'TrueHD Atmos 7.1',
+          ),
+          chinese,
+        ],
+      ),
+      _captureSource(
+        id: 'mirror-up-1080p',
+        name: '飞屋环游记 (2009) {tmdbid=14160} 1080p BluRay x264 DTS-CMCT',
+        width: 1920,
+        height: 1080,
+        size: 11600000000,
+        bitrate: 14200000,
+        streams: [
+          _captureStream(0, 'Video', 'h264', width: 1920, height: 1080),
+          _captureStream(1, 'Audio', 'dts', channels: 6, language: 'eng'),
+          chinese,
+        ],
+      ),
+    ];
+  }
+  final episode = RegExp(r'^episode-friends-s(\d+)e(\d+)$').firstMatch(id);
+  if (episode == null) return null;
+  final code =
+      'S${episode.group(1)!.padLeft(2, '0')}E${episode.group(2)!.padLeft(2, '0')}';
+  return [
+    _captureSource(
+      id: 'mirror-$id-2160p',
+      name: '老友记 $code 2160p.WEB-DL.H265.HDR.60fps.DDP5.1-SonyHD',
+      width: 3840,
+      height: 2160,
+      size: 5200000000,
+      bitrate: 15200000,
+      streams: [
+        _captureStream(
+          0,
+          'Video',
+          'hevc',
+          width: 3840,
+          height: 2160,
+          range: 'HDR',
+          rangeType: 'HDR10',
+          fps: 59.94,
+        ),
+        _captureStream(1, 'Audio', 'eac3', channels: 6, language: 'eng'),
+        chinese,
+      ],
+    ),
+    _captureSource(
+      id: 'mirror-$id-1080p',
+      name: 'Friends.$code.1080p.BluRay.x264.AAC-CHD',
+      width: 1920,
+      height: 1080,
+      size: 1400000000,
+      bitrate: 4800000,
+      streams: [
+        _captureStream(0, 'Video', 'h264', width: 1920, height: 1080),
+        _captureStream(1, 'Audio', 'aac', channels: 2, language: 'eng'),
+      ],
+    ),
+  ];
 }
 
 class CaptureBackend extends FakeVideoBackend

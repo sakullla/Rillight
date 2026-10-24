@@ -144,7 +144,10 @@ Future<bool> _enterUnlocked(
     return false;
   } catch (error) {
     if (context.mounted) {
-      showAppNotice(context, serverOperationFailure(l, error));
+      showAppNotice(
+        context,
+        serverOperationFailure(l, error, fallback: l.serversConnectionFailed),
+      );
     }
     return false;
   }
@@ -173,7 +176,11 @@ Future<bool> _enterUnlocked(
     context,
     auth.failure == null
         ? l.serversConnectionFailed
-        : serverOperationFailure(l, auth.failure!),
+        : serverOperationFailure(
+            l,
+            auth.failure!,
+            fallback: l.serversConnectionFailed,
+          ),
   );
   return false;
 }
@@ -358,7 +365,12 @@ class _ContentUnlockDialogState extends State<_ContentUnlockDialog> {
       if (!mounted || attempt != revision) return;
       setState(() {
         busy = false;
-        error = serverOperationFailure(AppLocalizations.of(context), failure);
+        final l = AppLocalizations.of(context);
+        error = serverOperationFailure(
+          l,
+          failure,
+          fallback: l.serversConnectionFailed,
+        );
       });
       return;
     }
@@ -398,7 +410,11 @@ class _ContentUnlockDialogState extends State<_ContentUnlockDialog> {
           ? null
           : widget.auth.failure == null
           ? l.serversConnectionFailed
-          : serverOperationFailure(l, widget.auth.failure!);
+          : serverOperationFailure(
+              l,
+              widget.auth.failure!,
+              fallback: l.serversConnectionFailed,
+            );
     });
   }
 

@@ -320,6 +320,41 @@ extension PageCaptures on CaptureSession {
           await auth.refreshServers();
         });
       }
+      if (shouldCapture('entry-source-selection-episode')) {
+        final target = auth.savedServers.last;
+        // From an episode the other server's row shows that same episode's
+        // release files, not just the series.
+        app.router.go('/item/episode-friends-s1e2');
+        await advance(1200);
+        await activate(
+          find.descendant(
+            of: find.byType(SourceSelectionAction),
+            matching: find.byKey(SourceSelectionActionView.key),
+          ),
+        );
+        final card = find.byKey(
+          ValueKey('source-selection-item-${target.id}-series-friends'),
+        );
+        final release = find.descendant(
+          of: card,
+          matching: find.textContaining('SonyHD'),
+        );
+        for (var i = 0; i < 80 && release.evaluate().isEmpty; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)),
+          );
+          await advance(100);
+        }
+        expect(
+          release,
+          findsOneWidget,
+          reason: 'The matched episode must show its own versions',
+        );
+        await advance(250);
+        await save('entry-source-selection-episode');
+        await activate(find.byKey(const Key('source-selection-close')));
+        await advance(400);
+      }
       app.router.go('/');
       await advance(500);
     }

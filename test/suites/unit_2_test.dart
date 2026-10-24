@@ -2,53 +2,53 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/query_cases.dart' as case0;
-import '../app/palette_contrast_cases.dart' as case1;
-import '../app/update_download_cases.dart' as case2;
-import '../auth/backup_import/backup_import_cases.dart' as case3;
-import '../auth/jellyfin_backup_import_cases.dart' as case4;
+import '../aggregation/server_sections_cases.dart' as case1;
+import '../app/file_import_cases.dart' as case2;
+import '../app/update_download_cases.dart' as case3;
+import '../auth/backup_import/backup_import_cases.dart' as case4;
 import '../auth/playback_cleanup_authority_cases.dart' as case5;
-import '../auth/server_configuration_migration_cases.dart' as case6;
-import '../auth/server_import_cases.dart' as case7;
-import '../auth/server_mutation_cases.dart' as case8;
-import '../auth/source_sessions_cases.dart' as case9;
-import '../catalog/emby_catalog_client_cases.dart' as case10;
-import '../emby/aggregation_metadata_cases.dart' as case11;
-import '../emby/emby_url_cases.dart' as case12;
-import '../emby/media_source_format_cases.dart' as case13;
-import '../home/library_nav_prefs_cases.dart' as case14;
-import '../media_server/contract_cases.dart' as case15;
+import '../auth/provider_line_boundaries_cases.dart' as case6;
+import '../auth/server_configuration_migration_cases.dart' as case7;
+import '../auth/server_import_cases.dart' as case8;
+import '../auth/server_list_store_cases.dart' as case9;
+import '../auth/server_mutation_cases.dart' as case10;
+import '../catalog/emby_catalog_client_cases.dart' as case11;
+import '../emby/emby_device_cases.dart' as case12;
+import '../emby/emby_request_guard_cases.dart' as case13;
+import '../emby/emby_url_cases.dart' as case14;
+import '../home/library_nav_prefs_cases.dart' as case15;
 import '../player/cache/cache_contract_cases.dart' as case16;
-import '../player/cache/directory_inventory_cases.dart' as case17;
-import '../player/cache/range_lease_index_cases.dart' as case18;
-import '../player/playback_check_in_cases.dart' as case19;
+import '../player/capability_record_cases.dart' as case17;
+import '../player/catalog_preference_negotiation_cases.dart' as case18;
+import '../player/hls_redirect_chain_cases.dart' as case19;
 import '../player/playback_http_proxy_cases.dart' as case20;
-import '../player/playback_metadata_cases.dart' as case21;
-import '../player/playback_transport_session_cases.dart' as case22;
-import '../player/player_host_command_cases.dart' as case23;
-import '../player/provider_process_boundary_cases.dart' as case24;
+import '../player/playback_wake_lock_cases.dart' as case21;
+import '../player/player_process_protocol_cases.dart' as case22;
+import '../player/player_runtime_options_cases.dart' as case23;
+import '../player/provider_scoped_preference_cases.dart' as case24;
 import '../player/rillight_video_backend_cases.dart' as case25;
-import '../player/session_subtitle_files_cases.dart' as case26;
+import '../player/strm_quality_confirmation_cases.dart' as case26;
 import '../plex/plex_provider_cases.dart' as case27;
 import '../helpers/suite.dart';
 
 void main() {
   verifySuiteManifest();
   group('aggregation/query_test.dart', case0.main);
-  group('app/palette_contrast_test.dart', case1.main);
-  group('app/update_download_test.dart', case2.main);
-  group('auth/backup_import/backup_import_test.dart', case3.main);
-  group('auth/jellyfin_backup_import_test.dart', case4.main);
+  group('aggregation/server_sections_test.dart', case1.main);
+  group('app/file_import_test.dart', case2.main);
+  group('app/update_download_test.dart', case3.main);
+  group('auth/backup_import/backup_import_test.dart', case4.main);
   group('auth/playback_cleanup_authority_test.dart', case5.main);
-  group('auth/server_configuration_migration_test.dart', case6.main);
-  group('auth/server_import_test.dart', case7.main);
-  group('auth/server_mutation_test.dart', case8.main);
-  group('auth/source_sessions_test.dart', case9.main);
-  group('catalog/emby_catalog_client_test.dart', case10.main);
-  group('emby/aggregation_metadata_test.dart', case11.main);
-  group('emby/emby_url_test.dart', case12.main);
-  group('emby/media_source_format_test.dart', case13.main);
-  group('home/library_nav_prefs_test.dart', case14.main);
-  group('media_server/contract_test.dart', case15.main);
+  group('auth/provider_line_boundaries_test.dart', case6.main);
+  group('auth/server_configuration_migration_test.dart', case7.main);
+  group('auth/server_import_test.dart', case8.main);
+  group('auth/server_list_store_test.dart', case9.main);
+  group('auth/server_mutation_test.dart', case10.main);
+  group('catalog/emby_catalog_client_test.dart', case11.main);
+  group('emby/emby_device_test.dart', case12.main);
+  group('emby/emby_request_guard_test.dart', case13.main);
+  group('emby/emby_url_test.dart', case14.main);
+  group('home/library_nav_prefs_test.dart', case15.main);
   group(
     'player/cache/cache_contract_test.dart [part 1]',
     () => case16.mainShard(0, 3),
@@ -57,21 +57,21 @@ void main() {
     'player/cache/cache_contract_test.dart [part 3]',
     () => case16.mainShard(2, 3),
   );
-  group('player/cache/directory_inventory_test.dart', case17.main);
-  group('player/cache/range_lease_index_test.dart', case18.main);
-  group('player/playback_check_in_test.dart', case19.main);
+  group('player/capability_record_test.dart', case17.main);
+  group('player/catalog_preference_negotiation_test.dart', case18.main);
+  group('player/hls_redirect_chain_test.dart', case19.main);
   group(
     'player/playback_http_proxy_test.dart [part 2]',
     () => case20.mainShard(1, 4),
   );
-  group('player/playback_metadata_test.dart', case21.main);
-  group('player/playback_transport_session_test.dart', case22.main);
-  group('player/player_host_command_test.dart', case23.main);
-  group('player/provider_process_boundary_test.dart', case24.main);
+  group('player/playback_wake_lock_test.dart', case21.main);
+  group('player/player_process_protocol_test.dart', case22.main);
+  group('player/player_runtime_options_test.dart', case23.main);
+  group('player/provider_scoped_preference_test.dart', case24.main);
   group(
     'player/rillight_video_backend_test.dart [part 2]',
     () => case25.mainShard(1, 3),
   );
-  group('player/session_subtitle_files_test.dart', case26.main);
+  group('player/strm_quality_confirmation_test.dart', case26.main);
   group('plex/plex_provider_test.dart', case27.main);
 }

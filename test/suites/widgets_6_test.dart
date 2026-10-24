@@ -2,16 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../app/android_bootstrap_cases.dart' as case1;
+import '../app/artwork_mood_cases.dart' as case1;
 import '../app/startup_history_recovery_cases.dart' as case2;
-import '../app/update_ui_cases.dart' as case3;
-import '../mobile/phone_player_cases.dart' as case4;
+import '../mobile/phone_player_cases.dart' as case3;
+import '../mobile/tv_shell_navigation_cases.dart' as case4;
 import '../player/danmaku/danmaku_renderer_cases.dart' as case5;
-import '../player/desktop_player_page_cases.dart' as case6;
+import '../player/seek_preview_cases.dart' as case6;
 import '../player/subtitle_viewport_cases.dart' as case7;
-import '../tv/tv_lan_pair_cases.dart' as case8;
-import '../tv/tv_player_controls_cases.dart' as case9;
-import '../widgets/backdrop_scrim_cases.dart' as case10;
+import '../tv/tv_flow_cases.dart' as case8;
+import '../tv/tv_lan_pair_cases.dart' as case9;
+import '../tv/tv_player_controls_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -20,14 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 6]',
     () => case0.mainShard(5, 6),
   );
-  group('app/android_bootstrap_test.dart', case1.main);
+  group('app/artwork_mood_test.dart', case1.main);
   group('app/startup_history_recovery_test.dart', case2.main);
-  group('app/update_ui_test.dart', case3.main);
-  group('mobile/phone_player_test.dart [part 3]', () => case4.mainShard(2, 4));
+  group('mobile/phone_player_test.dart [part 3]', () => case3.mainShard(2, 4));
+  group('mobile/tv_shell_navigation_test.dart', case4.main);
   group('player/danmaku/danmaku_renderer_test.dart', case5.main);
-  group('player/desktop_player_page_test.dart', case6.main);
+  group('player/seek_preview_test.dart', case6.main);
   group('player/subtitle_viewport_test.dart', case7.main);
-  group('tv/tv_lan_pair_test.dart [part 1]', () => case8.mainShard(0, 3));
-  group('tv/tv_player_controls_test.dart', case9.main);
-  group('widgets/backdrop_scrim_test.dart', case10.main);
+  group('tv/tv_flow_test.dart', case8.main);
+  group('tv/tv_lan_pair_test.dart [part 2]', () => case9.mainShard(1, 3));
+  group('tv/tv_player_controls_test.dart', case10.main);
 }

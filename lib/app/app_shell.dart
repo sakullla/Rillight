@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/widgets/browse_menu_button.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/top_bar_backdrop.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -42,13 +41,6 @@ class AppShell extends StatefulWidget {
   static const topBarKey = Key('app-shell-top-bar');
   static const homeNavKey = Key('app-shell-home');
   static const overflowNavKey = Key('app-shell-libraries-overflow');
-
-  /// 非浏览页面顶栏的「浏览」菜单入口。
-  static const browseMenuKey = BrowseMenuButton.buttonKey;
-
-  /// 顶栏「浏览」显示文字的最小窗口宽度;更窄只显示图标,
-  /// 让搜索与账户在 1024 宽度下仍能同排。
-  static const browseLabelMinWidth = 1200.0;
 
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
   ///
@@ -427,10 +419,6 @@ class _TopBar extends StatelessWidget {
     // 宽窗口用带提示文字的搜索胶囊,窄窗口退回图标。
     final wideSearch =
         MediaQuery.sizeOf(context).width >= AppShell.searchPillMinWidth;
-    final showBrowseMenu =
-        !AppRoutes.showsBrowseNav(location) && !AppRoutes.isItem(location);
-    final showBrowseLabel =
-        MediaQuery.sizeOf(context).width >= AppShell.browseLabelMinWidth;
     return SizedBox(
       height: height,
       child: Stack(
@@ -533,15 +521,6 @@ class _TopBar extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (showBrowseMenu) ...[
-                              BrowseMenuButton(
-                                key: AppShell.browseMenuKey,
-                                libraries: libraries,
-                                currentLocation: location,
-                                showLabel: showBrowseLabel,
-                              ),
-                              const SizedBox(width: AppSpacing.xxs),
-                            ],
                             if (wideSearch)
                               const SizedBox(width: AppSpacing.xs),
                             SearchAction(

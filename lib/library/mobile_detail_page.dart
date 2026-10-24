@@ -32,6 +32,7 @@ import 'package:rillight/library/source_selection.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/app/widgets/long_press_copy.dart';
 
 class MobileDetailPage extends StatefulWidget {
   const MobileDetailPage({
@@ -39,11 +40,16 @@ class MobileDetailPage extends StatefulWidget {
     required this.itemId,
     this.initialSeasonId,
     this.initialEpisodeId,
+    this.initialMediaSourceId,
   });
 
   final String itemId;
   final String? initialSeasonId;
   final String? initialEpisodeId;
+
+  /// 片源选择里点中的版本（路由 `version` 参数）。条目有这个版本时
+  /// 打开后预选它，并作为首次播放的明确选择。
+  final String? initialMediaSourceId;
 
   @override
   State<MobileDetailPage> createState() => _MobileDetailPageState();
@@ -57,6 +63,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   MediaServerException? _similarError;
   int _extrasRevision = 0;
   String? _selectedSourceId;
+
+  /// 路由预选的版本还没被一次播放用掉；之后播放器里的选择优先。
+  bool _routeVersionPending = true;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   final _scroll = ScrollController();
@@ -94,6 +103,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
       initialEpisodeId: widget.initialEpisodeId,
+      initialMediaSourceId: widget.initialMediaSourceId,
     );
     unawaited(_load());
   }
@@ -346,7 +356,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     final hasExplicitStreamChoice =
         _selectedSourceId != null ||
         _audioStreamIndex != null ||
-        _subtitleStreamIndex != null;
+        _subtitleStreamIndex != null ||
+        (_routeVersionPending && controller.mediaSourceFromRoute);
     await context.push(
       '/play/$itemId',
       extra: PlayerOpenRequest(
@@ -371,6 +382,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     // Choices made inside the player are now authoritative on the next open.
+    _routeVersionPending = false;
     _selectedSourceId = null;
     _audioStreamIndex = null;
     _subtitleStreamIndex = null;
@@ -1193,18 +1205,27 @@ class _PhoneDetailBar extends StatelessWidget {
                     width: 0.5,
                   ),
                 ),
-          title: label == null ? null : Text(label),
+          title: label == null
+              ? null
+              : LongPressCopy(text: label, child: Text(label)),
         ),
       ],
     );
   }
 }
 
-/// 头部主操作：播放钮（`mobile-detail-play`）通栏，续播时下面是一条进度和
-/// 「剩余 N 分钟」。再往下是带标签格行：从头播放 `phone-detail-play-start`、
-/// 上一集/下一集，然后是经 [status] 传入的收藏、已看与其他来源；只有可用项，
-/// 空则整行不画，窄屏放不下时整组折成两行。顶栏只留返回。播放钮位置不受
-/// 次级行影响，加载前后版式不跳，且始终落在首屏上半部。
+/// 头部主操作，自上而下三层，层级分明：
+///
+/// 1. 播放行：播放钮（`mobile-detail-play`）通栏；单集页两侧是上一集/下一集
+///    圆钮（[CatalogKeys.previousEpisode]/[CatalogKeys.nextEpisode]），像播放器
+///    的走带控件。没有的一侧保留为禁用态，播放钮位置不随集数跳动。
+/// 2. 续播时一条细进度和「剩余 N 分钟」。
+/// 3. 操作条（`phone-detail-actions`）：从头播放 `phone-detail-play-start`，
+///    然后是经 [status] 传入的收藏、已看与其他来源。整条与播放钮同宽、等分
+///    成格，图标在上标签在下；大字号放不下时整组折成两行。
+///
+/// 顶栏只留返回。播放钮位置不受次级行影响，加载前后版式不跳，且始终落在
+/// 首屏上半部。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
     required this.label,
@@ -1231,7 +1252,7 @@ class _DetailPlayActions extends StatelessWidget {
   final VoidCallback? onPlay;
   final VoidCallback? onRestart;
 
-  /// 状态与作品级操作（收藏、已看、其他来源），排在观看流程钮之后。
+  /// 状态与作品级操作（收藏、已看、其他来源），排在从头播放之后。
   final List<Widget> status;
 
   /// 续播进度 0–1；为 null 时不画进度行。
@@ -1247,7 +1268,6 @@ class _DetailPlayActions extends StatelessWidget {
     final scheme = theme.colorScheme;
     final progress = this.progress;
     final progressLabel = this.progressLabel;
-    // 顺序与桌面动作组一致：从头播放、上一集、下一集，然后收藏、已看、其他来源。
     final secondary = <Widget>[
       if (showRestart)
         _StatusIconButton(
@@ -1257,24 +1277,9 @@ class _DetailPlayActions extends StatelessWidget {
           tooltip: l.playFromStart,
           onPressed: onRestart,
         ),
-      if (onPrevious != null)
-        _StatusIconButton(
-          key: CatalogKeys.previousEpisode,
-          icon: AppIcons.skipPrevious,
-          label: l.previousEpisode,
-          tooltip: l.previousEpisode,
-          onPressed: onPrevious,
-        ),
-      if (onNext != null)
-        _StatusIconButton(
-          key: CatalogKeys.nextEpisode,
-          icon: AppIcons.skipNext,
-          label: l.nextEpisode,
-          tooltip: l.nextEpisode,
-          onPressed: onNext,
-        ),
       ...status,
     ];
+    final episodeNavigation = onPrevious != null || onNext != null;
     const shape = StadiumBorder();
     final playButton = AppTooltip(
       message: tooltip ?? label,
@@ -1302,9 +1307,32 @@ class _DetailPlayActions extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        playButton,
+        if (episodeNavigation)
+          Row(
+            children: [
+              _EpisodeStepButton(
+                key: CatalogKeys.previousEpisode,
+                icon: AppIcons.skipPrevious,
+                tooltip: l.previousEpisode,
+                size: _height,
+                onPressed: onPrevious,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(child: playButton),
+              const SizedBox(width: AppSpacing.sm),
+              _EpisodeStepButton(
+                key: CatalogKeys.nextEpisode,
+                icon: AppIcons.skipNext,
+                tooltip: l.nextEpisode,
+                size: _height,
+                onPressed: onNext,
+              ),
+            ],
+          )
+        else
+          playButton,
         if (progress != null && progress > 0) ...[
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm + 2),
           Semantics(
             container: true,
             label: progressLabel,
@@ -1316,9 +1344,9 @@ class _DetailPlayActions extends StatelessWidget {
                     child: AppLoadingBar(
                       key: const Key('phone-detail-progress'),
                       value: progress.clamp(0, 1),
-                      minHeight: 5,
+                      minHeight: 4,
                       color: scheme.primary,
-                      backgroundColor: scheme.onSurface.withValues(alpha: .14),
+                      backgroundColor: scheme.onSurface.withValues(alpha: .12),
                     ),
                   ),
                 ),
@@ -1341,54 +1369,160 @@ class _DetailPlayActions extends StatelessWidget {
         ],
         if (secondary.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
-          // 每格同宽（最多 76dp，放不下时均分），图标在上、标签在下；
-          // 整格都是触控区，不再要求用户长按看 tooltip 才知道是什么。
-          // 均分后一格窄于标签所需时整组折行（各行格数尽量相等）。
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final layout = _StatusIconButton.gridOf(
-                context,
-                width: constraints.maxWidth,
-                count: secondary.length,
-              );
-              return Column(
-                key: const Key('phone-detail-actions'),
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (
-                    var start = 0;
-                    start < secondary.length;
-                    start += layout.perRow
-                  )
-                    Padding(
-                      padding: EdgeInsets.only(
-                        top: start == 0 ? 0 : AppSpacing.xs,
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final button in secondary.sublist(
-                            start,
-                            math.min(start + layout.perRow, secondary.length),
-                          ))
-                            SizedBox(width: layout.cell, child: button),
-                        ],
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
+          _ActionBar(children: secondary),
         ],
       ],
     );
   }
 }
 
-/// 带标签的安静圆钮：40dp 圆形，`surfaceContainerHigh` 六成底加发丝边，
-/// 图标用 `onSurfaceVariant`；激活（已收藏/已看）换 [AppSelectionDecoration]
-/// 实底与 `onPrimaryContainer` 填充图标。圆钮下方是短标签（最多两行，不省略），
-/// 整格（圆钮 + 标签）都可点。[busy] 时圆钮里换成转圈（其他来源查询中）。
+/// 播放钮两侧的上一集/下一集圆钮：与播放钮等高，安静的半透明底与发丝边。
+/// 没有可去的一集时保留禁用态，不让播放钮左右跳。
+class _EpisodeStepButton extends StatelessWidget {
+  const _EpisodeStepButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.size,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final double size;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final enabled = onPressed != null;
+    return AppTooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        label: tooltip,
+        child: MobilePressFeedback(
+          enabled: enabled,
+          scale: .92,
+          child: AppSurfaceAction(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: scheme.surfaceContainerHigh.withValues(
+                  alpha: enabled ? .82 : .4,
+                ),
+                border: Border.all(
+                  color: AppEdge.of(theme.brightness, strong: true),
+                ),
+              ),
+              child: Icon(
+                icon,
+                size: 24,
+                fill: AppIcons.filled,
+                color: enabled
+                    ? scheme.onSurface
+                    : scheme.onSurfaceVariant.withValues(alpha: .32),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 次级操作条：与播放钮同宽的一块圆角面板，按格数等分；格间一道短发丝线。
+/// 均分后一格窄于标签所需时整组折成多行（各行格数尽量相等），行间同样用
+/// 发丝线分开。
+class _ActionBar extends StatelessWidget {
+  const _ActionBar({required this.children});
+
+  final List<Widget> children;
+
+  static const double _inset = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final light = theme.brightness == Brightness.light;
+    final hairline = AppEdge.of(theme.brightness, strong: true);
+    return DecoratedBox(
+      key: const Key('phone-detail-actions'),
+      decoration: BoxDecoration(
+        color: light
+            ? scheme.surfaceContainerLowest.withValues(alpha: .72)
+            : scheme.surfaceContainerHigh.withValues(alpha: .56),
+        borderRadius: BorderRadius.circular(AppRadii.lg + 4),
+        border: Border.all(color: hairline),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(_inset),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final layout = _StatusIconButton.gridOf(
+              context,
+              width: constraints.maxWidth,
+              count: children.length,
+            );
+            final rows = <List<Widget>>[
+              for (
+                var start = 0;
+                start < children.length;
+                start += layout.perRow
+              )
+                children.sublist(
+                  start,
+                  math.min(start + layout.perRow, children.length),
+                ),
+            ];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var index = 0; index < rows.length; index++) ...[
+                  if (index > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Container(height: 1, color: hairline),
+                    ),
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (
+                          var cell = 0;
+                          cell < rows[index].length;
+                          cell++
+                        ) ...[
+                          if (cell > 0)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              child: Container(width: 1, color: hairline),
+                            ),
+                          Expanded(child: rows[index][cell]),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// 操作条里的一格：图标在上、短标签在下，整格都是触控区。激活（已收藏/
+/// 已看）时图标换主色实心、标签加粗；[busy] 时图标位换成转圈（其他来源
+/// 查询中）。标签最多两行，不省略。
 class _StatusIconButton extends StatelessWidget {
   const _StatusIconButton({
     super.key,
@@ -1402,39 +1536,32 @@ class _StatusIconButton extends StatelessWidget {
 
   final IconData icon;
 
-  /// 圆钮下方的可见短标签。
+  /// 图标下方的可见短标签。
   final String label;
   final String tooltip;
   final VoidCallback? onPressed;
   final bool highlighted;
   final bool busy;
 
-  static const double _size = 42;
-
-  /// 一格的最大宽度；格数多时按可用宽度均分。
-  static const double maxCellWidth = 76;
-
   static const double _captionSize = 12;
 
   /// 一格放下四字标签所需的最小宽度，随系统字号放大。
   static double minCellWidthOf(BuildContext context) =>
-      MediaQuery.textScalerOf(context).scale(_captionSize) * 4 + 12;
+      MediaQuery.textScalerOf(context).scale(_captionSize) * 4 + 16;
 
-  /// 带标签格行的排布：均分后一格不窄于 [minCellWidthOf] 就排一行；
-  /// 否则折成多行，每行格数尽量相等。格宽不超过 [maxCellWidth]，大字号下
-  /// 上限随标签所需宽度放大，标签不因格宽封顶而折行。
+  /// 操作条的排布：均分后一格不窄于 [minCellWidthOf] 就排一行；否则折成
+  /// 多行，每行格数尽量相等。
   static ({int perRow, double cell}) gridOf(
     BuildContext context, {
     required double width,
     required int count,
   }) {
     final minCell = minCellWidthOf(context);
-    final maxCell = math.max(maxCellWidth, minCell);
-    if (count <= 0) return (perRow: 1, cell: maxCell);
+    if (count <= 0) return (perRow: 1, cell: width);
     final fit = math.max(1, (width / minCell).floor());
     final rows = (count / fit).ceil();
     final perRow = (count / rows).ceil();
-    return (perRow: perRow, cell: math.min(maxCell, width / perRow));
+    return (perRow: perRow, cell: width / perRow);
   }
 
   @override
@@ -1446,7 +1573,7 @@ class _StatusIconButton extends StatelessWidget {
     final color = !enabled
         ? scheme.onSurfaceVariant.withValues(alpha: .38)
         : highlighted
-        ? scheme.onPrimaryContainer
+        ? scheme.primary
         : scheme.onSurface;
     final animatedIcon = AnimatedSwitcher(
       duration: duration,
@@ -1459,33 +1586,16 @@ class _StatusIconButton extends StatelessWidget {
           ? CupertinoActivityIndicator(
               key: const ValueKey('busy'),
               color: color,
-              radius: 8,
+              radius: 9,
             )
           : Icon(
               icon,
               key: ValueKey(highlighted),
-              size: 20,
+              size: 23,
               color: color,
               fill: highlighted ? AppIcons.filled : AppIcons.outline,
             ),
     );
-    final circle = AnimatedContainer(
-      duration: duration,
-      curve: AppMotion.standard,
-      width: _size,
-      height: _size,
-      decoration: highlighted
-          ? AppSelectionDecoration.of(scheme, radius: AppRadii.pill)
-          : BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadii.pill),
-              color: scheme.surfaceContainerHigh.withValues(alpha: .78),
-              border: Border.all(
-                color: AppEdge.of(theme.brightness, strong: true),
-              ),
-            ),
-      child: Center(child: animatedIcon),
-    );
-    // 标签不省略：格宽按四字标签留足，超长时折成两行。
     final caption = Text(
       label,
       maxLines: 2,
@@ -1500,7 +1610,7 @@ class _StatusIconButton extends StatelessWidget {
             : highlighted
             ? scheme.onSurface
             : scheme.onSurfaceVariant,
-        fontWeight: highlighted ? FontWeight.w600 : FontWeight.w500,
+        fontWeight: highlighted ? FontWeight.w700 : FontWeight.w500,
       ),
     );
     return AppTooltip(
@@ -1512,12 +1622,13 @@ class _StatusIconButton extends StatelessWidget {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(AppRadii.md),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                circle,
-                const SizedBox(height: AppSpacing.xxs + 2),
+                SizedBox(height: 26, child: Center(child: animatedIcon)),
+                const SizedBox(height: 5),
                 caption,
               ],
             ),

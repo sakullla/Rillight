@@ -6,6 +6,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
+import 'package:rillight/app/widgets/long_press_copy.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -67,6 +68,9 @@ class PhoneItemBanner extends StatelessWidget {
   static const bannerKey = Key('phone-detail-banner');
   static const metaKey = Key('phone-detail-meta');
   static const posterKey = Key('phone-detail-poster');
+
+  /// 标题（长按复制）。
+  static const titleKey = Key('phone-detail-title');
   static const backdropKey = Key('phone-detail-backdrop');
 
   /// 承接共享图过渡的那一张（海报卡或背景），参数与来源卡片一致。
@@ -452,12 +456,17 @@ class _BannerTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     // 标题按可用宽度自然换行；200% 字号下也不省略，宁可增高头部。
-    final heading = Text(
-      title,
-      style: phoneDetailTitleStyle(
-        theme,
-        compact: compact,
-        titleLength: title.runes.length,
+    // 长按复制完整标题。
+    final heading = LongPressCopy(
+      key: PhoneItemBanner.titleKey,
+      text: title,
+      child: Text(
+        title,
+        style: phoneDetailTitleStyle(
+          theme,
+          compact: compact,
+          titleLength: title.runes.length,
+        ),
       ),
     );
     final hint = this.hint;
@@ -487,8 +496,10 @@ class _BannerTitle extends StatelessWidget {
           ),
       ],
     );
+    // 剧名点按进剧集页，长按复制剧名。
+    final copyableOverline = LongPressCopy(text: hint, child: overline);
     final overlineWidget = onTap == null
-        ? overline
+        ? copyableOverline
         : AppSurfaceAction(
             key: CatalogKeys.seriesLink,
             onTap: onTap,
@@ -498,7 +509,7 @@ class _BannerTitle extends StatelessWidget {
               child: Align(
                 alignment: Alignment.centerLeft,
                 widthFactor: 1,
-                child: overline,
+                child: copyableOverline,
               ),
             ),
           );
@@ -1253,7 +1264,7 @@ class _EpisodeRow extends StatelessWidget {
         brighten: .04,
         child: Container(
           decoration: BoxDecoration(
-            // 当前集用 primaryContainer 底色加左侧 3px 主色条标记，不描彩色边。
+            // 当前集用 primaryContainer 底色加左侧一枚主色竖胶囊标记，不描彩色边。
             color: current
                 ? scheme.primaryContainer
                 : scheme.surfaceContainerLow.withValues(alpha: .52),
@@ -1265,13 +1276,20 @@ class _EpisodeRow extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: Stack(
             children: [
+              // 竖胶囊上下内收、两端圆头：贴边直条会被卡片圆角削成月牙形。
               if (current)
                 Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
+                  left: 3,
+                  top: 14,
+                  bottom: 14,
                   width: 3,
-                  child: ColoredBox(color: scheme.primary),
+                  child: DecoratedBox(
+                    key: const Key('phone-episode-current-marker'),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
+                    ),
+                  ),
                 ),
               AppSurfaceAction(
                 key: CatalogKeys.episode(episode.id),

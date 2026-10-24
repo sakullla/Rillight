@@ -129,6 +129,65 @@ void main() {
     expect(sourceSelectionAccepts(item), isTrue);
     expect(sourceSelectionAccepts(item, resolution: '1080p'), isFalse);
   });
+
+  test('version labels keep the release name without title or tags', () {
+    final item = MediaItem(
+      id: 'movie',
+      name: '刀剑神域：序列之争',
+      type: 'Movie',
+      mediaSources: [
+        _source(
+          id: 'tagged',
+          name: '刀剑神域：序列之争 (2017) {tmdbid=413594} BDRip VCB Studio',
+          width: 3840,
+          height: 2160,
+          video: 'hevc',
+        ),
+        _source(id: 'title-only', name: '刀剑神域：序列之争', video: 'h264'),
+        _source(
+          id: 'file',
+          name: '/media/movies/SAO.2017.2160p.WEB-DL.H265.HDR-GRP.mkv',
+          width: 3840,
+          height: 2160,
+          video: 'hevc',
+          rangeType: 'HDR10',
+          fps: 59.94,
+        ),
+        _source(id: 'specs-only', name: '4K', width: 3840, height: 2160),
+      ],
+    );
+    final labels = sourceSelectionVersionLabels(item);
+    expect(labels.map((label) => label.release), [
+      'BDRip VCB Studio',
+      null,
+      'SAO.2017.2160p.WEB-DL.H265.HDR-GRP',
+      null,
+    ]);
+    expect(labels[2].specs, containsAllInOrder(['4K', 'HDR', '60fps']));
+    expect(labels[0].specs, isNot(contains('24fps')));
+  });
+
+  test('episode release names drop the series title', () {
+    final item = MediaItem(
+      id: 'episode',
+      name: '第 12 集',
+      type: 'Episode',
+      seriesName: '兰香如故',
+      mediaSources: [
+        _source(
+          id: 'episode',
+          name: '兰香如故 S01E12 2160p.HDR.60FPS',
+          width: 3840,
+          height: 2160,
+          video: 'hevc',
+        ),
+      ],
+    );
+    expect(
+      sourceSelectionVersionLabels(item).single.release,
+      'S01E12 2160p.HDR.60FPS',
+    );
+  });
 }
 
 String? _subtitleOf(List<_Subtitle> subtitles) {
@@ -150,6 +209,7 @@ ItemMediaSource _source({
   String? rangeType,
   String? audio,
   int? audioChannels,
+  double? fps,
   List<_Subtitle> subtitles = const [],
 }) {
   return ItemMediaSource(
@@ -167,6 +227,7 @@ ItemMediaSource _source({
           height: height,
           videoRange: range,
           videoRangeType: rangeType,
+          averageFrameRate: fps,
         ),
       if (audio != null)
         ItemMediaStream(

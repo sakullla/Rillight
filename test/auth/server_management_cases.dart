@@ -730,6 +730,39 @@ void main() {
   );
 
   testWidgets(
+    'a failed entry says the connection failed, never that something was not saved',
+    (tester) async {
+      final auth = controller();
+      addTearDown(auth.dispose);
+      await tester.runAsync(() async {
+        await auth.connect(
+          address: second.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+      });
+      final other = auth.savedServers.firstWhere(
+        (saved) => saved.id != auth.session!.server.id,
+      );
+      // An unclassified failure (HTTP 500 from an upstream proxy).
+      second.publicInfoStatus = 500;
+      second.publicInfoRawBody = 'upstream timeout';
+      await pumpServerSelection(tester, auth, phone: true);
+      await serverUiTap(tester, Key('server-enter-${other.id}'));
+      expect(find.text('连接失败，原连接已保留。请检查线路或重新登录。'), findsOneWidget);
+      expect(find.text('未保存，请检查输入或连接后重试。'), findsNothing);
+      expect(find.byKey(Key('server-retry-${other.id}')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
     'server card marks the current server and tiers its failure actions',
     (tester) async {
       final saved = _saved('one', '家庭影院', ['http://capture-mirror.test:8096']);

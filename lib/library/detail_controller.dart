@@ -16,6 +16,7 @@ class DetailController extends ChangeNotifier {
     required this.itemId,
     this.seasonId,
     this.initialEpisodeId,
+    this.initialMediaSourceId,
   }) : _sourceClient = client,
        _hasExplicitSeason = seasonId != null,
        _cache = cache,
@@ -29,7 +30,25 @@ class DetailController extends ChangeNotifier {
   DetailRepository repository;
   final String itemId;
   final String? initialEpisodeId;
+
+  /// 路由要求预选的版本（来自片源选择）。条目确有这个版本时才采用，
+  /// 否则仍是第一个版本。
+  final String? initialMediaSourceId;
   final bool _hasExplicitSeason;
+
+  /// 当前选中的版本是路由预选的那个（而不是默认的第一个）。
+  bool get mediaSourceFromRoute =>
+      initialMediaSourceId != null && mediaSourceId == initialMediaSourceId;
+
+  String? _defaultSource(MediaItem value) {
+    final preferred = initialMediaSourceId;
+    if (preferred != null &&
+        value.mediaSources.any((source) => source.id == preferred)) {
+      return preferred;
+    }
+    return value.mediaSources.firstOrNull?.id;
+  }
+
   MediaItem? item;
 
   void applyItem(MediaItem next) {
@@ -113,7 +132,7 @@ class DetailController extends ChangeNotifier {
           }
           if (cached != null && item == null) {
             item = cached;
-            mediaSourceId ??= cached.mediaSources.firstOrNull?.id;
+            mediaSourceId ??= _defaultSource(cached);
             loading = false;
             notifyListeners();
             if (cached.isSeries) unawaited(loadSeasons());
@@ -127,7 +146,7 @@ class DetailController extends ChangeNotifier {
       final result = await network;
       if (_disposed || revision != _revision || identity != _identity) return;
       item = result;
-      mediaSourceId ??= result.mediaSources.firstOrNull?.id;
+      mediaSourceId ??= _defaultSource(result);
       loading = false;
       notifyListeners();
       if (result.isSeries && _seasonsLoadRevision != revision) {

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -235,10 +236,13 @@ class _WholeCardStripState extends State<WholeCardStrip> {
             itemCount: pages,
             padEnds: false,
             itemBuilder: (context, page) {
-              final start = page * perPage;
-              final end = start + perPage > widget.itemCount
-                  ? widget.itemCount
-                  : start + perPage;
+              // 最后一页不足一页时向前补齐：仍是一整页卡片、左对齐，
+              // 不会只剩一张卡孤零零靠在右边、左侧大片空白。
+              var start = page * perPage;
+              if (start + perPage > widget.itemCount) {
+                start = math.max(0, widget.itemCount - perPage);
+              }
+              final end = math.min(start + perPage, widget.itemCount);
               final children = <Widget>[];
               for (var index = start; index < end; index++) {
                 if (children.isNotEmpty) {
@@ -246,15 +250,9 @@ class _WholeCardStripState extends State<WholeCardStrip> {
                 }
                 children.add(widget.itemBuilder(context, index));
               }
-              final alignEnd = pages > 1 && page == pages - 1;
               return Padding(
                 padding: EdgeInsets.symmetric(horizontal: widget.margin),
-                child: Row(
-                  mainAxisAlignment: alignEnd
-                      ? MainAxisAlignment.end
-                      : MainAxisAlignment.start,
-                  children: children,
-                ),
+                child: Row(children: children),
               );
             },
           ),

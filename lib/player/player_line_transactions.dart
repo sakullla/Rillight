@@ -341,6 +341,7 @@ extension PlayerLineTransactions on PlayerController {
     _confirmLine = null;
     switchConfirmation = null;
     pendingLineId = null;
+    switchingLineId = null;
     if (isRecovering || _lineTransactionOpening || loading) {
       _operations.invalidate();
       _trackNativeRetirement(
@@ -461,6 +462,7 @@ extension PlayerLineTransactions on PlayerController {
     playbackLineFailure = null;
     _confirmLine = null;
     switchConfirmation = null;
+    switchingLineId = null;
     try {
       current();
       if (selection.isAutomatic) {
@@ -507,6 +509,9 @@ extension PlayerLineTransactions on PlayerController {
         _emit();
         return;
       }
+      // 预检（地址、身份、条目、播放信息）可能要几秒：先标出正在切的线路。
+      switchingLineId = line.id;
+      _emit();
       await _attemptPlaybackLine(
         line,
         selection,
@@ -517,12 +522,23 @@ extension PlayerLineTransactions on PlayerController {
       );
     } catch (failure) {
       if (revision == _lineRevision && !_disposed && !_revoked) {
-        playbackLineFailure = _lineFailureText(failure);
+        // 需要用户确认时确认面板本身就是提示；取消后也不留「请确认」。
+        final awaitingChoice =
+            switchConfirmation != null &&
+            failure is PlaybackRecoveryFailure &&
+            failure.kind == PlaybackRecoveryFailureKind.needsSelection;
+        playbackLineFailure = awaitingChoice ? null : _lineFailureText(failure);
         _emit();
       }
       rethrow;
     } finally {
-      if (revision == _lineRevision) _lineSelectionDeadlineUtc = null;
+      if (revision == _lineRevision) {
+        _lineSelectionDeadlineUtc = null;
+        if (switchingLineId != null) {
+          switchingLineId = null;
+          _emit();
+        }
+      }
       if (identical(_lineBudget, budget) && _confirmLine == null) {
         _lineBudget = null;
         _attachRecoveryBudget(null);
@@ -832,9 +848,9 @@ extension PlayerLineTransactions on PlayerController {
       (s) => s.id == previous.mediaSource.id,
     );
     if (targets.length != 1) {
-      throw const PlaybackRecoveryFailure(
-        PlaybackRecoveryFailureKind.needsSelection,
-      );
+      // 这条线路取不到同一版本：没有可让用户确认的方案，按连接失败处理，
+      // 自动模式会继续尝试下一条线路。
+      throw const PlaybackRecoveryFailure(PlaybackRecoveryFailureKind.network);
     }
     final target = targets.single;
     // Same stable version is necessary, but a changed timeline is not equivalent.
@@ -849,13 +865,8 @@ extension PlayerLineTransactions on PlayerController {
       subtitleIndex: subtitleStreamIndex,
       sameVersion: timeline,
     );
-    if (secondarySubtitleStreamIndex != null &&
-        target.streamByIndex(secondarySubtitleStreamIndex!)?.isSubtitle !=
-            true) {
-      throw const PlaybackRecoveryFailure(
-        PlaybackRecoveryFailureKind.needsSelection,
-      );
-    }
+    // 次字幕是尽力而为的附加槽：目标线路没有这条轨时开流后自动放弃
+    // （见 _restoreSessionSubtitleSlots），不拦下整次换线。
     return plan;
   }
 
@@ -1059,13 +1070,8 @@ extension PlayerLineTransactions on PlayerController {
       );
       current();
       _requireOpenedLine(operation, current);
-      if (oldSecondary != secondarySubtitleStreamIndex ||
-          oldPrimaryFile != primarySubtitleFileId ||
-          oldSecondaryFile != secondarySubtitleFileId) {
-        throw const PlaybackRecoveryFailure(
-          PlaybackRecoveryFailureKind.needsSelection,
-        );
-      }
+      // 次字幕与导入字幕槽在新线路上恢复失败时只放弃该槽（与换源一致），
+      // 主画面、音轨、主字幕已经严格恢复，不再为附加槽回滚整次换线。
       await budget.run(
         () => _persistPlaybackLine(
           line.id,

@@ -2,17 +2,17 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/playback_runtime_cases.dart' as case0;
-import '../app/hero_palette_overlay_cases.dart' as case1;
-import '../app/update_verification_ui_cases.dart' as case2;
-import '../catalog/catalog_browse_cases.dart' as case3;
-import '../home/shelf_hover_clip_cases.dart' as case4;
-import '../mobile/motion_behaviors_cases.dart' as case5;
-import '../mobile/phone_player_interaction_cases.dart' as case6;
+import '../app/android_bootstrap_cases.dart' as case1;
+import '../catalog/catalog_browse_cases.dart' as case2;
+import '../home/hero_playback_actions_cases.dart' as case3;
+import '../library/season_switcher_cases.dart' as case4;
+import '../mobile/phone_detail_redesign_cases.dart' as case5;
+import '../mobile/search_cached_refresh_cases.dart' as case6;
 import '../mobile/tv_server_management_cases.dart' as case7;
-import '../player/player_window_cases.dart' as case8;
-import '../tv/tv_flow_cases.dart' as case9;
+import '../tv/tv_lan_pair_cases.dart' as case8;
+import '../tv/tv_shell_nav_cases.dart' as case9;
 import '../widgets/app_button_cases.dart' as case10;
-import '../widgets/poster_card_cases.dart' as case11;
+import '../widgets/liquid_glass_cases.dart' as case11;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,15 +21,15 @@ void main() {
     'aggregation/playback_runtime_test.dart [part 3]',
     () => case0.mainShard(2, 3),
   );
-  group('app/hero_palette_overlay_test.dart', case1.main);
-  group('app/update_verification_ui_test.dart', case2.main);
-  group('catalog/catalog_browse_test.dart', case3.main);
-  group('home/shelf_hover_clip_test.dart', case4.main);
-  group('mobile/motion_behaviors_test.dart', case5.main);
-  group('mobile/phone_player_interaction_test.dart', case6.main);
+  group('app/android_bootstrap_test.dart', case1.main);
+  group('catalog/catalog_browse_test.dart', case2.main);
+  group('home/hero_playback_actions_test.dart', case3.main);
+  group('library/season_switcher_test.dart', case4.main);
+  group('mobile/phone_detail_redesign_test.dart', case5.main);
+  group('mobile/search_cached_refresh_test.dart', case6.main);
   group('mobile/tv_server_management_test.dart', case7.main);
-  group('player/player_window_test.dart', case8.main);
-  group('tv/tv_flow_test.dart', case9.main);
+  group('tv/tv_lan_pair_test.dart [part 1]', () => case8.mainShard(0, 3));
+  group('tv/tv_shell_nav_test.dart', case9.main);
   group('widgets/app_button_test.dart', case10.main);
-  group('widgets/poster_card_test.dart', case11.main);
+  group('widgets/liquid_glass_test.dart', case11.main);
 }

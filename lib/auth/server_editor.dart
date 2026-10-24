@@ -146,7 +146,15 @@ class ServerEditorState extends State<ServerEditor> {
       await widget.auth.refreshServers();
       if (mounted) (widget.onSignedOut ?? widget.onSaved)();
     } catch (failure) {
-      if (mounted) setState(() => error = serverOperationFailure(l, failure));
+      if (mounted) {
+        setState(
+          () => error = serverOperationFailure(
+            l,
+            failure,
+            fallback: l.serversActionFailed,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }

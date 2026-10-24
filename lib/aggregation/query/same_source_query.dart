@@ -33,12 +33,22 @@ class EpisodeComparison {
     this.lookup, {
     this.cursor = 0,
     this.total,
+    this.item,
+    this.detailLoading = false,
   });
   final SourceReference target;
   final SourceQueryStatus status;
   final EpisodeLookup lookup;
   final int cursor;
   final int? total;
+
+  /// Detail DTO of the confirmed episode, carrying its versions and streams so
+  /// the comparison can show them like a movie. Null while loading, or when
+  /// the detail request failed; the confirmed lookup stays usable either way.
+  final MediaItem? item;
+
+  /// True while [item] is being read for a confirmed episode.
+  final bool detailLoading;
 }
 
 /// Detail-owned query; never mutates or depends on global search state.
@@ -283,12 +293,7 @@ class SameSourceQueryController extends ChangeNotifier {
           if (lookup.status == EpisodeLookupStatus.confirmed ||
               lookup.status == EpisodeLookupStatus.conflict ||
               lookup.status == EpisodeLookupStatus.ambiguous) {
-            _episodes[target.reference] = EpisodeComparison(
-              target.reference,
-              SourceQueryStatus.available,
-              lookup,
-            );
-            if (owns()) notifyListeners();
+            _publishEpisode(target.reference, lookup, permit, owns);
             return;
           }
         }
@@ -310,11 +315,8 @@ class SameSourceQueryController extends ChangeNotifier {
         available: known.available,
         complete: known.complete,
       );
-      _episodes[target.reference] = EpisodeComparison(
-        target.reference,
-        SourceQueryStatus.available,
-        lookup,
-      );
+      _publishEpisode(target.reference, lookup, permit, owns);
+      return;
     } catch (error) {
       if (!owns()) return;
       _episodes[target.reference] = EpisodeComparison(
@@ -324,6 +326,61 @@ class SameSourceQueryController extends ChangeNotifier {
       );
     }
     if (owns()) notifyListeners();
+  }
+
+  /// Publishes a finished lookup. A confirmed episode is openable at once;
+  /// its versions are read afterwards so the row never waits on them, and a
+  /// failed detail request only leaves the row without version details.
+  void _publishEpisode(
+    SourceReference target,
+    EpisodeLookup lookup,
+    OperationPermit permit,
+    bool Function() owns,
+  ) {
+    final found = lookup.source;
+    final details =
+        lookup.status == EpisodeLookupStatus.confirmed &&
+        found != null &&
+        permit.isValid;
+    _episodes[target] = EpisodeComparison(
+      target,
+      SourceQueryStatus.available,
+      lookup,
+      detailLoading: details,
+    );
+    if (!owns()) return;
+    notifyListeners();
+    if (!details) return;
+    void settle(MediaItem? item) {
+      if (!owns()) return;
+      final current = _episodes[target];
+      if (current == null || !identical(current.lookup, lookup)) return;
+      _episodes[target] = EpisodeComparison(
+        target,
+        current.status,
+        lookup,
+        cursor: current.cursor,
+        total: current.total,
+        item: item,
+      );
+      notifyListeners();
+    }
+
+    unawaited(
+      permit
+          .dispatch((client) => client.getItem(found.reference.itemId))
+          .timeout(query.timeout)
+          .then<void>(
+            (item) => settle(
+              permit.isValid &&
+                      item.id == found.reference.itemId &&
+                      item.isEpisode
+                  ? item
+                  : null,
+            ),
+            onError: (Object _) => settle(null),
+          ),
+    );
   }
 
   /// Episodes whose season index is already known on [episode]. Does not page

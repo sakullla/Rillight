@@ -13,7 +13,6 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/ui/app_icons.dart';
-import 'package:rillight/app/widgets/browse_menu_button.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/top_bar_backdrop.dart';
@@ -219,16 +218,21 @@ void main() {
     expect(titleOpacity(), 1);
   });
 
-  testWidgets('browse menu appears off browse pages only', (tester) async {
+  testWidgets('only home and aggregation carry top-bar browse navigation', (
+    tester,
+  ) async {
+    const browse = Key('app-shell-browse');
+    const aggregation = Key('app-shell-aggregation');
     await pump(tester, AppRoutes.home);
-    expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
+    expect(find.byKey(aggregation), findsOneWidget);
     await pump(tester, AppRoutes.aggregation);
-    expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
+    expect(find.byKey(aggregation), findsOneWidget);
+    // 片库、详情页顶栏只留 返回/搜索/账户，不再有「浏览」下拉。
     await pump(tester, AppRoutes.library('movies'));
-    expect(find.byKey(BrowseMenuButton.buttonKey), findsOneWidget);
-    // 详情/季页顶栏只留 返回/搜索/账户。
+    expect(find.byKey(browse), findsNothing);
+    expect(find.byKey(aggregation), findsNothing);
     await pump(tester, AppRoutes.item('movie-1'));
-    expect(find.byKey(BrowseMenuButton.buttonKey), findsNothing);
+    expect(find.byKey(browse), findsNothing);
   });
 
   testWidgets('closing search returns focus to the search trigger', (

@@ -24,6 +24,8 @@ import '../player/player_host_command.dart';
 import '../player/player_window_host.dart';
 import 'detail_source_scope.dart';
 import 'episode_mapping_dialog.dart';
+import 'item_format.dart';
+import '../app/widgets/long_press_copy.dart';
 
 class _DialogKeyboard extends StatelessWidget {
   const _DialogKeyboard({required this.child, this.autofocus = true});
@@ -46,148 +48,214 @@ class _DialogKeyboard extends StatelessWidget {
   );
 }
 
-class _SourceSelectionFrame extends StatelessWidget {
-  const _SourceSelectionFrame({
+/// 片源选择的外框。桌面/TV 是居中对话框，手机是贴底弹层；两者结构一致：
+/// 固定页眉（标题、作品与查找状态、关闭）、固定筛选条、可滚动的来源列表，
+/// 以及可选页脚（TV 的关闭、密码页的取消）。
+class _SourcePanel extends StatelessWidget {
+  const _SourcePanel({
+    required this.sheet,
     required this.title,
     required this.scroll,
     required this.content,
-    required this.footer,
-    this.caption,
+    this.subtitle,
+    this.status,
+    this.toolbar,
+    this.footer,
+    this.onClose,
+    this.closeLabel,
   });
 
+  final bool sheet;
   final String title;
   final ScrollController scroll;
   final Widget content;
-  final Widget footer;
-  final Widget? caption;
+  final Widget? subtitle;
+  final Widget? status;
+  final Widget? toolbar;
+  final Widget? footer;
+
+  /// 页眉右上角的关闭按钮；TV 用页脚按钮代替，以便方向键能走到。
+  final VoidCallback? onClose;
+  final String? closeLabel;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final hairline = BorderSide(color: scheme.outlineVariant);
-    return AppModalFrame(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 640,
-          maxHeight: MediaQuery.sizeOf(context).height - 48,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-              decoration: BoxDecoration(border: Border(bottom: hairline)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    key: const Key('source-selection-title'),
-                    style: theme.textTheme.titleLarge,
+    final hairline = Container(height: 1, color: scheme.outlineVariant);
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        sheet ? 8 : 18,
+        onClose == null ? 20 : 10,
+        toolbar == null ? 14 : 10,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  key: const Key('source-selection-title'),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
-                  if (caption != null) ...[const SizedBox(height: 6), caption!],
-                ],
-              ),
+                ),
+                if (subtitle != null) ...[const SizedBox(height: 4), subtitle!],
+                if (status != null) ...[const SizedBox(height: 8), status!],
+              ],
             ),
-            Flexible(
-              child: SingleChildScrollView(
-                key: const Key('source-selection-content'),
-                controller: scroll,
-                primary: false,
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: content,
-              ),
+          ),
+          if (onClose != null)
+            AppIconButton(
+              key: const Key('source-selection-close'),
+              icon: const Icon(AppIcons.close),
+              tooltip: closeLabel,
+              onPressed: onClose,
             ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-              decoration: BoxDecoration(border: Border(top: hairline)),
-              child: footer,
-            ),
-          ],
-        ),
+        ],
       ),
     );
-  }
-}
-
-/// 手机底部弹层的框架：顶部拖拽条、标题区、可滚内容与贴底页脚，
-/// 结构与 [_SourceSelectionFrame] 一一对应，只是外框换成贴底圆角弹层。
-class _SourceSelectionSheetFrame extends StatelessWidget {
-  const _SourceSelectionSheetFrame({
-    required this.title,
-    required this.scroll,
-    required this.content,
-    required this.footer,
-    this.caption,
-  });
-
-  final String title;
-  final ScrollController scroll;
-  final Widget content;
-  final Widget footer;
-  final Widget? caption;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final hairline = BorderSide(color: scheme.outlineVariant);
-    return Column(
+    final body = Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 10),
-        Center(
-          child: Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: scheme.onSurfaceVariant.withValues(alpha: .32),
-              borderRadius: BorderRadius.circular(AppRadii.pill),
+        if (sheet) ...[
+          const SizedBox(height: 10),
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: scheme.onSurfaceVariant.withValues(alpha: .32),
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+              ),
             ),
           ),
-        ),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
-          decoration: BoxDecoration(border: Border(bottom: hairline)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                key: const Key('source-selection-title'),
-                style: theme.textTheme.titleLarge,
-              ),
-              if (caption != null) ...[const SizedBox(height: 6), caption!],
-            ],
-          ),
-        ),
+        ],
+        header,
+        if (toolbar != null)
+          Padding(padding: const EdgeInsets.only(bottom: 12), child: toolbar),
+        hairline,
         Flexible(
           child: SingleChildScrollView(
             key: const Key('source-selection-content'),
             controller: scroll,
             primary: false,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              14,
+              16,
+              footer == null && sheet
+                  ? 16 + MediaQuery.paddingOf(context).bottom
+                  : 16,
+            ),
             child: content,
           ),
         ),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-          decoration: BoxDecoration(border: Border(top: hairline)),
-          child: SafeArea(top: false, child: footer),
+        if (footer != null) ...[
+          hairline,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: sheet ? SafeArea(top: false, child: footer!) : footer,
+          ),
+        ],
+      ],
+    );
+    if (sheet) {
+      // 结果陆续到达时弹层不从一条缝跳成整屏：先占半屏，内容多了再长高。
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.sizeOf(context).height * .5,
+        ),
+        child: body,
+      );
+    }
+    return AppModalFrame(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 680,
+          maxHeight: MediaQuery.sizeOf(context).height - 48,
+        ),
+        child: body,
+      ),
+    );
+  }
+}
+
+/// 页眉里的查找状态：查询进行时带一个小转圈，结束后只剩文字。
+class _StatusLine extends StatelessWidget {
+  const _StatusLine({required this.text, required this.loading});
+  final String text;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Row(
+      children: [
+        if (loading) ...[
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CupertinoActivityIndicator(radius: 7),
+          ),
+          const SizedBox(width: 8),
+        ],
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
         ),
       ],
     );
   }
 }
 
-/// 查询中占位的来源骨架卡：与 [_SourceCard] 同外形（服务器标记圆块 +
-/// 两行文字），骨架到结果的切换不跳动。
+/// 列表里的分区标题：「正在使用」「其他服务器 3」「需要解锁 2」。
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label, {this.count, this.top = 0});
+  final String label;
+  final int? count;
+  final double top;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final style = theme.textTheme.labelMedium?.copyWith(
+      color: muted,
+      fontWeight: FontWeight.w600,
+      letterSpacing: .2,
+    );
+    return Padding(
+      padding: EdgeInsets.fromLTRB(4, top, 4, 8),
+      child: Row(
+        children: [
+          Text(label, style: style),
+          if (count != null) ...[
+            const SizedBox(width: 6),
+            Text(
+              '$count',
+              style: style?.copyWith(color: muted.withValues(alpha: .7)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 查询中占位的来源骨架卡：与 [_SourceCard] 同外形（服务器标记 + 标题行 +
+/// 一组版本规格），骨架到结果的切换不跳动。
 class _SourceCardSkeleton extends StatelessWidget {
   const _SourceCardSkeleton();
 
@@ -196,7 +264,7 @@ class _SourceCardSkeleton extends StatelessWidget {
     final scheme = AppUiTheme.of(context).colorScheme;
     final animate = !MediaQuery.disableAnimationsOf(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHigh,
@@ -206,39 +274,74 @@ class _SourceCardSkeleton extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
+          padding: const EdgeInsets.all(14),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SkeletonBlock(
-                width: 36,
-                height: 36,
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                animated: animate,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SkeletonBlock(width: 96, height: 14, animated: animate),
-                    const SizedBox(height: 8),
-                    SkeletonBlock(
-                      width: double.infinity,
-                      height: 12,
-                      animated: animate,
+              Row(
+                children: [
+                  SkeletonBlock(
+                    width: 40,
+                    height: 40,
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                    animated: animate,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBlock(
+                          width: 112,
+                          height: 14,
+                          animated: animate,
+                        ),
+                        const SizedBox(height: 8),
+                        SkeletonBlock(
+                          width: 160,
+                          height: 11,
+                          animated: animate,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 6),
-                    SkeletonBlock(width: 168, height: 12, animated: animate),
-                  ],
-                ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 14),
+              _VersionSkeleton(animate: animate),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+class _VersionSkeleton extends StatelessWidget {
+  const _VersionSkeleton({required this.animate});
+  final bool animate;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SkeletonBlock(width: double.infinity, height: 12, animated: animate),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          for (final width in const [36.0, 44.0, 52.0, 60.0]) ...[
+            SkeletonBlock(
+              width: width,
+              height: 20,
+              borderRadius: BorderRadius.circular(6),
+              animated: animate,
+            ),
+            const SizedBox(width: 6),
+          ],
+        ],
+      ),
+    ],
+  );
 }
 
 /// What a detail page needs to render the source selection entry in its own
@@ -372,8 +475,11 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
         // Desktop overlays must cover the shell header. TV keeps its route-local
         // navigator so the underlying D-pad focus scope becomes inactive.
         useRootNavigator: !PresentationScope.of(context).isTv,
-        builder: (context) =>
-            _SourceSelectionDialog(controller: controller!, episode: episode),
+        builder: (context) => _SourceSelectionDialog(
+          controller: controller!,
+          episode: episode,
+          current: dto,
+        ),
       );
     } catch (_) {
       if (mounted && stillHere()) {
@@ -465,6 +571,7 @@ class _SourceSelectionDialog extends StatefulWidget {
   const _SourceSelectionDialog({
     required this.controller,
     this.episode,
+    this.current,
     this.phoneSheet = false,
     this.runtime,
     this.scopedOrigin,
@@ -474,6 +581,10 @@ class _SourceSelectionDialog extends StatefulWidget {
   });
   final SameSourceQueryController controller;
   final EpisodeSource? episode;
+
+  /// The item being watched (movie or the episode itself) with its versions,
+  /// shown as the reference row.
+  final MediaItem? current;
 
   /// 手机端走底部弹层：入口点击后立刻弹层，预取在弹层内完成，此时
   /// [runtime]/[scopedOrigin]/[itemId]/[selectedGeneration]/[stillHere]
@@ -493,6 +604,9 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   SameSourceQueryController get controller => widget.controller;
   EpisodeSource? get episode => widget.episode ?? _resolvedEpisode;
   EpisodeSource? _resolvedEpisode;
+  MediaItem? get current => widget.current ?? _resolvedCurrent;
+  MediaItem? _resolvedCurrent;
+  Map<SourceReference, EpisodeComparison> _episodeIndex = const {};
   SavedServer? _passwordTarget;
   ServerEntryTicket? _pendingEntry;
   bool _busy = false;
@@ -553,6 +667,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         return;
       }
       _resolvedEpisode = episode;
+      _resolvedCurrent = dto;
       final item = QueryItem(
         SourceReference(account: origin.source.account, itemId: current.id),
         origin.libraryId,
@@ -669,6 +784,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   Future<void> _openTarget(
     QueryItem item, {
     required SourceReference row,
+    String? version,
   }) async {
     if (_busy || controller.origin == null) return;
     final runtime = PlayerScope.of(context).runtime;
@@ -740,7 +856,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       }
       overlay?.close();
       router.go(
-        '/item/${Uri.encodeComponent(target.source.itemId)}',
+        '/item/${Uri.encodeComponent(target.source.itemId)}'
+        '${version == null ? '' : '?version=${Uri.encodeQueryComponent(version)}'}',
         extra: destination,
       );
     } catch (_) {
@@ -770,16 +887,22 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     }
   }
 
-  EpisodeComparison? _episodeResult(SourceComparison comparison) {
-    for (final item in controller.episodes) {
-      if (item.target == comparison.source.reference) return item;
-    }
-    return null;
-  }
+  EpisodeComparison? _episodeResult(SourceComparison comparison) =>
+      _episodeIndex[comparison.source.reference];
 
   bool _episodeLookupFailed(EpisodeComparison result) =>
       result.status != SourceQueryStatus.available ||
       result.lookup.status == EpisodeLookupStatus.queryFailed;
+
+  /// The DTO whose versions represent this row: the matched episode once its
+  /// details arrived, otherwise the row's own item (movie or series).
+  MediaItem _versionsOf(SourceComparison comparison) {
+    if (episode != null && comparison.source.item.isSeries) {
+      final detail = _episodeResult(comparison)?.item;
+      if (detail != null) return detail;
+    }
+    return comparison.source.item;
+  }
 
   /// Confirmed series or movie. From an episode, the target is that episode
   /// once it matches. A missing episode, or one that is still unmatched,
@@ -822,6 +945,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     return null;
   }
 
+  /// 单集模式下这一行的查找状态；找到并确认的一集不再额外提示，
+  /// 直接显示那一集的版本。
   Widget? _episodeStatus(AppLocalizations l, SourceComparison comparison) {
     final current = episode;
     if (current == null ||
@@ -830,26 +955,77 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       return null;
     }
     final result = _episodeResult(comparison);
-    final muted = TextStyle(
-      color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-    );
     if (result == null || result.status == SourceQueryStatus.loading) {
-      return Text(l.sourceSelectionFindingEpisode, style: muted);
+      return _RowNote(text: l.sourceSelectionFindingEpisode, loading: true);
     }
     if (_episodeLookupFailed(result)) {
       return AppButton(
         onPressed: _busy ? null : () => _lookupEpisode(comparison.source),
         variant: AppButtonVariant.tinted,
-        child: Text(l.aggregationEpisodeFailed),
+        minimumSize: const Size(0, 36),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(AppIcons.refresh, size: 16),
+            const SizedBox(width: 6),
+            Text(l.aggregationEpisodeFailed),
+          ],
+        ),
       );
     }
     if (result.lookup.status == EpisodeLookupStatus.missing) {
-      return Text(l.aggregationMissingEpisode, style: muted);
+      return _RowNote(text: l.aggregationMissingEpisode, icon: AppIcons.info);
     }
     if (result.lookup.status == EpisodeLookupStatus.uncertain) {
-      return Text(l.sourceSelectionFindingEpisode, style: muted);
+      return _RowNote(
+        text: l.sourceSelectionFindingEpisode,
+        icon: AppIcons.search,
+      );
     }
     return null;
+  }
+
+  /// 卡片副标题。同名同作品不再重复片名；待核对的候选带上片名与年份，
+  /// 单集模式显示对上的那一集，最后是这台服务器上的观看记录。
+  String? _cardMeta(AppLocalizations l, SourceComparison comparison) {
+    final item = comparison.source.item;
+    final origin = controller.origin!.item;
+    final parts = <String>[];
+    final differs =
+        item.name.trim().toLowerCase() != origin.name.trim().toLowerCase();
+    if (!comparison.decision.confirmed || differs) {
+      final year = item.productionYear;
+      parts.add(
+        year == null || comparison.decision.confirmed
+            ? item.name
+            : '${item.name} ($year)',
+      );
+    }
+    DateTime? watched = item.userData.lastPlayedDate;
+    if (episode != null && item.isSeries) {
+      final result = _episodeResult(comparison);
+      final detail = result?.item;
+      final found = result?.lookup.status == EpisodeLookupStatus.confirmed
+          ? result?.lookup.source
+          : null;
+      if (detail != null) {
+        final label = continueWatchingSubtitle(detail);
+        if (label.isNotEmpty) parts.add(label);
+        watched = detail.userData.lastPlayedDate;
+      } else if (found != null) {
+        final code = found.season != null && found.episode != null
+            ? 'S${found.season}E${found.episode}'
+            : null;
+        final name = found.name?.trim();
+        final label = [?code, if (name != null && name.isNotEmpty) name];
+        if (label.isNotEmpty) parts.add(label.join(' · '));
+      }
+    } else if (item.isSeries && (item.childCount ?? 0) > 0) {
+      parts.add(l.cardSeasonCount(item.childCount!));
+    }
+    final seen = _watchedLabel(l, watched);
+    if (seen != null) parts.add(seen);
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 
   Widget _sourceCard(
@@ -860,23 +1036,35 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   ) {
     final openItem = _openableItem(comparison);
     final reference = comparison.source.reference;
+    final faces = _versionFaces(_versionsOf(comparison));
+    final prefix = _versionPrefix(reference);
+    final result = episode != null && comparison.source.item.isSeries
+        ? _episodeResult(comparison)
+        : null;
     return _SourceCard(
       cardKey: ValueKey(
         'source-selection-item-${reference.account.configuredServerId}-${reference.itemId}',
       ),
       serverName: serverName(reference.account.configuredServerId) ?? '',
-      meta: _sourceMeta(l, comparison.source.item),
+      meta: _cardMeta(l, comparison),
       caution: comparison.decision.confirmed
           ? null
           : l.sourceSelectionCheckDetails,
-      faces: _versionFaces(comparison.source.item),
-      badges: [
-        for (var i = 0; i < _versionFaces(comparison.source.item).length; i++)
-          badges[_versionKey(comparison, i)],
-      ],
+      faces: faces,
+      badges: [for (var i = 0; i < faces.length; i++) badges['$prefix:$i']],
+      versionsLoading: result?.detailLoading == true,
       onOpen: _busy || openItem == null
           ? null
           : () => _openTarget(openItem, row: reference),
+      // 多个版本时点哪个版本，就带着它打开详情并预选；只有一个版本时没有
+      // 可选的，按默认打开。版本必须属于将要打开的那个条目。
+      onOpenVersion:
+          _busy ||
+              openItem == null ||
+              faces.length < 2 ||
+              _versionsOf(comparison).id != openItem.reference.itemId
+          ? null
+          : (id) => _openTarget(openItem, row: reference, version: id),
       lookup: _episodeStatus(l, comparison),
       error: _rowErrors[reference],
     );
@@ -987,7 +1175,9 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     );
   }
 
-  Widget _filterBar(
+  /// 固定在页眉下方的筛选条。只有至少两种取值的维度才出现；
+  /// 没有可筛的维度时返回 null，页眉下不留空行。
+  Widget? _filterBar(
     AppLocalizations l, {
     required List<String> resolutions,
     required List<String> ranges,
@@ -1052,59 +1242,81 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
           key: const Key('source-selection-filter-clear'),
           onPressed: _busy ? null : () => setState(_clearFilters),
           variant: AppButtonVariant.plain,
-          minimumSize: const Size(0, 44),
+          minimumSize: const Size(0, 36),
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(l.sourceSelectionClearFilters),
         ),
     ];
-    if (controls.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: SizedBox(
-        key: const Key('source-selection-filters'),
-        height: 44,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          primary: false,
-          child: Row(children: controls),
-        ),
+    if (controls.isEmpty) return null;
+    return SizedBox(
+      key: const Key('source-selection-filters'),
+      height: 36,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        primary: false,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(children: controls),
       ),
     );
   }
 
-  Widget _closeButton() => AppButton(
-    key: const Key('source-selection-close'),
-    autofocus: PresentationScope.of(context).isTv,
-    onPressed: () => Navigator.pop(context),
-    variant: AppButtonVariant.plain,
-    child: const Text('关闭'),
-  );
+  void _close() => Navigator.pop(context);
 
-  /// 桌面/TV 走居中对话框；手机底部弹层走带拖拽条的弹层框架，两者共用
-  /// 标题、内容与页脚，键盘快捷键只保留在桌面/TV。
+  /// 桌面/TV 走居中对话框；手机走贴底弹层，两者共用页眉、筛选条与列表。
+  /// TV 的关闭放在页脚，遥控器向下就能走到；其余平台放在页眉右上角，
+  /// 键盘快捷键只保留在桌面/TV。
   Widget _frame({
     required String title,
     required Widget content,
-    required Widget footer,
-    Widget? caption,
+    Widget? subtitle,
+    Widget? status,
+    Widget? toolbar,
+    Widget? footer,
   }) {
-    if (widget.phoneSheet) {
-      return _SourceSelectionSheetFrame(
-        title: title,
-        scroll: _scroll,
-        content: content,
-        footer: footer,
-        caption: caption,
-      );
-    }
-    return _DialogKeyboard(
-      autofocus: !PresentationScope.of(context).isTv,
-      child: _SourceSelectionFrame(
-        title: title,
-        scroll: _scroll,
-        content: content,
-        footer: footer,
-        caption: caption,
+    final l = AppLocalizations.of(context);
+    final tv = PresentationScope.of(context).isTv;
+    final panel = _SourcePanel(
+      sheet: widget.phoneSheet,
+      title: title,
+      scroll: _scroll,
+      content: content,
+      subtitle: subtitle,
+      status: status,
+      toolbar: toolbar,
+      onClose: tv ? null : _close,
+      closeLabel: l.sourceSelectionClose,
+      footer:
+          footer ??
+          (tv
+              ? Align(
+                  alignment: Alignment.centerRight,
+                  child: AppButton(
+                    key: const Key('source-selection-close'),
+                    autofocus: true,
+                    onPressed: _close,
+                    variant: AppButtonVariant.plain,
+                    child: Text(l.sourceSelectionClose),
+                  ),
+                )
+              : null),
+    );
+    if (widget.phoneSheet) return panel;
+    return _DialogKeyboard(autofocus: !tv, child: panel);
+  }
+
+  Widget _workLine(MediaItem work) {
+    final theme = AppUiTheme.of(context);
+    final current = this.current;
+    final episodeLabel = current != null && current.isEpisode
+        ? continueWatchingSubtitle(current)
+        : '';
+    return Text(
+      episodeLabel.isEmpty ? work.name : '${work.name} · $episodeLabel',
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        color: theme.colorScheme.onSurface.withValues(alpha: .86),
+        fontWeight: FontWeight.w500,
       ),
     );
   }
@@ -1116,21 +1328,18 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       final l = AppLocalizations.of(context);
       if (controller.origin == null) {
         if (_sheetResolving) {
-          // 弹层解析来源中：骨架卡占位，页脚只有解析指示与关闭。
+          // 弹层解析来源中：骨架卡占位，页眉显示查找状态。
           return _frame(
             title: l.sourceSelectionAction,
+            status: _StatusLine(
+              text: l.sourceSelectionSearching,
+              loading: true,
+            ),
             content: const Column(
               children: [
                 _SourceCardSkeleton(),
                 _SourceCardSkeleton(),
                 _SourceCardSkeleton(),
-              ],
-            ),
-            footer: Row(
-              children: [
-                const CupertinoActivityIndicator(),
-                const Spacer(),
-                _closeButton(),
               ],
             ),
           );
@@ -1142,13 +1351,18 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         });
         return const SizedBox.shrink();
       }
+      _episodeIndex = {
+        for (final result in controller.episodes) result.target: result,
+      };
       final servers = controller.query.registry.project();
       final access = controller.query.registry.access;
+      final originServer =
+          controller.origin!.reference.account.configuredServerId;
       final comparisons =
           [
             for (final candidate in controller.comparisons)
               if (candidate.source.reference.account.configuredServerId !=
-                      controller.origin!.reference.account.configuredServerId &&
+                      originServer &&
                   (candidate.decision.confirmed ||
                       candidate.decision.kind == MatchKind.candidate))
                 candidate,
@@ -1157,27 +1371,43 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
               a.decision.confirmed ? 1 : 0,
             );
             if (confirm != 0) return confirm;
-            return _bestScore(b).compareTo(_bestScore(a));
+            return _bestScore(_versionsOf(b))
+                .compareTo(_bestScore(_versionsOf(a)));
           });
       final shown = [
         for (final comparison in comparisons)
-          if (_accepts(comparison.source.item)) comparison,
+          if (_accepts(_versionsOf(comparison))) comparison,
       ];
-      final badges = _bestBadges(shown, l);
+      final current = this.current;
+      // 当前来源只作对照：只列它最好的一个版本，其余以「N 个版本」带过，
+      // 不把其他服务器挤出首屏。
+      final currentVersions = current == null
+          ? const <_VersionFace>[]
+          : _versionFaces(current);
+      final currentFaces = [?_bestFace(currentVersions)];
+      final badges = _bestBadges([
+        (_currentPrefix, currentFaces),
+        for (final comparison in shown)
+          (
+            _versionPrefix(comparison.source.reference),
+            _versionFaces(_versionsOf(comparison)),
+          ),
+      ], l);
       final passwordTarget = _passwordTarget;
       final theme = AppUiTheme.of(context);
       final scheme = theme.colorScheme;
       if (passwordTarget != null) {
         return _frame(
           title: l.sourceSelectionPasswordTitle,
+          subtitle: Text(
+            passwordTarget.displayName,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
           content: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                passwordTarget.displayName,
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
               PresentationScope.of(context).isTv
                   ? TvServerUnlockForm(
                       onSubmit: _verifyTarget,
@@ -1215,123 +1445,116 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
           ),
         );
       }
-      final resolutions = _facetOptions(comparisons, (face) => face.resolution);
-      final ranges = _facetOptions(
-        comparisons,
-        (face) => face.range,
-        _rangeOrder,
-      );
-      final videos = _facetOptions(
-        comparisons,
-        (face) => face.video,
-        _videoOrder,
-      );
+      final versions = [for (final c in comparisons) _versionsOf(c)];
+      final resolutions = _facetOptions(versions, (face) => face.resolution);
+      final ranges = _facetOptions(versions, (face) => face.range, _rangeOrder);
+      final videos = _facetOptions(versions, (face) => face.video, _videoOrder);
       final subtitles = _facetOptions(
-        comparisons,
+        versions,
         (face) => face.subtitle,
         _subtitleOrder,
       );
-      final sounds = _facetOptions(
-        comparisons,
-        (face) => face.audio,
-        _audioOrder,
-      );
-      final unlocked = servers.every(
-        (server) =>
-            access.allows(server.id) ||
-            controller.entryFor(server.id)?.isValid == true,
-      );
+      final sounds = _facetOptions(versions, (face) => face.audio, _audioOrder);
+      final locked = [
+        for (final server in servers)
+          if (!access.allows(server.id) &&
+              controller.entryFor(server.id)?.isValid != true)
+            server,
+      ];
       final hasMore = controller.sources.any(
         (source) => source.hasMore && !source.failed,
       );
-      final failed = controller.sources.any((source) => source.failed);
+      final failedServers = {
+        for (final source in controller.sources)
+          if (source.failed) source.key.serverId,
+      };
       String? serverName(String id) =>
           servers.where((server) => server.id == id).firstOrNull?.displayName;
+      final loading = controller.loading;
+      final showCurrent = currentFaces.isNotEmpty;
+      final status = _StatusLine(
+        loading: loading,
+        text: loading && comparisons.isEmpty
+            ? l.sourceSelectionSearching
+            : l.sourceSelectionFound(
+                _filtering ? shown.length : comparisons.length,
+              ),
+      );
       return _frame(
         title: l.sourceSelectionAction,
-        caption: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              controller.origin!.item.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              l.sourceSelectionHint,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+        subtitle: _workLine(controller.origin!.item),
+        status: status,
+        toolbar: _filterBar(
+          l,
+          resolutions: resolutions,
+          ranges: ranges,
+          videos: videos,
+          subtitles: subtitles,
+          sounds: sounds,
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: TextStyle(color: scheme.error)),
-              ),
-            _filterBar(
-              l,
-              resolutions: resolutions,
-              ranges: ranges,
-              videos: videos,
-              subtitles: subtitles,
-              sounds: sounds,
-            ),
-            for (final server in servers)
-              if (!access.allows(server.id) &&
-                  controller.entryFor(server.id)?.isValid != true)
-                _LockedServerRow(
-                  server: server,
-                  lockedLabel: l.serversLocked,
-                  unlockLabel: l.sourceSelectionUnlock,
-                  enabled: !_busy,
-                  onUnlock: () {
-                    if (_scroll.hasClients) _scroll.jumpTo(0);
-                    setState(() {
-                      _passwordTarget = server;
-                      _error = null;
-                    });
-                  },
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _RowNote(
+                  text: _error!,
+                  icon: AppIcons.error,
+                  color: scheme.error,
                 ),
-            if (controller.loading && shown.isEmpty) ...const [
-              _SourceCardSkeleton(),
+              ),
+            if (showCurrent) ...[
+              _SectionLabel(l.sourceSelectionCurrentSection),
+              _SourceCard(
+                cardKey: const Key('source-selection-current'),
+                serverName: serverName(originServer) ?? '',
+                current: true,
+                currentLabel: l.sourceSelectionCurrent,
+                meta: [
+                  if (currentVersions.length > 1)
+                    l.sourceSelectionVersionCount(currentVersions.length),
+                  ?_watchedLabel(l, current!.userData.lastPlayedDate),
+                ].join(' · ').emptyAsNull,
+                faces: currentFaces,
+                badges: [
+                  for (var i = 0; i < currentFaces.length; i++)
+                    badges['$_currentPrefix:$i'],
+                ],
+                onOpen: null,
+              ),
+              if (shown.isNotEmpty || (loading && comparisons.isEmpty))
+                _SectionLabel(
+                  l.sourceSelectionOtherSection,
+                  count: shown.isEmpty ? null : shown.length,
+                  top: 10,
+                ),
+            ],
+            if (loading && shown.isEmpty) ...const [
               _SourceCardSkeleton(),
               _SourceCardSkeleton(),
             ],
-            if (controller.complete && comparisons.isEmpty && unlocked)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 28),
-                child: Center(
-                  child: Text(
-                    l.sourceSelectionEmpty,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
+            if (controller.complete && comparisons.isEmpty && locked.isEmpty)
+              _EmptyState(
+                icon: AppIcons.otherSources,
+                title: l.sourceSelectionEmpty,
+                hint: l.sourceSelectionEmptyHint,
               ),
             if (controller.complete && comparisons.isNotEmpty && shown.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Center(
-                  child: Text(
-                    l.sourceSelectionNoMatch,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
+              _EmptyState(
+                icon: AppIcons.filter,
+                title: l.sourceSelectionNoMatch,
               ),
             for (final comparison in shown)
               _sourceCard(l, comparison, serverName, badges),
-            if (failed)
+            if (failedServers.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: AppButton(
-                  onPressed: _busy
+                padding: const EdgeInsets.only(top: 2, bottom: 10),
+                child: _FailureNotice(
+                  text: l.sourceSelectionFailedServers(failedServers.length),
+                  actionLabel: l.sourceSelectionRetryAction,
+                  onRetry: _busy
                       ? null
                       : () {
                           for (final source in controller.sources.where(
@@ -1340,16 +1563,11 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                             unawaited(controller.retry(source.key));
                           }
                         },
-                  variant: AppButtonVariant.outlined,
-                  style: const AppButtonStyle(
-                    minimumSize: Size(double.infinity, 40),
-                  ),
-                  child: Text(l.sourceSelectionRetry),
                 ),
               ),
             if (hasMore)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(bottom: 10),
                 child: AppButton(
                   onPressed: _busy
                       ? null
@@ -1360,36 +1578,40 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
                             unawaited(controller.loadMore(source.key));
                           }
                         },
-                  variant: AppButtonVariant.outlined,
+                  variant: AppButtonVariant.tinted,
                   style: const AppButtonStyle(
-                    minimumSize: Size(double.infinity, 40),
+                    minimumSize: Size(double.infinity, 44),
                   ),
-                  child: Text(l.sourceSelectionMore),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(AppIcons.search, size: 18),
+                      const SizedBox(width: 6),
+                      Text(l.sourceSelectionMore),
+                    ],
+                  ),
                 ),
               ),
-          ],
-        ),
-        footer: Row(
-          children: [
-            if (controller.loading) ...[
-              const CupertinoActivityIndicator(),
-              const SizedBox(width: 8),
+            if (locked.isNotEmpty) ...[
+              _SectionLabel(
+                l.sourceSelectionLockedSection,
+                count: locked.length,
+                top: comparisons.isEmpty && !showCurrent && !loading ? 0 : 10,
+              ),
+              _LockedServerGroup(
+                servers: locked,
+                subtitle: '${l.serversLocked} · ${l.sourceSelectionLockedHint}',
+                unlockLabel: l.sourceSelectionUnlock,
+                enabled: !_busy,
+                onUnlock: (server) {
+                  if (_scroll.hasClients) _scroll.jumpTo(0);
+                  setState(() {
+                    _passwordTarget = server;
+                    _error = null;
+                  });
+                },
+              ),
             ],
-            Expanded(
-              child: Text(
-                controller.loading && comparisons.isEmpty
-                    ? l.sourceSelectionSearching
-                    : l.sourceSelectionFound(
-                        _filtering ? shown.length : comparisons.length,
-                      ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            _closeButton(),
           ],
         ),
       );
@@ -1397,10 +1619,19 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   );
 }
 
+enum _SpecTone { neutral, resolution, range }
+
+class _Spec {
+  const _Spec(this.label, [this.tone = _SpecTone.neutral]);
+  final String label;
+  final _SpecTone tone;
+}
+
 class _VersionFace {
   const _VersionFace({
-    required this.chips,
-    required this.note,
+    required this.id,
+    required this.specs,
+    required this.release,
     required this.resolution,
     required this.range,
     required this.video,
@@ -1410,8 +1641,14 @@ class _VersionFace {
     required this.bitrate,
   });
 
-  final List<String> chips;
-  final String? note;
+  /// 服务器上的 MediaSource id；打开详情时用来预选这个版本。
+  final String id;
+
+  /// 规格标签，按「分辨率 · 动态范围 · 编码 · 帧率 · 音频 · 体积 · 码率」排列。
+  final List<_Spec> specs;
+
+  /// 去掉片名、年份和刮削标记后的发布名（文件名），用来区分同规格的版本。
+  final String? release;
   final String? resolution;
   final String? range;
   final String? video;
@@ -1592,20 +1829,71 @@ String? _bitRateLabel(int bitrate) {
   return '${(bitrate / 1000).round()} kbps';
 }
 
-String? _releaseNote(String? detail, List<String> chips) {
-  if (detail == null || detail.trim().isEmpty) return null;
-  var text = detail;
-  final ordered = [...chips]..sort((a, b) => b.length.compareTo(a.length));
-  for (final chip in ordered) {
-    if (chip.isEmpty) continue;
-    text = text.replaceAll(chip, ' ');
-  }
-  text = text.replaceAll(RegExp(r'[·\s]+'), ' ').trim();
+final _providerTag = RegExp(
+  r'[\[{(]\s*(?:tmdb|tvdb|imdb|douban|bgm|anidb)(?:id)?\s*[-=:]\s*[^\]})]*[\]})]',
+  caseSensitive: false,
+);
+final _mediaExtension = RegExp(
+  r'\.(?:mkv|mp4|m4v|m2ts|ts|avi|iso|wmv|mov|webm|flv|rmvb|strm)$',
+  caseSensitive: false,
+);
+final _leadingYear = RegExp(r'^[(\[]?(?:19|20)\d{2}[)\]]?(?=[\s._\-]|$)');
+final _leadingSeparators = RegExp(r'^[\s._\-·:：|]+');
+
+/// 发布名：Emby 的 MediaSource.Name 通常就是文件名，如
+/// `兰香如故 S01E12 2160p.HDR.60FPS` 或 `刀剑神域 (2017) {tmdbid=413594} BDRip`。
+/// 片名在弹窗标题里已经有了，这里去掉片名、紧随的年份、刮削标记与扩展名；
+/// 剩下的只是规格标签的重复（如「4K」）时不再单独显示。
+String? _releaseName(
+  ItemMediaSource source,
+  MediaItem item,
+  List<_Spec> specs,
+) {
+  var text = source.name?.trim() ?? '';
   if (text.isEmpty) return null;
+  final slash = text.lastIndexOf(RegExp(r'[\\/]'));
+  if (slash >= 0) text = text.substring(slash + 1);
+  text = text.replaceFirst(_mediaExtension, '').replaceAll(_providerTag, ' ');
+  final titles = <String>{
+    for (final title in [item.seriesName, item.name])
+      if (title != null && title.trim().length >= 2) title.trim(),
+  }.toList()..sort((a, b) => b.length.compareTo(a.length));
+  for (final title in titles) {
+    if (!text.toLowerCase().startsWith(title.toLowerCase())) continue;
+    var rest = text
+        .substring(title.length)
+        .replaceFirst(_leadingSeparators, '');
+    rest = rest
+        .replaceFirst(_leadingYear, '')
+        .replaceFirst(_leadingSeparators, '');
+    // 名字就是片名本身（Emby 单版本的默认名），没有可区分的信息。
+    if (rest.isEmpty) return null;
+    text = rest;
+    break;
+  }
+  text = text.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+  if (text.isEmpty) return null;
+  var residue = text;
+  final labels = [for (final spec in specs) spec.label]
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final label in labels) {
+    residue = residue.replaceAll(label, ' ');
+  }
+  if (residue.replaceAll(RegExp(r'[\s·._\-]+'), '').isEmpty) return null;
   return text;
 }
 
-_VersionFace _faceFor(ItemMediaSource source) {
+String? _frameRateLabel(ItemMediaSource source) {
+  for (final stream in source.streams) {
+    if (!stream.isVideo) continue;
+    final fps = stream.averageFrameRate ?? 0;
+    // 只标高帧率：24/25/30 是默认，标出来只是噪音。
+    return fps >= 47 ? '${fps.round()}fps' : null;
+  }
+  return null;
+}
+
+_VersionFace _faceFor(ItemMediaSource source, MediaItem item) {
   final view = source.presentation;
   final parts = view.headline == '—'
       ? const <String>[]
@@ -1614,12 +1902,14 @@ _VersionFace _faceFor(ItemMediaSource source) {
             .map((part) => part.trim())
             .where((part) => part.isNotEmpty)
             .toList();
-  final chips = <String>[];
+  final specs = <_Spec>[];
+  bool has(String label) => specs.any((spec) => spec.label == label);
   String? resolution;
   String? range;
   String? audio;
   final video = _videoFromStreams(source) ?? _videoFromParts(parts);
   final subtitle = _subtitleKey(source);
+  final fps = _frameRateLabel(source);
   if (parts.isNotEmpty) {
     final quality = parts.first
         .split(RegExp(r'\s+'))
@@ -1631,17 +1921,31 @@ _VersionFace _faceFor(ItemMediaSource source) {
           (token) => _resolutionRank(token) > 0 || _rangeLabel(token) != null,
         );
     if (!structured) {
-      chips.add(parts.join(' · '));
+      specs.add(_Spec(parts.join(' · ')));
     } else {
       for (final token in quality) {
-        if (_resolutionRank(token) > 0) resolution ??= token;
-        range ??= _rangeLabel(token);
-        if (!chips.contains(token)) chips.add(token);
+        final isResolution = _resolutionRank(token) > 0;
+        final tokenRange = _rangeLabel(token);
+        if (isResolution) resolution ??= token;
+        range ??= tokenRange;
+        if (!has(token)) {
+          specs.add(
+            _Spec(
+              token,
+              isResolution
+                  ? _SpecTone.resolution
+                  : tokenRange != null
+                  ? _SpecTone.range
+                  : _SpecTone.neutral,
+            ),
+          );
+        }
       }
-      if (parts.length >= 2 && !chips.contains(parts[1])) chips.add(parts[1]);
+      if (parts.length >= 2 && !has(parts[1])) specs.add(_Spec(parts[1]));
+      if (fps != null && !has(fps)) specs.add(_Spec(fps));
       if (parts.length >= 3) {
         audio = _audioKey(parts[2]);
-        if (!chips.contains(parts[2])) chips.add(parts[2]);
+        if (!has(parts[2])) specs.add(_Spec(parts[2]));
       }
     }
   }
@@ -1657,8 +1961,8 @@ _VersionFace _faceFor(ItemMediaSource source) {
   }
   final size = _byteLabel(source.size);
   final rate = _bitRateLabel(bitrate);
-  if (size != null && !chips.contains(size)) chips.add(size);
-  if (rate != null && !chips.contains(rate)) chips.add(rate);
+  if (size != null && !has(size)) specs.add(_Spec(size));
+  if (rate != null && !has(rate)) specs.add(_Spec(rate));
   var rank = _resolutionRank(resolution);
   if (rank == 0) {
     final height = source.height ?? 0;
@@ -1675,13 +1979,14 @@ _VersionFace _faceFor(ItemMediaSource source) {
   }
   if (resolution == null) {
     resolution = _resolutionFromRank(rank);
-    if (resolution != null && !chips.contains(resolution)) {
-      chips.insert(0, resolution);
+    if (resolution != null && !has(resolution)) {
+      specs.insert(0, _Spec(resolution, _SpecTone.resolution));
     }
   }
   return _VersionFace(
-    chips: chips,
-    note: _releaseNote(view.detail, chips),
+    id: source.id,
+    specs: specs,
+    release: _releaseName(source, item, specs),
     resolution: resolution,
     range: range,
     video: video,
@@ -1697,9 +2002,9 @@ List<_VersionFace> _versionFaces(MediaItem item) {
   if (cached != null) return cached;
   final faces = <_VersionFace>[];
   for (final source in item.mediaSources) {
-    final face = _faceFor(source);
-    if (face.chips.isNotEmpty ||
-        face.note != null ||
+    final face = _faceFor(source, item);
+    if (face.specs.isNotEmpty ||
+        face.release != null ||
         face.resolution != null ||
         face.range != null ||
         face.video != null ||
@@ -1734,6 +2039,15 @@ List<SourceSelectionFace> sourceSelectionFaces(MediaItem item) => [
     ),
 ];
 
+/// 版本行上显示的发布名与规格标签，供测试核对展示内容。
+@visibleForTesting
+List<({String? release, List<String> specs})> sourceSelectionVersionLabels(
+  MediaItem item,
+) => [
+  for (final face in _versionFaces(item))
+    (release: face.release, specs: [for (final spec in face.specs) spec.label]),
+];
+
 @visibleForTesting
 bool sourceSelectionAccepts(
   MediaItem item, {
@@ -1762,26 +2076,42 @@ bool sourceSelectionAccepts(
   );
 }
 
-int _bestScore(SourceComparison comparison) {
+int _faceScore(_VersionFace face) => face.rank * 1000000000 + face.bitrate;
+
+int _bestScore(MediaItem item) {
   var best = 0;
-  for (final face in _versionFaces(comparison.source.item)) {
-    final score = face.rank * 1000000000 + face.bitrate;
+  for (final face in _versionFaces(item)) {
+    final score = _faceScore(face);
     if (score > best) best = score;
   }
   return best;
 }
 
-String _versionKey(SourceComparison comparison, int index) =>
-    '${comparison.source.reference.account.configuredServerId}:${comparison.source.reference.itemId}:$index';
+_VersionFace? _bestFace(List<_VersionFace> faces) {
+  _VersionFace? best;
+  for (final face in faces) {
+    if (best == null || _faceScore(face) > _faceScore(best)) best = face;
+  }
+  return best;
+}
+
+extension on String {
+  String? get emptyAsNull => isEmpty ? null : this;
+}
+
+const _currentPrefix = 'current';
+
+String _versionPrefix(SourceReference reference) =>
+    '${reference.account.configuredServerId}:${reference.itemId}';
 
 List<String> _facetOptions(
-  List<SourceComparison> comparisons,
+  List<MediaItem> items,
   String? Function(_VersionFace face) read, [
   List<String> order = _resolutionOrder,
 ]) {
   final found = <String>{};
-  for (final comparison in comparisons) {
-    for (final face in _versionFaces(comparison.source.item)) {
+  for (final item in items) {
+    for (final face in _versionFaces(item)) {
       final value = read(face);
       if (value != null && value.isNotEmpty) found.add(value);
     }
@@ -1794,17 +2124,18 @@ List<String> _facetOptions(
   return [...ordered, ...rest];
 }
 
+/// 在当前来源与所有可见来源的全部版本里挑出唯一的最佳者，
+/// 标「最高码率」或「最清晰」。并列或缺少数据时不标。
 Map<String, String> _bestBadges(
-  List<SourceComparison> shown,
+  List<(String, List<_VersionFace>)> rows,
   AppLocalizations l10n,
 ) {
   final ranked = <_RankedVersion>[];
-  for (final comparison in shown) {
-    final faces = _versionFaces(comparison.source.item);
+  for (final (prefix, faces) in rows) {
     for (var index = 0; index < faces.length; index++) {
       ranked.add(
         _RankedVersion(
-          _versionKey(comparison, index),
+          '$prefix:$index',
           faces[index].rank,
           faces[index].bitrate,
         ),
@@ -1839,16 +2170,6 @@ Map<String, String> _bestBadges(
   return {top.key: label};
 }
 
-String _sourceMeta(AppLocalizations l10n, MediaItem item) {
-  final watched = _watchedLabel(l10n, item.userData.lastPlayedDate);
-  return [
-    item.name,
-    if (item.isSeries && (item.childCount ?? 0) > 0)
-      l10n.sourceSelectionEpisodeCount(item.childCount!),
-    ?watched,
-  ].join(' · ');
-}
-
 String? _watchedLabel(AppLocalizations l10n, DateTime? date) {
   if (date == null) return null;
   final local = date.toLocal();
@@ -1865,7 +2186,20 @@ String? _watchedLabel(AppLocalizations l10n, DateTime? date) {
 String _serverInitial(String name) {
   final trimmed = name.trim();
   if (trimmed.isEmpty) return '?';
-  return String.fromCharCode(trimmed.runes.first);
+  return String.fromCharCode(trimmed.runes.first).toUpperCase();
+}
+
+/// 每台服务器一个稳定的低饱和色块，多台服务器一眼能分开。
+(Color, Color) _serverColors(String name, Brightness brightness) {
+  var hash = 0;
+  for (final rune in name.trim().runes) {
+    hash = (hash * 31 + rune) & 0x7fffffff;
+  }
+  final hue = (hash % 360).toDouble();
+  final dark = brightness == Brightness.dark;
+  final fill = HSLColor.fromAHSL(1, hue, .42, dark ? .30 : .88).toColor();
+  final ink = HSLColor.fromAHSL(1, hue, .55, dark ? .88 : .28).toColor();
+  return (fill, ink);
 }
 
 class _FilterButton extends StatelessWidget {
@@ -1891,6 +2225,9 @@ class _FilterButton extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final foreground = selected ? scheme.onPrimaryContainer : scheme.onSurface;
+    final muted = selected
+        ? scheme.onPrimaryContainer
+        : scheme.onSurfaceVariant;
     return AppButton(
       onPressed: onPressed,
       semanticLabel: semanticLabel,
@@ -1898,103 +2235,143 @@ class _FilterButton extends StatelessWidget {
       style: AppButtonStyle(
         backgroundColor: selected
             ? scheme.primaryContainer
-            : scheme.surfaceContainerHighest,
+            : scheme.surfaceContainerHigh,
         foregroundColor: foreground,
-        minimumSize: const Size(0, 32),
+        minimumSize: const Size(0, 36),
         padding: const EdgeInsets.symmetric(horizontal: 10),
-        shape: const StadiumBorder(),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.sm),
+        ),
         side: BorderSide(
           color: selected
-              ? AppInk.transparent
+              ? scheme.primary.withValues(alpha: .5)
               : AppEdge.of(scheme.brightness, strong: true),
         ),
-        textStyle: theme.textTheme.labelMedium,
+        textStyle: theme.textTheme.labelLarge,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (icon != null) ...[Icon(icon, size: 16), const SizedBox(width: 4)],
+          if (icon != null) ...[
+            Icon(icon, size: 17, color: muted),
+            const SizedBox(width: 6),
+          ],
           if (mark != null) ...[
-            Text(mark!),
-            if (label != mark) const SizedBox(width: 4),
+            Text(
+              mark!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: muted,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -.2,
+              ),
+            ),
+            if (label != mark) const SizedBox(width: 6),
           ],
           if (mark == null || label != mark) Text(label),
-          const SizedBox(width: 2),
-          const Icon(CupertinoIcons.chevron_down, size: 12),
+          const SizedBox(width: 4),
+          Icon(AppIcons.chevronDown, size: 16, color: muted),
         ],
       ),
     );
   }
 }
 
-class _LockedServerRow extends StatelessWidget {
-  const _LockedServerRow({
-    required this.server,
-    required this.lockedLabel,
+/// 需要解锁的服务器收在列表末尾的一组紧凑行里：查找结果优先，
+/// 解锁是次要动作。
+class _LockedServerGroup extends StatelessWidget {
+  const _LockedServerGroup({
+    required this.servers,
+    required this.subtitle,
     required this.unlockLabel,
     required this.enabled,
     required this.onUnlock,
   });
 
-  final SavedServer server;
-  final String lockedLabel;
+  final List<SavedServer> servers;
+  final String subtitle;
   final String unlockLabel;
   final bool enabled;
-  final VoidCallback onUnlock;
+  final ValueChanged<SavedServer> onUnlock;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: DecoratedBox(
-        key: ValueKey('source-selection-server-${server.id}'),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          border: Border.all(
-            color: AppEdge.of(scheme.brightness, strong: true),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-          child: Row(
-            children: [
-              Icon(
-                CupertinoIcons.lock,
-                size: 18,
-                color: scheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      server.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    Text(
-                      lockedLabel,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh.withValues(alpha: .6),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppEdge.of(scheme.brightness, strong: true)),
+      ),
+      child: Column(
+        children: [
+          for (var index = 0; index < servers.length; index++) ...[
+            if (index > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 58),
+                child: Container(
+                  height: 1,
+                  color: AppEdge.of(scheme.brightness),
                 ),
               ),
-              AppButton(
-                key: ValueKey('source-selection-verify-${server.id}'),
-                onPressed: enabled ? onUnlock : null,
-                variant: AppButtonVariant.tinted,
-                child: Text(unlockLabel),
+            Padding(
+              key: ValueKey('source-selection-server-${servers[index].id}'),
+              padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: scheme.onSurface.withValues(alpha: .06),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      AppIcons.lock,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          servers[index].displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  AppButton(
+                    key: ValueKey(
+                      'source-selection-verify-${servers[index].id}',
+                    ),
+                    onPressed: enabled ? () => onUnlock(servers[index]) : null,
+                    variant: AppButtonVariant.tinted,
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Text(unlockLabel),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -2008,18 +2385,28 @@ class _SourceCard extends StatefulWidget {
     required this.faces,
     required this.badges,
     required this.onOpen,
+    this.onOpenVersion,
+    this.current = false,
+    this.currentLabel,
     this.caution,
+    this.versionsLoading = false,
     this.lookup,
     this.error,
   });
 
   final Key cardKey;
   final String serverName;
-  final String meta;
+  final String? meta;
+  final bool current;
+  final String? currentLabel;
   final String? caution;
   final List<_VersionFace> faces;
   final List<String?> badges;
   final VoidCallback? onOpen;
+
+  /// 打开并预选某个版本。为空时版本行与卡片头一样按默认打开。
+  final ValueChanged<String>? onOpenVersion;
+  final bool versionsLoading;
   final Widget? lookup;
   final String? error;
 
@@ -2028,111 +2415,350 @@ class _SourceCard extends StatefulWidget {
 }
 
 class _SourceCardState extends State<_SourceCard> {
-  bool _hover = false;
+  /// 指针所在的部分：-1 是卡片头，0.. 是第几个版本。
+  int? _hovered;
+
+  void _hover(int part, bool value) {
+    setState(() {
+      if (value) {
+        _hovered = part;
+      } else if (_hovered == part) {
+        _hovered = null;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final fill = _hover
+    final interactive = widget.onOpen != null;
+    final headerHovered = _hovered == -1 && interactive;
+    final anyHovered = _hovered != null && interactive;
+    final radius = BorderRadius.circular(AppRadii.lg);
+    final border = widget.current
+        ? scheme.primary.withValues(alpha: .65)
+        : anyHovered
+        ? scheme.onSurface.withValues(alpha: .22)
+        : AppEdge.of(scheme.brightness, strong: true);
+    final fill = widget.current
+        ? Color.alphaBlend(
+            scheme.primary.withValues(alpha: .06),
+            scheme.surfaceContainerHigh,
+          )
+        : headerHovered
         ? scheme.surfaceContainerHighest
         : scheme.surfaceContainerHigh;
+    final header = Row(
+      children: [
+        _ServerMark(name: widget.serverName),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      widget.serverName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (widget.current && widget.currentLabel != null) ...[
+                    const SizedBox(width: 8),
+                    _Pill(
+                      label: widget.currentLabel!,
+                      background: scheme.primary,
+                      foreground: scheme.onPrimary,
+                    ),
+                  ],
+                ],
+              ),
+              if (widget.meta != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  widget.meta!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (interactive) ...[
+          const SizedBox(width: 8),
+          Icon(
+            AppIcons.chevronRight,
+            size: 22,
+            color: headerHovered ? scheme.onSurface : scheme.onSurfaceVariant,
+          ),
+        ],
+      ],
+    );
+    final faces = [
+      for (final face in widget.faces)
+        if (face.release != null || face.specs.isNotEmpty) face,
+    ];
+    final hasVersions = faces.isNotEmpty;
+    final trailing = widget.lookup != null || widget.error != null;
     return Padding(
       key: widget.cardKey,
-      padding: const EdgeInsets.only(bottom: 8),
-      child: DecoratedBox(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AnimatedContainer(
+        duration: AppMotion.fast,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: fill,
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          border: Border.all(
-            color: AppEdge.of(scheme.brightness, strong: true),
-          ),
+          borderRadius: radius,
+          border: Border.all(color: border, width: widget.current ? 1.5 : 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             AppSurfaceAction(
               onTap: widget.onOpen,
-              onHover: (value) => setState(() => _hover = value),
-              borderRadius: BorderRadius.circular(AppRadii.lg),
+              onHover: (value) => _hover(-1, value),
+              borderRadius: radius,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
-                  12,
-                  12,
-                  12,
-                  widget.lookup == null ? 12 : 4,
+                  14,
+                  14,
+                  14,
+                  hasVersions || widget.versionsLoading
+                      ? 4
+                      : trailing
+                      ? 10
+                      : 14,
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _ServerMark(name: widget.serverName),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.serverName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            widget.meta,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          if (widget.caution != null) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              widget.caution!,
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                color: scheme.onTertiaryContainer,
-                              ),
-                            ),
-                          ],
-                          for (
-                            var index = 0;
-                            index < widget.faces.length;
-                            index++
-                          )
-                            _VersionBlock(
-                              face: widget.faces[index],
-                              badge: index < widget.badges.length
-                                  ? widget.badges[index]
-                                  : null,
-                            ),
-                        ],
+                    header,
+                    if (widget.caution != null) ...[
+                      const SizedBox(height: 10),
+                      _RowNote(
+                        text: widget.caution!,
+                        icon: AppIcons.info,
+                        color: _cautionColor(scheme.brightness),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
             ),
+            for (var index = 0; index < faces.length; index++)
+              _VersionRow(
+                key: ValueKey('source-selection-version-${faces[index].id}'),
+                face: faces[index],
+                badge: widget.faces.indexOf(faces[index]) < widget.badges.length
+                    ? widget.badges[widget.faces.indexOf(faces[index])]
+                    : null,
+                divided: index > 0,
+                last: index == faces.length - 1 && !trailing,
+                hovered: _hovered == index && interactive,
+                onHover: (value) => _hover(index, value),
+                onTap: widget.onOpen == null
+                    ? null
+                    : widget.onOpenVersion == null
+                    ? widget.onOpen
+                    : () => widget.onOpenVersion!(faces[index].id),
+              ),
+            if (widget.versionsLoading && !hasVersions)
+              Padding(
+                padding: EdgeInsets.fromLTRB(14, 8, 14, trailing ? 10 : 14),
+                child: _VersionSkeleton(
+                  animate: !MediaQuery.disableAnimationsOf(context),
+                ),
+              ),
             if (widget.lookup != null)
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 8, 8),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
                   child: widget.lookup,
                 ),
               ),
             if (widget.error != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Text(
-                  widget.error!,
-                  style: TextStyle(color: scheme.error),
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                child: _RowNote(
+                  text: widget.error!,
+                  icon: AppIcons.wifiOff,
+                  color: scheme.error,
                 ),
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 待核对提示与 HDR 标签共用的暖色，取自服务状态的语义色。
+Color _cautionColor(Brightness brightness) => AppSemantic.warning(brightness);
+
+class _Pill extends StatelessWidget {
+  const _Pill({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: background,
+      borderRadius: BorderRadius.circular(AppRadii.pill),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+      child: Text(
+        label,
+        style: AppUiTheme.of(context).textTheme.labelSmall
+            ?.copyWith(color: foreground, fontWeight: FontWeight.w700),
+      ),
+    ),
+  );
+}
+
+/// 卡片里的一行小字说明（查找中、没有这一集、待核对、连不上）。
+class _RowNote extends StatelessWidget {
+  const _RowNote({
+    required this.text,
+    this.icon,
+    this.color,
+    this.loading = false,
+  });
+  final String text;
+  final IconData? icon;
+  final Color? color;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final tint = color ?? theme.colorScheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (loading)
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CupertinoActivityIndicator(radius: 6),
+          )
+        else if (icon != null)
+          Icon(icon, size: 15, color: tint),
+        if (loading || icon != null) const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            style: theme.textTheme.bodySmall?.copyWith(color: tint),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FailureNotice extends StatelessWidget {
+  const _FailureNotice({
+    required this.text,
+    required this.actionLabel,
+    required this.onRetry,
+  });
+  final String text;
+  final String actionLabel;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.error.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: scheme.error.withValues(alpha: .22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+        child: Row(
+          children: [
+            Icon(AppIcons.wifiOff, size: 18, color: scheme.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurface,
+                ),
+              ),
+            ),
+            AppButton(
+              onPressed: onRetry,
+              variant: AppButtonVariant.plain,
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(actionLabel),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.icon, required this.title, this.hint});
+  final IconData icon;
+  final String title;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+      child: Column(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onSurface.withValues(alpha: .06),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 24, color: muted),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleSmall,
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              hint!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -2145,93 +2771,148 @@ class _ServerMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
+    final (fill, ink) = _serverColors(name, theme.colorScheme.brightness);
     return Container(
-      width: 36,
-      height: 36,
+      width: 40,
+      height: 40,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
+        color: fill,
         borderRadius: BorderRadius.circular(AppRadii.md),
       ),
       child: Text(
         _serverInitial(name),
-        style: theme.textTheme.labelLarge?.copyWith(
-          color: scheme.onPrimaryContainer,
-          fontWeight: FontWeight.w700,
+        style: theme.textTheme.titleMedium?.copyWith(
+          color: ink,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
   }
 }
 
-class _VersionBlock extends StatelessWidget {
-  const _VersionBlock({required this.face, required this.badge});
+/// 一个版本：发布名一行，下面一排规格标签，多个版本之间用细线分开。
+/// 每一行是独立的点按目标：多个版本时打开详情并预选这个版本。
+class _VersionRow extends StatelessWidget {
+  const _VersionRow({
+    super.key,
+    required this.face,
+    required this.badge,
+    required this.divided,
+    required this.last,
+    required this.hovered,
+    required this.onHover,
+    required this.onTap,
+  });
   final _VersionFace face;
   final String? badge;
+  final bool divided;
+  final bool last;
+  final bool hovered;
+  final ValueChanged<bool> onHover;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    if (face.note == null && face.chips.isEmpty && badge == null) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (face.note != null)
-            Text(
-              face.note!,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurface,
+    final release = face.release;
+    return AppSurfaceAction(
+      onTap: onTap,
+      // 长按复制发布名（文件名），方便到别处搜索或比对。
+      onLongPress: release == null
+          ? null
+          : () => unawaited(LongPressCopy.copy(context, release)),
+      onHover: onHover,
+      child: AnimatedContainer(
+        duration: AppMotion.fast,
+        color: hovered
+            ? scheme.onSurface.withValues(alpha: .05)
+            : scheme.onSurface.withValues(alpha: 0),
+        padding: EdgeInsets.fromLTRB(14, divided ? 0 : 8, 14, last ? 14 : 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (divided) ...[
+              Container(height: 1, color: AppEdge.of(scheme.brightness)),
+              const SizedBox(height: 10),
+            ],
+            if (face.release != null)
+              Text(
+                face.release!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurface.withValues(alpha: .9),
+                  fontWeight: FontWeight.w500,
+                  height: 1.35,
+                ),
               ),
-            ),
-          if (face.chips.isNotEmpty || badge != null) ...[
-            if (face.note != null) const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final chip in face.chips) _SpecChip(label: chip),
-                if (badge != null) _SpecChip(label: badge!, emphasize: true),
-              ],
-            ),
+            if (face.specs.isNotEmpty || badge != null) ...[
+              if (face.release != null) const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final spec in face.specs) _SpecChip(spec: spec),
+                  if (badge != null) _SpecChip.badge(badge!),
+                ],
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
 class _SpecChip extends StatelessWidget {
-  const _SpecChip({required this.label, this.emphasize = false});
-  final String label;
-  final bool emphasize;
+  const _SpecChip({required this.spec}) : badgeLabel = null;
+  const _SpecChip.badge(String label)
+    : spec = const _Spec(''),
+      badgeLabel = label;
+  final _Spec spec;
+  final String? badgeLabel;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
+    final gold = _cautionColor(scheme.brightness);
+    final badge = badgeLabel != null;
+    final (Color background, Color foreground, FontWeight weight) = badge
+        ? (scheme.primary, scheme.onPrimary, FontWeight.w700)
+        : switch (spec.tone) {
+            _SpecTone.resolution => (
+              scheme.primary.withValues(alpha: dark ? .20 : .12),
+              dark ? scheme.primary : scheme.onPrimaryContainer,
+              FontWeight.w700,
+            ),
+            _SpecTone.range => (
+              gold.withValues(alpha: dark ? .16 : .14),
+              gold,
+              FontWeight.w700,
+            ),
+            _SpecTone.neutral => (
+              scheme.onSurface.withValues(alpha: dark ? .07 : .06),
+              scheme.onSurface.withValues(alpha: .82),
+              FontWeight.w500,
+            ),
+          };
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: emphasize ? scheme.primary : scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: emphasize
-            ? null
-            : Border.all(color: AppEdge.of(scheme.brightness)),
+        color: background,
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         child: Text(
-          label,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: emphasize ? scheme.onPrimary : scheme.onSurface,
-            fontWeight: emphasize ? FontWeight.w600 : FontWeight.w500,
+          badgeLabel ?? spec.label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: foreground,
+            fontWeight: weight,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
       ),

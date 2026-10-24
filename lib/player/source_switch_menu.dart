@@ -409,7 +409,8 @@ class PlaybackLineMenu extends StatelessWidget {
                 ),
               ),
             if (controller.isRecovering ||
-                controller.pendingLineId != null) ...[
+                controller.pendingLineId != null ||
+                controller.switchingLineId != null) ...[
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(l10n.playbackLinePending),
@@ -452,8 +453,12 @@ class PlaybackLineMenu extends StatelessWidget {
                   : null,
               selected: selection.isAutomatic,
               autofocus: autofocus && selection.isAutomatic,
-              onTap: () =>
-                  unawaited(_pickLine(controller, const LineSelection.auto())),
+              // 一次切换没结束前不接受新的选择，免得几次切换互相打断。
+              onTap: controller.switchingLineId != null
+                  ? null
+                  : () => unawaited(
+                      _pickLine(controller, const LineSelection.auto()),
+                    ),
             ),
             for (var index = 0; index < lines.length; index++)
               _LineTile(
@@ -462,6 +467,8 @@ class PlaybackLineMenu extends StatelessWidget {
                 label: playbackLineLabel(lines[index]),
                 selected: selection.fixedLineId == lines[index].id,
                 current: controller.playbackLineIsCurrent(lines[index]),
+                switching: controller.switchingLineId == lines[index].id,
+                locked: controller.switchingLineId != null,
                 currentLabel: l10n.playbackLineInUse,
                 autofocus:
                     autofocus && selection.fixedLineId == lines[index].id,
@@ -483,6 +490,8 @@ class _LineTile extends StatelessWidget {
     required this.selected,
     required this.currentLabel,
     required this.autofocus,
+    this.switching = false,
+    this.locked = false,
     this.onSelected,
   });
 
@@ -490,6 +499,12 @@ class _LineTile extends StatelessWidget {
   final String lineId;
   final String label;
   final bool current, selected;
+
+  /// 这条线路正在切换（预检或开流中）。
+  final bool switching;
+
+  /// 有一次切换在进行：不接受点击。
+  final bool locked;
   final String currentLabel;
   final bool autofocus;
   final VoidCallback? onSelected;
@@ -518,16 +533,22 @@ class _LineTile extends StatelessWidget {
             : null,
       ),
       // Same tag as the server list's line picker: one meaning, one look.
-      trailing: current
+      trailing: switching
+          ? const CupertinoActivityIndicator(
+              key: Key('playback-line-switching'),
+            )
+          : current
           ? ServerStatusPill(label: currentLabel, tone: ServerTone.success)
           : null,
-      onTap: () {
-        unawaited(
-          _pickLine(controller, LineSelection.fixed(lineId)).then((_) {
-            if (controller.switchConfirmation == null) onSelected?.call();
-          }),
-        );
-      },
+      onTap: locked
+          ? null
+          : () {
+              unawaited(
+                _pickLine(controller, LineSelection.fixed(lineId)).then((_) {
+                  if (controller.switchConfirmation == null) onSelected?.call();
+                }),
+              );
+            },
     );
   }
 }

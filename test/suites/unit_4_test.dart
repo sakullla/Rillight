@@ -2,71 +2,71 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/identity_cases.dart' as case0;
-import '../aggregation/server_sections_cases.dart' as case1;
-import '../aggregation/work_index_regression_cases.dart' as case2;
-import '../app/update_controller_cases.dart' as case3;
-import '../app/window_geometry_cases.dart' as case4;
-import '../auth/backup_import/environment_keys_cases.dart' as case5;
-import '../auth/provider_identity_cases.dart' as case6;
-import '../auth/provider_session_ownership_cases.dart' as case7;
-import '../auth/provider_user_agent_cases.dart' as case8;
-import '../auth/server_access_cases.dart' as case9;
-import '../auth/server_list_store_cases.dart' as case10;
-import '../catalog/detail_controller_cases.dart' as case11;
-import '../helpers/temporary_directory_cases.dart' as case12;
-import '../platform/network_change_monitor_cases.dart' as case13;
-import '../player/cache/hls_proxy_timeline_cases.dart' as case14;
-import '../player/cache/media_time_index_cases.dart' as case15;
-import '../player/cache/proxy_progressive_timeline_cases.dart' as case16;
-import '../player/cache_crc32_cases.dart' as case17;
-import '../player/danmaku/danmaku_timeline_cases.dart' as case18;
-import '../player/next_episode_prefix_authorization_cases.dart' as case19;
-import '../player/playback_http_proxy_cases.dart' as case20;
-import '../player/playback_http_proxy_recovery_cases.dart' as case21;
-import '../player/playback_resolver_cases.dart' as case22;
-import '../player/player_line_transactions_cases.dart' as case23;
-import '../player/player_process_protocol_cases.dart' as case24;
-import '../player/player_startup_cases.dart' as case25;
-import '../player/provider_transport_cases.dart' as case26;
-import '../player/response_read_ahead_cases.dart' as case27;
-import '../webdav/webdav_client_cases.dart' as case28;
+import '../aggregation/playback_switch_cases.dart' as case1;
+import '../app/color_hygiene_cases.dart' as case2;
+import '../auth/jellyfin_backup_import_cases.dart' as case3;
+import '../auth/provider_identity_cases.dart' as case4;
+import '../auth/server_access_cases.dart' as case5;
+import '../auth/source_sessions_cases.dart' as case6;
+import '../emby/aggregation_metadata_cases.dart' as case7;
+import '../emby/emby_item_image_cases.dart' as case8;
+import '../emby/emby_socket_cases.dart' as case9;
+import '../emby/media_source_format_cases.dart' as case10;
+import '../library/source_selection_filter_cases.dart' as case11;
+import '../mobile/catalog_controllers_cases.dart' as case12;
+import '../player/cache/directory_inventory_cases.dart' as case13;
+import '../player/cache/range_lease_index_cases.dart' as case14;
+import '../player/emby_playback_client_cases.dart' as case15;
+import '../player/hls_prefetch_cases.dart' as case16;
+import '../player/playback_check_in_cases.dart' as case17;
+import '../player/playback_http_proxy_cases.dart' as case18;
+import '../player/playback_http_proxy_recovery_cases.dart' as case19;
+import '../player/playback_metadata_cases.dart' as case20;
+import '../player/playback_resolver_cases.dart' as case21;
+import '../player/playback_session_snapshot_cases.dart' as case22;
+import '../player/player_host_command_cases.dart' as case23;
+import '../player/player_line_transactions_cases.dart' as case24;
+import '../player/response_read_ahead_cases.dart' as case25;
+import '../player/session_subtitle_files_cases.dart' as case26;
+import '../player/subtitle_slots_cases.dart' as case27;
+import '../plex/plex_review_regression_cases.dart' as case28;
 import '../helpers/suite.dart';
 
 void main() {
   verifySuiteManifest();
   group('aggregation/identity_test.dart', case0.main);
-  group('aggregation/server_sections_test.dart', case1.main);
-  group('aggregation/work_index_regression_test.dart', case2.main);
-  group('app/update_controller_test.dart', case3.main);
-  group('app/window_geometry_test.dart', case4.main);
-  group('auth/backup_import/environment_keys_test.dart', case5.main);
-  group('auth/provider_identity_test.dart', case6.main);
-  group('auth/provider_session_ownership_test.dart', case7.main);
-  group('auth/provider_user_agent_test.dart', case8.main);
-  group('auth/server_access_test.dart', case9.main);
-  group('auth/server_list_store_test.dart', case10.main);
-  group('catalog/detail_controller_test.dart', case11.main);
-  group('helpers/temporary_directory_test.dart', case12.main);
-  group('platform/network_change_monitor_test.dart', case13.main);
-  group('player/cache/hls_proxy_timeline_test.dart', case14.main);
-  group('player/cache/media_time_index_test.dart', case15.main);
-  group('player/cache/proxy_progressive_timeline_test.dart', case16.main);
-  group('player/cache_crc32_test.dart', case17.main);
-  group('player/danmaku/danmaku_timeline_test.dart', case18.main);
-  group('player/next_episode_prefix_authorization_test.dart', case19.main);
+  group('aggregation/playback_switch_test.dart', case1.main);
+  group('app/color_hygiene_test.dart', case2.main);
+  group('auth/jellyfin_backup_import_test.dart', case3.main);
+  group('auth/provider_identity_test.dart', case4.main);
+  group('auth/server_access_test.dart', case5.main);
+  group('auth/source_sessions_test.dart', case6.main);
+  group('emby/aggregation_metadata_test.dart', case7.main);
+  group('emby/emby_item_image_test.dart', case8.main);
+  group('emby/emby_socket_test.dart', case9.main);
+  group('emby/media_source_format_test.dart', case10.main);
+  group('library/source_selection_filter_test.dart', case11.main);
+  group('mobile/catalog_controllers_test.dart', case12.main);
+  group('player/cache/directory_inventory_test.dart', case13.main);
+  group('player/cache/range_lease_index_test.dart', case14.main);
+  group('player/emby_playback_client_test.dart', case15.main);
+  group('player/hls_prefetch_test.dart', case16.main);
+  group('player/playback_check_in_test.dart', case17.main);
   group(
     'player/playback_http_proxy_test.dart [part 4]',
-    () => case20.mainShard(3, 4),
+    () => case18.mainShard(3, 4),
   );
-  group('player/playback_http_proxy_recovery_test.dart', case21.main);
-  group('player/playback_resolver_test.dart', case22.main);
-  group('player/player_line_transactions_test.dart', case23.main);
-  group('player/player_process_protocol_test.dart', case24.main);
-  group('player/player_startup_test.dart', case25.main);
-  group('player/provider_transport_test.dart', case26.main);
+  group('player/playback_http_proxy_recovery_test.dart', case19.main);
+  group('player/playback_metadata_test.dart', case20.main);
+  group('player/playback_resolver_test.dart', case21.main);
+  group('player/playback_session_snapshot_test.dart', case22.main);
+  group('player/player_host_command_test.dart', case23.main);
+  group('player/player_line_transactions_test.dart', case24.main);
   group(
     'player/response_read_ahead_test.dart [part 2]',
-    () => case27.mainShard(1, 3),
+    () => case25.mainShard(1, 3),
   );
-  group('webdav/webdav_client_test.dart', case28.main);
+  group('player/session_subtitle_files_test.dart', case26.main);
+  group('player/subtitle_slots_test.dart', case27.main);
+  group('plex/plex_review_regression_test.dart', case28.main);
 }

@@ -2770,16 +2770,44 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sourceSelectionEmpty => '暂未找到其他来源';
 
   @override
-  String get sourceSelectionRetry => '部分来源加载失败，重试';
-
-  @override
   String get sourceSelectionMore => '继续查找';
 
   @override
-  String get sourceSelectionCheckDetails => '请核对影片详情';
+  String get sourceSelectionClose => '关闭';
 
   @override
-  String get sourceSelectionHint => '点开后进入那一台服务器上的详情，可以再播放。';
+  String get sourceSelectionCurrent => '当前';
+
+  @override
+  String get sourceSelectionCurrentSection => '正在使用';
+
+  @override
+  String get sourceSelectionOtherSection => '其他服务器';
+
+  @override
+  String get sourceSelectionLockedSection => '需要解锁';
+
+  @override
+  String get sourceSelectionLockedHint => '解锁后一起查找';
+
+  @override
+  String sourceSelectionFailedServers(int count) {
+    return '$count 台服务器暂时连不上';
+  }
+
+  @override
+  String get sourceSelectionRetryAction => '重试';
+
+  @override
+  String sourceSelectionVersionCount(int count) {
+    return '$count 个版本';
+  }
+
+  @override
+  String get sourceSelectionEmptyHint => '已解锁的服务器上都没有这部作品。';
+
+  @override
+  String get sourceSelectionCheckDetails => '请核对影片详情';
 
   @override
   String get sourceSelectionUnreachable => '这台服务器暂时连不上，当前连接不受影响。';
@@ -2852,11 +2880,6 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String sourceSelectionWatchedDays(int days) {
     return '$days 天前看过';
-  }
-
-  @override
-  String sourceSelectionEpisodeCount(int count) {
-    return '共 $count 集';
   }
 
   @override
@@ -3103,4 +3126,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get serversAddShort => '添加';
+
+  @override
+  String get copyAction => '复制';
+
+  @override
+  String copiedText(String text) {
+    return '已复制：$text';
+  }
 }

@@ -594,6 +594,9 @@ class FakeEmbyServer {
   /// 单条详情仍返回完整条目。
   bool omitUnrequestedListFields = false;
 
+  /// 列表响应不带片源与媒体流，模拟只取基础字段的分集列表。
+  bool omitListMediaSources = false;
+
   /// 挡住 `GET /Users/{uid}/Items/{id}`，让测试先看到切集时的列表预览。
   Completer<void>? holdItemGet;
   final Set<String> issuedTokens = {};
@@ -1762,6 +1765,10 @@ class FakeEmbyServer {
     RequestOptions options,
   ) {
     final json = item.toJson();
+    if (omitListMediaSources) {
+      json.remove('MediaSources');
+      json.remove('MediaStreams');
+    }
     if (!omitUnrequestedListFields) {
       return json;
     }

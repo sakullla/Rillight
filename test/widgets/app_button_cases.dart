@@ -154,6 +154,7 @@ void main() {
   testWidgets('keyboard focus and held confirm differ from the resting face', (
     tester,
   ) async {
+    _keyboardHighlight();
     final node = FocusNode();
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -185,6 +186,66 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(taps, 1);
+  });
+
+  testWidgets('touch focus stays invisible until the keyboard is used', (
+    tester,
+  ) async {
+    // Focus restored to a touched control (e.g. after a route pops) must not
+    // paint a ring; the first key press makes the same focus visible.
+    final previous = FocusManager.instance.highlightStrategy;
+    FocusManager.instance.highlightStrategy = FocusHighlightStrategy.automatic;
+    addTearDown(() => FocusManager.instance.highlightStrategy = previous);
+    final buttonNode = FocusNode();
+    final surfaceNode = FocusNode();
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      buttonNode.dispose();
+      surfaceNode.dispose();
+    });
+    await _pump(
+      tester,
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppButton(
+            focusNode: buttonNode,
+            onPressed: () {},
+            child: const Text('确定'),
+          ),
+          AppSurfaceAction(
+            key: const Key('surface'),
+            focusNode: surfaceNode,
+            onTap: () {},
+            child: const SizedBox(width: 80, height: 40),
+          ),
+        ],
+      ),
+      theme: AppUiTheme.phoneDark(),
+    );
+    // A touch makes the highlight mode "touch", as on a phone.
+    await tester.tap(find.byKey(const Key('surface')));
+    await tester.pump();
+    expect(FocusManager.instance.highlightMode, FocusHighlightMode.touch);
+    final resting = _signature(tester);
+    buttonNode.requestFocus();
+    await tester.pump();
+    await tester.pump();
+    expect(buttonNode.hasPrimaryFocus, isTrue);
+    expect(_signature(tester), resting);
+    surfaceNode.requestFocus();
+    await tester.pump();
+    await tester.pump();
+    expect(surfaceNode.hasPrimaryFocus, isTrue);
+    expect(_surfaceRing(tester), isNull);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    surfaceNode.requestFocus();
+    await tester.pump();
+    await tester.pump();
+    expect(FocusManager.instance.highlightMode, FocusHighlightMode.traditional);
+    expect(_surfaceRing(tester), isNotNull);
   });
 
   testWidgets('TV focus changes fill and scale', (tester) async {
@@ -417,6 +478,7 @@ void main() {
   testWidgets('explicit fill stays put until focus only adds the focus ring', (
     tester,
   ) async {
+    _keyboardHighlight();
     final node = FocusNode();
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -904,4 +966,29 @@ double _scale(WidgetTester tester) {
         ),
       )
       .scale;
+}
+
+/// Desktop keyboard: focus is always drawn.
+void _keyboardHighlight() {
+  final previous = FocusManager.instance.highlightStrategy;
+  FocusManager.instance.highlightStrategy =
+      FocusHighlightStrategy.alwaysTraditional;
+  addTearDown(() => FocusManager.instance.highlightStrategy = previous);
+}
+
+/// The focus ring drawn in front of [AppSurfaceAction], or null.
+BoxBorder? _surfaceRing(WidgetTester tester) {
+  for (final box in tester.widgetList<DecoratedBox>(
+    find.descendant(
+      of: find.byKey(const Key('surface')),
+      matching: find.byType(DecoratedBox),
+    ),
+  )) {
+    final decoration = box.decoration;
+    if (box.position == DecorationPosition.foreground &&
+        decoration is BoxDecoration) {
+      return decoration.border;
+    }
+  }
+  return null;
 }

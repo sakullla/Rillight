@@ -4,9 +4,9 @@ import '../helpers/settle.dart';
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -1691,12 +1691,19 @@ void main() {
         expect(episodeFavorite.top, greaterThan(episodePlay.bottom));
         expect(episodePlayed.top, greaterThan(episodePlay.bottom));
         expect(episodeRestart.top, greaterThan(episodePlay.bottom));
-        expect(episodeNext.top, closeTo(episodeRestart.top, 1));
-        // 收藏与观看流程钮同在一组带标签格里，都有可见标签和 tooltip。
+        // 上一集/下一集是播放钮两侧的走带圆钮，与播放钮同一水平线。
+        expect(episodeNext.center.dy, closeTo(episodePlay.center.dy, 1));
+        expect(episodeNext.left, greaterThan(episodePlay.right));
+        final episodePrevious = tester.getRect(
+          find.byKey(CatalogKeys.previousEpisode),
+        );
+        expect(episodePrevious.center.dy, closeTo(episodePlay.center.dy, 1));
+        expect(episodePrevious.right, lessThan(episodePlay.left));
+        // 收藏、已看与从头播放在播放钮下方的操作条里，都有可见标签和 tooltip。
         for (final tip in ['收藏', '标记已看', '从头播放', '下一集']) {
           expect(findAppTooltip(tip), findsOneWidget, reason: tip);
         }
-        for (final label in ['收藏', '标记已看', '从头播放', '下一集']) {
+        for (final label in ['收藏', '标记已看', '从头播放']) {
           expect(
             find.descendant(
               of: find.byKey(const Key('phone-detail-actions')),
@@ -1842,12 +1849,20 @@ void main() {
         );
         final cells = [
           const Key('phone-detail-play-start'),
-          CatalogKeys.previousEpisode,
-          CatalogKeys.nextEpisode,
           const Key('phone-detail-favorite'),
           CatalogKeys.playedToggle,
         ].map((key) => tester.getRect(find.byKey(key))).toList();
-        // 五格在 200% 字号下放不进一行：整组折成两行，全部在屏内、播放钮下方。
+        // 上一集/下一集在播放钮两侧，大字号下也留在屏内。
+        for (final key in [
+          CatalogKeys.previousEpisode,
+          CatalogKeys.nextEpisode,
+        ]) {
+          final rect = tester.getRect(find.byKey(key));
+          expect(rect.center.dy, closeTo(play.center.dy, 1));
+          expect(rect.left, greaterThanOrEqualTo(0));
+          expect(rect.right, lessThanOrEqualTo(360));
+        }
+        // 操作条在 200% 字号下放不进一行：整组折成两行，全部在屏内、播放钮下方。
         final tops = cells.map((rect) => rect.top.round()).toSet();
         expect(tops.length, 2);
         for (final rect in cells) {
@@ -1896,6 +1911,27 @@ void main() {
           findsNothing,
         );
         expect(tester.getRect(bar).bottom, lessThan(favorite.top));
+        // 长按标题复制剧名。
+        final copied = <String>[];
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.setData') {
+              copied.add((call.arguments as Map)['text'] as String);
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
+        );
+        await tester.longPress(find.byKey(PhoneItemBanner.titleKey));
+        await tester.pump();
+        expect(copied, ['老友记']);
+        await tester.pump(const Duration(seconds: 3));
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],

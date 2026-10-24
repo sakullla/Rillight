@@ -2510,10 +2510,32 @@
   "detailPlayedDone": "已看过",
   "detailPlaybackOptions": "播放选项",
   "sourceSelectionEmpty": "暂未找到其他来源",
-  "sourceSelectionRetry": "部分来源加载失败，重试",
   "sourceSelectionMore": "继续查找",
+  "sourceSelectionClose": "关闭",
+  "sourceSelectionCurrent": "当前",
+  "sourceSelectionCurrentSection": "正在使用",
+  "sourceSelectionOtherSection": "其他服务器",
+  "sourceSelectionLockedSection": "需要解锁",
+  "sourceSelectionLockedHint": "解锁后一起查找",
+  "sourceSelectionFailedServers": "{count} 台服务器暂时连不上",
+  "@sourceSelectionFailedServers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sourceSelectionRetryAction": "重试",
+  "sourceSelectionVersionCount": "{count} 个版本",
+  "@sourceSelectionVersionCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sourceSelectionEmptyHint": "已解锁的服务器上都没有这部作品。",
   "sourceSelectionCheckDetails": "请核对影片详情",
-  "sourceSelectionHint": "点开后进入那一台服务器上的详情，可以再播放。",
   "sourceSelectionUnreachable": "这台服务器暂时连不上，当前连接不受影响。",
   "sourceSelectionFindingEpisode": "正在查找这一集",
   "sourceSelectionOpenEpisode": "打开这一集",
@@ -2547,14 +2569,6 @@
   "@sourceSelectionWatchedDays": {
     "placeholders": {
       "days": {
-        "type": "int"
-      }
-    }
-  },
-  "sourceSelectionEpisodeCount": "共 {count} 集",
-  "@sourceSelectionEpisodeCount": {
-    "placeholders": {
-      "count": {
         "type": "int"
       }
     }
@@ -2766,5 +2780,14 @@
       }
     }
   },
-  "serversAddShort": "添加"
+  "serversAddShort": "添加",
+  "copyAction": "复制",
+  "copiedText": "已复制：{text}",
+  "@copiedText": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  }
 }

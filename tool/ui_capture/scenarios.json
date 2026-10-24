@@ -115,6 +115,15 @@
   ]
 },
 {
+  "id": "entry-source-selection-episode",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
   "id": "entry-history-recovery",
   "feature": "entry",
   "platforms": [

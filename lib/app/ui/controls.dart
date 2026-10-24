@@ -200,6 +200,10 @@ class _AppButtonState extends State<AppButton> {
       _hovered = false,
       _pointerDown = false,
       _keyDown = false;
+
+  /// Focus is drawn only in keyboard/D-pad highlight mode. Focus restored to
+  /// a touched control (for example after a route pops) stays invisible.
+  bool _focusHighlight = false;
   bool get _pressed => _pointerDown || _keyDown;
   static final _activateKeys = {
     LogicalKeyboardKey.enter,
@@ -247,6 +251,8 @@ class _AppButtonState extends State<AppButton> {
   _ButtonFace _face(AppUiThemeData theme) {
     final colors = theme.colorScheme;
     final enabled = widget.onPressed != null;
+    // TV is driven by the remote: its focus is always the visible cursor.
+    final focused = _focused && (theme.tv || _focusHighlight);
     final customFill = widget.color ?? widget.style?.backgroundColor;
     final resting =
         customFill ??
@@ -258,7 +264,7 @@ class _AppButtonState extends State<AppButton> {
           ),
           AppButtonVariant.plain => AppInk.transparent,
         };
-    final tvFocus = theme.tv && _focused && enabled;
+    final tvFocus = theme.tv && focused && enabled;
     var fill = resting;
     var scale = 1.0;
     var side =
@@ -291,18 +297,18 @@ class _AppButtonState extends State<AppButton> {
       scale = _tvFocusScale;
       side = BorderSide(color: colors.primary, width: 2);
     } else if (_pressed) {
-      fill = theme.tv && _focused
+      fill = theme.tv && focused
           ? Color.alphaBlend(
               colors.scrim.withValues(alpha: .16),
               colors.inverseSurface,
             )
           : _stateFill(colors, resting, customFill != null, _PressKind.pressed);
       scale = theme.tv
-          ? (_focused ? _tvPressScale : 1)
+          ? (focused ? _tvPressScale : 1)
           : (widget.variant == AppButtonVariant.plain ? 1 : _pressScale);
       // 按下只压暗底色;键盘焦点保留焦点环,不再叠一圈强调色边。
-      if (_focused) side = BorderSide(color: colors.primary, width: 2);
-    } else if (_focused) {
+      if (focused) side = BorderSide(color: colors.primary, width: 2);
+    } else if (focused) {
       if (customFill == null) {
         fill = _stateFill(colors, resting, false, _PressKind.focus);
       }
@@ -449,6 +455,7 @@ class _AppButtonState extends State<AppButton> {
         });
         widget.onFocusChange?.call(value);
       },
+      onShowFocusHighlight: (value) => setState(() => _focusHighlight = value),
       onShowHoverHighlight: (value) => setState(() => _hovered = value),
       shortcuts: const <ShortcutActivator, Intent>{
         _KeyPhaseActivator(LogicalKeyboardKey.enter, up: false):
@@ -1220,6 +1227,10 @@ class AppSurfaceAction extends StatefulWidget {
 
 class _AppSurfaceActionState extends State<AppSurfaceAction> {
   bool _focused = false;
+
+  /// See [_AppButtonState._focusHighlight]: the ring follows keyboard/D-pad
+  /// highlight mode, so focus restored after touch never paints a stray ring.
+  bool _focusHighlight = false;
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onTap != null || widget.onLongPress != null;
@@ -1231,6 +1242,7 @@ class _AppSurfaceActionState extends State<AppSurfaceAction> {
         setState(() => _focused = value);
         widget.onFocusChange?.call(value);
       },
+      onShowFocusHighlight: (value) => setState(() => _focusHighlight = value),
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
         SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
@@ -1263,7 +1275,8 @@ class _AppSurfaceActionState extends State<AppSurfaceAction> {
               position: DecorationPosition.foreground,
               decoration: BoxDecoration(
                 borderRadius: widget.borderRadius,
-                border: _focused
+                border:
+                    _focused && (AppUiTheme.of(context).tv || _focusHighlight)
                     ? Border.all(
                         color: AppUiTheme.of(context).colorScheme.primary,
                         width: 2,

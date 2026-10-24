@@ -317,20 +317,32 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
             unlockBusy = false;
             unlockError = widget.auth.failure == null
                 ? l.serversConnectionFailed
-                : serverOperationFailure(l, widget.auth.failure!);
+                : serverOperationFailure(
+                    l,
+                    widget.auth.failure!,
+                    fallback: l.serversConnectionFailed,
+                  );
           });
         } else {
           setState(
             () => errors[server.id] = widget.auth.failure == null
                 ? l.serversConnectionFailed
-                : serverOperationFailure(l, widget.auth.failure!),
+                : serverOperationFailure(
+                    l,
+                    widget.auth.failure!,
+                    fallback: l.serversConnectionFailed,
+                  ),
           );
         }
       }
     } catch (failure) {
       if (mounted && revision == entryRevision) {
         setState(() {
-          final message = serverOperationFailure(l, failure);
+          final message = serverOperationFailure(
+            l,
+            failure,
+            fallback: l.serversConnectionFailed,
+          );
           if (step == 'unlock') {
             unlockError = message;
             unlockBusy = false;
