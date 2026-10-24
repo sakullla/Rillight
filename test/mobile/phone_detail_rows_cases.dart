@@ -1654,7 +1654,7 @@ void main() {
       );
       await settle(tester);
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
-      expect(find.text('已看'), findsNothing);
+      expect(find.text('已看'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -2243,15 +2243,16 @@ void main() {
     await Scrollable.ensureVisible(tester.element(row), alignment: 0.5);
     await settle(tester);
 
-    // 日期是独立一行的完整文本，不再和编号、时长挤在一行里被省略号截断。
+    // 日期是独立一行的完整文本；编号有独立标识，不与时长挤在一起。
     final date = find.descendant(of: row, matching: find.text('2025-01-07'));
     expect(date, findsOneWidget);
     final paragraph = tester.renderObject<RenderParagraph>(date);
     expect(paragraph.didExceedMaxLines, isFalse);
     expect(
-      find.descendant(of: row, matching: find.textContaining('S1E1 \u00b7 24')),
+      find.descendant(of: row, matching: find.textContaining('24')),
       findsOneWidget,
     );
+    expect(find.descendant(of: row, matching: find.text('E1')), findsOneWidget);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 

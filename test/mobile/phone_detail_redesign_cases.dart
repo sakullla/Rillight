@@ -175,9 +175,14 @@ void main() {
       );
       expect(find.text('第 1 季'), findsNothing);
       expect(find.text('圣女隐瞒身份的第一年。'), findsNothing);
-      // 已看只由剧照上的勾表达。
+      // 已看同时由剧照勾和文字表达，集号独立于集名，方便快速扫读。
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
-      expect(find.text('已看'), findsNothing);
+      expect(find.text('已看'), findsOneWidget);
+      expect(
+        find.byKey(const Key('phone-episode-number-episode-1')),
+        findsOneWidget,
+      );
+      expect(find.text('E1'), findsOneWidget);
       expect(find.byKey(const Key('phone-episode-current')), findsOneWidget);
       final currentIcon = tester.widget<Icon>(
         find.byKey(const Key('phone-episode-current')),

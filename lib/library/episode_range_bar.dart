@@ -203,10 +203,12 @@ class _EpisodeRangeBarState extends State<EpisodeRangeBar> {
                     padding: EdgeInsets.symmetric(
                       vertical: ((extent - labelHeight) / 2).clamp(4.0, 12.0),
                     ),
-                    shape: const StadiumBorder(),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                    ),
                     backgroundColor: selected
                         ? colors.primaryContainer
-                        : AppInk.transparent,
+                        : colors.surfaceContainerLow.withValues(alpha: .58),
                     foregroundColor: selected
                         ? colors.onPrimaryContainer
                         : colors.onSurfaceVariant,

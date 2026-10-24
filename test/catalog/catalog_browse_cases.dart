@@ -364,7 +364,11 @@ void main() {
       );
       final row = find.byKey(CatalogKeys.episodesRow);
       expect(
-        find.descendant(of: row, matching: find.text('1. The Pilot')),
+        find.descendant(of: row, matching: find.text('The Pilot')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text('E1')),
         findsOneWidget,
       );
       expect(

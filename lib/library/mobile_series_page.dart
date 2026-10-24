@@ -1172,8 +1172,8 @@ class _RevealEpisodeState extends State<_RevealEpisode> {
 
 /// 分集行：左侧 16:9 剧照，右侧标题与「编号 · 时长 · 播出日期」，简介通栏排在下面。
 ///
-/// 同一状态只表达一次：已看只由剧照上的勾和压暗表示；续播只由剧照底部进度条
-/// 表示；当前集用浅底色、左侧主色条和剧照中央播放标记标示，不只靠颜色。
+/// 已看由剧照勾和文字状态共同表达；续播由剧照底部进度条表示；当前集用
+/// 主题色描边、左侧主色条和剧照中央播放标记标示，不只靠颜色。
 ///
 /// 同一列表里每行等高：标题最多两行、事实最多两行，上半部按两者的最大高度
 /// 与剧照高度取大者；[reserveOverview] 时简介区固定两行高度，短简介或没有
@@ -1193,7 +1193,7 @@ class _EpisodeRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onPlay;
 
-  static const double _thumbWidth = 152;
+  static const double _thumbWidth = 136;
 
   static double _linesHeight(BuildContext context, TextStyle? style, int n) {
     final painter = TextPainter(
@@ -1217,11 +1217,10 @@ class _EpisodeRow extends StatelessWidget {
     final scheme = theme.colorScheme;
     final overview = plainOverview(episode.overview);
     final runtime = runtimeLabel(l, episode);
-    final code = seasonEpisodeCode(episode);
     final progress = episode.playbackProgress;
     final played = episode.userData.played;
     final premiere = episode.premiereDate;
-    final facts = <String>[?code, ?runtime];
+    final facts = <String>[?runtime];
     final date = premiere == null ? null : formatDateYmd(premiere);
     final titleStyle = theme.textTheme.titleSmall?.copyWith(
       fontSize: 16,
@@ -1241,11 +1240,38 @@ class _EpisodeRow extends StatelessWidget {
       color: scheme.onSurfaceVariant,
       height: 1.45,
     );
-    final title = Text(
-      episode.name,
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      style: titleStyle,
+    final title = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: EpisodeNumberBadge(
+            key: ValueKey('phone-episode-number-${episode.id}'),
+            number: episode.indexNumber,
+            selected: current,
+          ),
+        ),
+        if (episode.indexNumber != null) const SizedBox(width: AppSpacing.xs),
+        Expanded(
+          child: Text(
+            episode.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: titleStyle,
+          ),
+        ),
+        if (played) ...[
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            l.watchedAction,
+            maxLines: 1,
+            style: factsStyle?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
     );
     // 上半部高度：剧照与「两行标题 + 两行事实」取大者，所有行一致。
     final headHeight = math.max(
@@ -1264,14 +1290,16 @@ class _EpisodeRow extends StatelessWidget {
         brighten: .04,
         child: Container(
           decoration: BoxDecoration(
-            // 当前集用 primaryContainer 底色加左侧一枚主色竖胶囊标记，不描彩色边。
+            // 当前集以浅染底、主题色描边和左侧竖胶囊共同强调。
             color: current
-                ? scheme.primaryContainer
-                : scheme.surfaceContainerLow.withValues(alpha: .52),
+                ? scheme.primaryContainer.withValues(alpha: .82)
+                : scheme.surfaceContainerLow.withValues(alpha: .68),
             borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: current
-                ? null
-                : Border.all(color: AppEdge.of(theme.brightness)),
+            border: Border.all(
+              color: current
+                  ? scheme.primary.withValues(alpha: .48)
+                  : AppEdge.of(theme.brightness),
+            ),
           ),
           clipBehavior: Clip.antiAlias,
           child: Stack(

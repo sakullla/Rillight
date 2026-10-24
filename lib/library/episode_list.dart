@@ -610,10 +610,55 @@ class _EpisodeListState extends State<EpisodeList> {
   }
 }
 
-/// 分集行:左侧 16:9 缩略图,右侧「N. 标题」、时长/首播与两行简介。
+/// 分集编号来自数据，不依赖集名前缀；三端分集卡共用这一紧凑标识。
+class EpisodeNumberBadge extends StatelessWidget {
+  const EpisodeNumberBadge({
+    super.key,
+    required this.number,
+    this.selected = false,
+  });
+
+  final int? number;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final number = this.number;
+    if (number == null) return const SizedBox.shrink();
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minWidth: 34, minHeight: 22),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: selected
+            ? scheme.primary.withValues(alpha: .16)
+            : scheme.onSurface.withValues(alpha: .055),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+        border: Border.all(
+          color: selected
+              ? scheme.primary.withValues(alpha: .42)
+              : AppEdge.of(scheme.brightness),
+        ),
+      ),
+      child: Text(
+        'E$number',
+        maxLines: 1,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: selected ? scheme.primary : scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .25,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+    );
+  }
+}
+
+/// 分集行:左侧 16:9 缩略图,右侧独立集号、标题、时长/首播与两行简介。
 ///
-/// 当前集:淡染底 + 加粗标题 + 缩略图左上角播放标记;已看:标题转次要色,
-/// 缩略图右上角实心勾。点行进集详情;缩略图中央的圆钮直接开播
+/// 当前集:主题色描边 + 加粗标题 + 缩略图左上角播放标记;已看同时显示
+/// 文字状态和缩略图实心勾。点行进集详情;缩略图中央的圆钮直接开播
 /// ([CatalogKeys.episodePlay]);右上角 [CatalogKeys.episodePlayed] 切换已看。
 /// 行在网格里等高,由 [EpisodeGridMetrics] 给出;单独使用时按内容收缩。
 class EpisodeRow extends StatefulWidget {
@@ -690,25 +735,23 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final scheme = theme.colorScheme;
     final item = widget.item;
     final selected = widget.selected;
-    final title = numberedEpisodeTitle(item);
     final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
     final played = item.userData.played;
     final runtime = runtimeLabel(l10n, item);
     final premiere = item.premiereDate;
     final overview = plainOverview(item.overview);
     final revealed = _hovered || _focused;
-    // 当前集只留淡染底、加粗标题和剧照中央的播放标记。
-    // 侧边主色细条会切进画面，读起来像一条多余的边。悬停只在非当前集上加浅底。
+    // 每张卡都有稳定表面；当前集再用描边和集号强调，悬停只提升层次。
     final fill = selected
-        ? scheme.primaryContainer.withValues(alpha: 0.62)
+        ? scheme.primaryContainer.withValues(alpha: 0.58)
         : revealed
-        ? scheme.surfaceContainerHighest.withValues(alpha: 0.62)
-        : AppInk.transparent;
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.78)
+        : scheme.surfaceContainerLow.withValues(alpha: 0.52);
     final stroke = selected
-        ? scheme.primary.withValues(alpha: 0.45)
+        ? scheme.primary.withValues(alpha: 0.62)
         : revealed
         ? AppEdge.of(scheme.brightness, strong: true)
-        : AppInk.transparent;
+        : AppEdge.of(scheme.brightness);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -762,24 +805,44 @@ class _EpisodeRowState extends State<EpisodeRow> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: _EpisodeCardStyles.title(theme)?.copyWith(
-                              fontWeight: selected ? FontWeight.w700 : null,
-                              color: played && !selected
-                                  ? scheme.onSurfaceVariant
-                                  : scheme.onSurface,
-                            ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              EpisodeNumberBadge(
+                                key: ValueKey('episode-number-${item.id}'),
+                                number: item.indexNumber,
+                                selected: selected,
+                              ),
+                              if (item.indexNumber != null)
+                                const SizedBox(width: AppSpacing.xs),
+                              Expanded(
+                                child: Text(
+                                  item.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: _EpisodeCardStyles.title(theme)
+                                      ?.copyWith(
+                                        fontWeight: selected
+                                            ? FontWeight.w700
+                                            : FontWeight.w600,
+                                        color: played && !selected
+                                            ? scheme.onSurfaceVariant
+                                            : scheme.onSurface,
+                                      ),
+                                ),
+                              ),
+                            ],
                           ),
-                          if (runtime != null || premiere != null) ...[
+                          if (runtime != null ||
+                              premiere != null ||
+                              played) ...[
                             const SizedBox(height: 2),
                             _EpisodeMetaLine(
                               runtime: runtime,
                               premiere: premiere == null
                                   ? null
                                   : formatDateYmd(premiere),
+                              watched: played,
                             ),
                           ],
                           if (overview != null && overview.isNotEmpty) ...[
@@ -807,10 +870,11 @@ class _EpisodeRowState extends State<EpisodeRow> {
 
 /// 时长与首播日期一行;两段各自是独立文字,日期过长时省略。
 class _EpisodeMetaLine extends StatelessWidget {
-  const _EpisodeMetaLine({this.runtime, this.premiere});
+  const _EpisodeMetaLine({this.runtime, this.premiere, this.watched = false});
 
   final String? runtime;
   final String? premiere;
+  final bool watched;
 
   @override
   Widget build(BuildContext context) {
@@ -818,6 +882,7 @@ class _EpisodeMetaLine extends StatelessWidget {
         ?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
     final runtime = this.runtime;
     final premiere = this.premiere;
+    final theme = AppUiTheme.of(context);
     return Row(
       children: [
         if (runtime != null) Text(runtime, maxLines: 1, style: style),
@@ -832,6 +897,24 @@ class _EpisodeMetaLine extends StatelessWidget {
               style: style,
             ),
           ),
+        if (watched) ...[
+          if (runtime != null || premiere != null)
+            Text(' · ', maxLines: 1, style: style),
+          Icon(
+            CupertinoIcons.checkmark_circle_fill,
+            size: 12,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            AppLocalizations.of(context).watchedAction,
+            maxLines: 1,
+            style: style?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -352,6 +352,21 @@ void main() {
         tester.widget<EpisodeList>(find.byType(EpisodeList)).currentId,
         'episode-friends-s1e2',
       );
+      final nextNumber = find.byKey(
+        const ValueKey('episode-number-episode-friends-s1e2'),
+      );
+      expect(nextNumber, findsOneWidget);
+      expect(
+        find.descendant(of: nextNumber, matching: find.text('E2')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+          matching: find.text('已看'),
+        ),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

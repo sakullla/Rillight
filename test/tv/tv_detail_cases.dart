@@ -475,9 +475,13 @@ void main() {
       final plate = disc.decoration as BoxDecoration;
       expect(plate.shape, BoxShape.circle);
       expect(plate.color!.a, greaterThan(0.7));
-      // 分集卡标题是「N. 集名」，不再叠 S1E2 前缀。
-      final title = find.text('2. The One with the Resume');
+      // 集名保持原文，编号在副标题独立呈现，不叠 S1E2 前缀。
+      final title = find.text('The One with the Resume');
       expect(find.textContaining('S1E2 The One'), findsNothing);
+      expect(
+        find.descendant(of: currentTile, matching: find.textContaining('E2')),
+        findsOneWidget,
+      );
       expect(
         tester.widget<Text>(title).style?.color,
         AppUiTheme.of(tester.element(title)).colorScheme.primary,
@@ -725,6 +729,19 @@ void main() {
       // 分集卡标题不再重复 S1E1 与「第 N 集」。
       expect(find.textContaining('S1E1 第'), findsNothing);
       expect(find.text('第 1 集 · 小小奇遇'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('episode-friends-s1e1')),
+          matching: find.textContaining('E1'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<TvAction>(find.byKey(const Key('tv-detail-favorite')))
+            .pill,
+        isFalse,
+      );
 
       // 分集行横向移动，焦点一直留在分集上。
       for (var step = 0; step < 6; step++) {
@@ -780,7 +797,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('1. Season 2 opener'), findsOneWidget);
+      expect(find.text('Season 2 opener'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -867,7 +884,7 @@ void main() {
         find.descendant(of: backdrop, matching: find.byType(SkeletonBlock)),
         findsNothing,
       );
-      expect(find.text('1. 第二季开头', skipOffstage: false), findsOneWidget);
+      expect(find.text('第二季开头', skipOffstage: false), findsOneWidget);
       hold.complete();
       await _waitForBackdrop(tester, backdrop, 'season-friends-2');
       expect(

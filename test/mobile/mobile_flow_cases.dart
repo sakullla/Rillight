@@ -486,8 +486,8 @@ void main() {
       expect(find.byKey(const Key('phone-season-list')), findsNothing);
       expect(find.byKey(MobileSeriesPage.seasonSummaryKey), findsOneWidget);
       expect(find.text('The Pilot'), findsWidgets);
-      // 已看只由缩略图角标表达一次，不再另写「已看」文字。
-      expect(find.text('已看'), findsNothing);
+      // 已看角标和卡片文字状态共同表达，不只依赖颜色。
+      expect(find.text('已看'), findsOneWidget);
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
       expectPhoneOnly(tester);
 

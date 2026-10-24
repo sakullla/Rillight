@@ -71,6 +71,7 @@ void main() {
         onSelected: picked.add,
       );
       expect(find.byKey(CatalogKeys.seasonPicker), findsNothing);
+      expect(find.byKey(const Key('season-switcher-tabs')), findsOneWidget);
       expect(find.byKey(CatalogKeys.seasonTab('s1')), findsOneWidget);
       expect(find.byKey(CatalogKeys.seasonTab('s2')), findsOneWidget);
       expect(
@@ -104,6 +105,17 @@ void main() {
     );
     expect(find.byKey(CatalogKeys.seasonTab('s1')), findsNothing);
     expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+    expect(
+      tester
+          .widget<AppButton>(
+            find.descendant(
+              of: find.byKey(CatalogKeys.seasonPicker),
+              matching: find.byType(AppButton),
+            ),
+          )
+          .selected,
+      isTrue,
+    );
     expect(
       find.descendant(
         of: find.byKey(CatalogKeys.seasonPicker),

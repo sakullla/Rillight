@@ -77,7 +77,8 @@ void main() {
       ),
     );
     // 横排行:左侧 16:9 缩略图,右侧标题、时长与两行简介;行高约等于缩略图。
-    expect(thumb.left, closeTo(row.left + 8, 1));
+    expect(thumb.left, greaterThanOrEqualTo(row.left + 8));
+    expect(thumb.left, lessThan(row.left + 12));
     expect(thumb.width, closeTo(192, 1));
     expect(thumb.height, closeTo(192 * 9 / 16, 1));
     expect(row.height, lessThan(thumb.height + 24));
@@ -92,7 +93,7 @@ void main() {
       ),
     );
     expect(playIcon.fill, AppIcons.filled);
-    final title = tester.getRect(find.text('1. 勇者的相遇'));
+    final title = tester.getRect(find.text('勇者的相遇'));
     expect(title.left, greaterThan(thumb.right));
     expect(title.top, closeTo(thumb.top, 1));
     expect(find.text('23分钟'), findsOneWidget);
@@ -105,7 +106,8 @@ void main() {
       tester.getRect(find.textContaining('很长的本集简介')).bottom,
       lessThanOrEqualTo(row.bottom),
     );
-    expect(find.text('1. 勇者的相遇'), findsOneWidget);
+    expect(find.text('勇者的相遇'), findsOneWidget);
+    expect(find.text('E1'), findsOneWidget);
     final cardContainer = tester.widget<Container>(
       find
           .descendant(
@@ -191,7 +193,7 @@ void main() {
       expect(played, 1);
       expect(opened, 1);
       opened = 0;
-      await tester.tap(find.text('2. 半途'));
+      await tester.tap(find.text('半途'));
       await tester.pump();
       expect(opened, 1);
 
@@ -333,7 +335,7 @@ void main() {
       final mark = tester.getRect(find.byType(EpisodeCurrentMark));
       expect(mark.left - thumb.left, lessThan(12));
       expect(mark.top - thumb.top, lessThan(12));
-      final title = tester.widget<Text>(find.text('39. 终圆房'));
+      final title = tester.widget<Text>(find.text('终圆房'));
       expect(title.style?.fontWeight, FontWeight.w700);
 
       final rails = <RenderBox>[];
@@ -434,7 +436,7 @@ void main() {
         ),
       );
       await tester.pump();
-      return tester.getSize(find.text('1. 相遇')).height;
+      return tester.getSize(find.text('相遇')).height;
     }
 
     final hd = await titleHeight(const Size(1920, 1080));

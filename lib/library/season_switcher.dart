@@ -81,7 +81,8 @@ class SeasonSwitcher extends StatelessWidget {
         var available = constraints.maxWidth;
         if (maxWidth != null && maxWidth! < available) available = maxWidth!;
         final metrics = _TabMetrics.of(context, resolved);
-        if (metrics.rowWidth(seasons) <= available) {
+        final groupInset = resolved == SeasonSwitcherPlatform.tv ? 0.0 : 6.0;
+        if (metrics.rowWidth(seasons) + groupInset <= available) {
           return _tabs(context, resolved, metrics);
         }
         return _picker(context, resolved, metrics);
@@ -124,7 +125,19 @@ class SeasonSwitcher extends StatelessWidget {
               ),
       );
     }
-    return Row(mainAxisSize: MainAxisSize.min, children: children);
+    final row = Row(mainAxisSize: MainAxisSize.min, children: children);
+    if (resolved == SeasonSwitcherPlatform.tv) return row;
+    final scheme = AppUiTheme.of(context).colorScheme;
+    return Container(
+      key: const Key('season-switcher-tabs'),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow.withValues(alpha: .72),
+        borderRadius: BorderRadius.circular(AppRadii.md + 3),
+        border: Border.all(color: AppEdge.of(scheme.brightness)),
+      ),
+      child: row,
+    );
   }
 
   Widget _picker(
@@ -162,7 +175,7 @@ class SeasonSwitcher extends StatelessWidget {
     return _SeasonTab(
       key: CatalogKeys.seasonPicker,
       name: current.name,
-      selected: false,
+      selected: true,
       truncated: truncated,
       maxLabel: metrics.maxLabel,
       semanticLabel: semantic,
@@ -376,7 +389,9 @@ class _SeasonTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           backgroundColor: selected
               ? colors.primaryContainer
-              : colors.surfaceContainerLow,
+              : trailing != null
+              ? colors.surfaceContainerLow
+              : AppInk.transparent,
           foregroundColor: selected
               ? colors.onPrimaryContainer
               : colors.onSurface,
@@ -385,7 +400,14 @@ class _SeasonTab extends StatelessWidget {
                   color: colors.primary,
                   width: AppSelectionDecoration.borderWidth,
                 )
-              : BorderSide(color: AppEdge.of(colors.brightness)),
+              : BorderSide(
+                  color: trailing != null
+                      ? AppEdge.of(colors.brightness)
+                      : AppInk.transparent,
+                ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+          ),
           textStyle: theme.textTheme.labelLarge!.copyWith(
             fontWeight: selected || trailing != null
                 ? FontWeight.w600

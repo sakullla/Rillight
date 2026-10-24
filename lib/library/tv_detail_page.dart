@@ -395,7 +395,6 @@ class _TvDetailPageState extends State<TvDetailPage> {
       ),
       if (target?.canResume == true)
         TvAction(
-          pill: true,
           leading: const Icon(CupertinoIcons.arrow_counterclockwise),
           onPressed: _playBusy ? null : () => _play(fromStart: true),
           child: Text(l.playFromStart),
@@ -403,7 +402,6 @@ class _TvDetailPageState extends State<TvDetailPage> {
       if (item.isEpisode && _previous != null)
         TvAction(
           key: CatalogKeys.previousEpisode,
-          pill: true,
           leading: const Icon(AppIcons.skipPrevious, fill: AppIcons.filled),
           onPressed: () => _openEpisode(_previous!),
           child: Text(l.previousEpisode),
@@ -411,7 +409,6 @@ class _TvDetailPageState extends State<TvDetailPage> {
       if (item.isEpisode && _next != null)
         TvAction(
           key: CatalogKeys.nextEpisode,
-          pill: true,
           leading: const Icon(AppIcons.skipNext, fill: AppIcons.filled),
           onPressed: () => _openEpisode(_next!),
           child: Text(l.nextEpisode),
@@ -422,7 +419,6 @@ class _TvDetailPageState extends State<TvDetailPage> {
       if (c.supportsFavorite)
         TvAction(
           key: const Key('tv-detail-favorite'),
-          pill: true,
           active: item.userData.favorite,
           leading: Icon(
             AppIcons.favorite,
@@ -436,7 +432,6 @@ class _TvDetailPageState extends State<TvDetailPage> {
       if (!item.isSeries)
         TvAction(
           key: const Key('tv-detail-played-toggle'),
-          pill: true,
           active: item.userData.played,
           leading: Icon(
             item.userData.played
@@ -456,7 +451,6 @@ class _TvDetailPageState extends State<TvDetailPage> {
             excludeSemantics: true,
             child: TvAction(
               key: SourceSelectionActionView.key,
-              pill: true,
               leading: Icon(view.icon),
               onPressed: view.onPressed,
               child: Text(view.shortLabel),
@@ -775,6 +769,7 @@ class _TvEpisodeRowState extends State<_TvEpisodeRow> {
           final current = episode.id == widget.currentId;
           // 当前集由实心圆标和主色标题标出，续播由进度条标出，已看由角标标出。
           final meta = <String>[
+            if (episode.indexNumber != null) 'E${episode.indexNumber}',
             if (episode.premiereDate != null)
               formatDateYmd(episode.premiereDate!),
           ];
@@ -788,9 +783,8 @@ class _TvEpisodeRowState extends State<_TvEpisodeRow> {
                 current: current,
                 focusNode: widget.nodeFor(episode),
                 imageMaxWidth: metrics.imageMaxWidth,
-                // 「N. 集名」；集名已以集数开头（「第 3 集 …」）时直接用集名，
-                // 不再叠一层 S1E3 前缀。
-                title: numberedEpisodeTitle(episode),
+                // 编号独立放在副标题，集名不再为了去重而解析或改写。
+                title: episode.name,
                 subtitle: meta.join(' · '),
                 badge: runtimeLabel(l, episode),
                 onPressed: () => context.push(
