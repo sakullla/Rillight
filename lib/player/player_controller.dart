@@ -2809,10 +2809,8 @@ class PlayerController extends ChangeNotifier {
       _episodeSeriesId = seriesId;
       episodeListLoading = false;
       _emit();
-    } on MediaServerException {
-      if (!_accepts(operation)) {
-        return;
-      }
+    } catch (_) {
+      if (!_accepts(operation)) return;
       episodeListLoading = false;
       episodeListFailed = true;
       _emit();
@@ -2834,10 +2832,8 @@ class PlayerController extends ChangeNotifier {
         seasonId,
         aroundCurrent: item?.seasonId == seasonId,
       );
-    } on MediaServerException {
-      if (!_accepts(operation)) {
-        return;
-      }
+    } catch (_) {
+      if (!_accepts(operation)) return;
       episodeListFailed = true;
     }
     if (!_accepts(operation)) return;
@@ -2864,10 +2860,8 @@ class PlayerController extends ChangeNotifier {
     _emit();
     try {
       await _loadSeasonEpisodes(seasonId, aroundCurrent: true);
-    } on MediaServerException {
-      if (!_accepts(operation)) {
-        return;
-      }
+    } catch (_) {
+      if (!_accepts(operation)) return;
       episodeListFailed = true;
     }
     if (!_accepts(operation)) return;
@@ -2902,10 +2896,8 @@ class PlayerController extends ChangeNotifier {
             ? episodeTotal
             : episodeWindowEnd + page.items.length;
       }
-    } on MediaServerException {
-      if (!_accepts(operation) || gen != _episodePageGen) {
-        return;
-      }
+    } catch (_) {
+      if (!_accepts(operation) || gen != _episodePageGen) return;
       episodeListFailed = true;
     }
     if (!_accepts(operation) || gen != _episodePageGen) {
@@ -2942,10 +2934,8 @@ class PlayerController extends ChangeNotifier {
         episodeTotal = page.totalRecordCount ?? episodeTotal;
         episodeWindowStart = start;
       }
-    } on MediaServerException {
-      if (!_accepts(operation) || gen != _episodePageGen) {
-        return;
-      }
+    } catch (_) {
+      if (!_accepts(operation) || gen != _episodePageGen) return;
       episodeListFailed = true;
     }
     if (!_accepts(operation) || gen != _episodePageGen) {

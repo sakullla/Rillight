@@ -2589,8 +2589,23 @@ class AppLocalizationsZh extends AppLocalizations {
   String get serversPaste => '粘贴导入';
 
   @override
+  String get serversPasteAgain => '重新粘贴导入';
+
+  @override
+  String get serversPasteEmpty => '剪贴板里没有可识别的文本。请复制服务器信息，或在下方手动粘贴。';
+
+  @override
+  String get serversPasteReadFailed => '无法读取剪贴板。请检查系统剪贴板权限，或在下方手动粘贴。';
+
+  @override
+  String get serversPasteSuccess => '已识别并填入服务器信息，请确认后连接。';
+
+  @override
+  String get serversPastePreviewHint => '地址、账号和线路已填入，可继续修改。';
+
+  @override
   String get serversPasteHint =>
-      '把服务器信息粘贴到下面，再点「识别并预览」。\n\n可以识别这些内容：\n· 带标签的文本，例如「名称：家里」「地址：https://emby.example:8096」「用户名：alice」「密码：secret」「线路1：https://backup.example」\n· 每行一个 http 或 https 地址\n· SenPlayer、小幻影视或 Hills 的导入链接\n\n地址、名称、账号、密码和线路会直接填进登录表。\n打开这一页时才会读取剪贴板。';
+      '已自动读取剪贴板；没有读取到时，也可以手动粘贴。支持服务器地址、账号密码、备用线路，以及 SenPlayer、小幻影视和 Hills 导入链接。';
 
   @override
   String get serversPasteText => '粘贴服务器信息';
@@ -2756,6 +2771,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get sourceSelectionAction => '选择影片来源';
+
+  @override
+  String get sourceSelectionSwitchTitle => '切换片源';
+
+  @override
+  String get sourceSelectionPlayHint => '点选版本即可播放，并沿用当前观看位置';
+
+  @override
+  String get sourceSelectionSwitching => '正在切换片源，马上为你继续播放…';
+
+  @override
+  String get sourceSelectionSwitchFailed => '未能切换片源，请重试。当前服务器和观看进度不受影响。';
 
   @override
   String get sourceSelectionShort => '其他来源';

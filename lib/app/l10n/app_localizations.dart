@@ -4972,10 +4972,40 @@ abstract class AppLocalizations {
   /// **'粘贴导入'**
   String get serversPaste;
 
+  /// No description provided for @serversPasteAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新粘贴导入'**
+  String get serversPasteAgain;
+
+  /// No description provided for @serversPasteEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'剪贴板里没有可识别的文本。请复制服务器信息，或在下方手动粘贴。'**
+  String get serversPasteEmpty;
+
+  /// No description provided for @serversPasteReadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取剪贴板。请检查系统剪贴板权限，或在下方手动粘贴。'**
+  String get serversPasteReadFailed;
+
+  /// No description provided for @serversPasteSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'已识别并填入服务器信息，请确认后连接。'**
+  String get serversPasteSuccess;
+
+  /// No description provided for @serversPastePreviewHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'地址、账号和线路已填入，可继续修改。'**
+  String get serversPastePreviewHint;
+
   /// No description provided for @serversPasteHint.
   ///
   /// In zh, this message translates to:
-  /// **'把服务器信息粘贴到下面，再点「识别并预览」。\n\n可以识别这些内容：\n· 带标签的文本，例如「名称：家里」「地址：https://emby.example:8096」「用户名：alice」「密码：secret」「线路1：https://backup.example」\n· 每行一个 http 或 https 地址\n· SenPlayer、小幻影视或 Hills 的导入链接\n\n地址、名称、账号、密码和线路会直接填进登录表。\n打开这一页时才会读取剪贴板。'**
+  /// **'已自动读取剪贴板；没有读取到时，也可以手动粘贴。支持服务器地址、账号密码、备用线路，以及 SenPlayer、小幻影视和 Hills 导入链接。'**
   String get serversPasteHint;
 
   /// No description provided for @serversPasteText.
@@ -5295,6 +5325,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'选择影片来源'**
   String get sourceSelectionAction;
+
+  /// No description provided for @sourceSelectionSwitchTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换片源'**
+  String get sourceSelectionSwitchTitle;
+
+  /// No description provided for @sourceSelectionPlayHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'点选版本即可播放，并沿用当前观看位置'**
+  String get sourceSelectionPlayHint;
+
+  /// No description provided for @sourceSelectionSwitching.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在切换片源，马上为你继续播放…'**
+  String get sourceSelectionSwitching;
+
+  /// No description provided for @sourceSelectionSwitchFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能切换片源，请重试。当前服务器和观看进度不受影响。'**
+  String get sourceSelectionSwitchFailed;
 
   /// No description provided for @sourceSelectionShort.
   ///

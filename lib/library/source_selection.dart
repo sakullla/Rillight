@@ -610,6 +610,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
   SavedServer? _passwordTarget;
   ServerEntryTicket? _pendingEntry;
   bool _busy = false;
+  SourceReference? _openingRow;
   bool _resolved = false;
   String? _error;
   final Map<SourceReference, String> _rowErrors = {};
@@ -786,9 +787,15 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     required SourceReference row,
     String? version,
   }) async {
-    if (_busy || controller.origin == null) return;
+    if (_busy) return;
     final runtime = PlayerScope.of(context).runtime;
-    if (runtime == null) return;
+    if (controller.origin == null || runtime == null) {
+      setState(() {
+        _rowErrors[row] = AppLocalizations.of(context)
+            .sourceSelectionSwitchFailed;
+      });
+      return;
+    }
     final auth = AuthScope.of(context);
     final router = GoRouter.of(context);
     final navigator = Navigator.of(context);
@@ -798,6 +805,7 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
     ServerEntryTicket? entry = controller.entryFor(serverId);
     setState(() {
       _busy = true;
+      _openingRow = row;
       _rowErrors.remove(row);
     });
     try {
@@ -847,7 +855,6 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       );
       // Entering B can revoke the detail hosting this dialog. Navigation uses
       // the captured router, never that soon-to-be-unmounted A context.
-      // Detail only: the source list never starts playback.
       if (navigator.mounted && route?.isCurrent == true) {
         // A sheet/dialog pop starts an exit animation. Waiting for the pop
         // future prevents the following route replacement from racing the
@@ -855,21 +862,47 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         await navigator.maybePop();
       }
       overlay?.close();
-      router.go(
-        '/item/${Uri.encodeComponent(target.source.itemId)}'
-        '${version == null ? '' : '?version=${Uri.encodeQueryComponent(version)}'}',
-        extra: destination,
-      );
+      final openSeriesDetails = item.item.isSeries;
+      if (widget.phoneSheet && !openSeriesDetails) {
+        final resumePosition = current?.canResume == true
+            ? current!.resumePosition
+            : Duration.zero;
+        router.go(
+          '/play/${Uri.encodeComponent(target.source.itemId)}',
+          extra: PlayerOpenRequest(
+            itemId: target.source.itemId,
+            source: target.source,
+            work: target.work,
+            libraryId: target.libraryId,
+            accessGeneration: generation,
+            mediaSourceId: version,
+            startPosition: resumePosition > Duration.zero
+                ? resumePosition
+                : null,
+          ),
+        );
+      } else {
+        router.go(
+          '/item/${Uri.encodeComponent(target.source.itemId)}'
+          '${version == null ? '' : '?version=${Uri.encodeQueryComponent(version)}'}',
+          extra: destination,
+        );
+      }
     } catch (_) {
       entry?.cancel();
       if (mounted) {
         setState(() {
           _rowErrors[row] = AppLocalizations.of(context)
-              .sourceSelectionUnreachable;
+              .sourceSelectionSwitchFailed;
         });
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _openingRow = null;
+        });
+      }
     }
   }
 
@@ -1067,6 +1100,8 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
           : (id) => _openTarget(openItem, row: reference, version: id),
       lookup: _episodeStatus(l, comparison),
       error: _rowErrors[reference],
+      switching: _openingRow == reference,
+      directPlay: widget.phoneSheet,
     );
   }
 
@@ -1481,9 +1516,18 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
               ),
       );
       return _frame(
-        title: l.sourceSelectionAction,
+        title: widget.phoneSheet
+            ? l.sourceSelectionSwitchTitle
+            : l.sourceSelectionAction,
         subtitle: _workLine(controller.origin!.item),
-        status: status,
+        status: widget.phoneSheet
+            ? _StatusLine(
+                text: loading
+                    ? l.sourceSelectionSearching
+                    : l.sourceSelectionPlayHint,
+                loading: loading,
+              )
+            : status,
         toolbar: _filterBar(
           l,
           resolutions: resolutions,
@@ -2392,6 +2436,8 @@ class _SourceCard extends StatefulWidget {
     this.versionsLoading = false,
     this.lookup,
     this.error,
+    this.switching = false,
+    this.directPlay = false,
   });
 
   final Key cardKey;
@@ -2409,6 +2455,8 @@ class _SourceCard extends StatefulWidget {
   final bool versionsLoading;
   final Widget? lookup;
   final String? error;
+  final bool switching;
+  final bool directPlay;
 
   @override
   State<_SourceCard> createState() => _SourceCardState();
@@ -2435,13 +2483,15 @@ class _SourceCardState extends State<_SourceCard> {
     final interactive = widget.onOpen != null;
     final headerHovered = _hovered == -1 && interactive;
     final anyHovered = _hovered != null && interactive;
-    final radius = BorderRadius.circular(AppRadii.lg);
-    final border = widget.current
-        ? scheme.primary.withValues(alpha: .65)
+    final radius = BorderRadius.circular(
+      widget.directPlay ? AppRadii.xl : AppRadii.lg,
+    );
+    final border = widget.current || widget.switching
+        ? scheme.primary.withValues(alpha: widget.switching ? .9 : .65)
         : anyHovered
         ? scheme.onSurface.withValues(alpha: .22)
         : AppEdge.of(scheme.brightness, strong: true);
-    final fill = widget.current
+    final fill = widget.current || widget.switching
         ? Color.alphaBlend(
             scheme.primary.withValues(alpha: .06),
             scheme.surfaceContainerHigh,
@@ -2493,12 +2543,25 @@ class _SourceCardState extends State<_SourceCard> {
             ],
           ),
         ),
-        if (interactive) ...[
+        if (widget.switching) ...[
+          const SizedBox(width: 12),
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CupertinoActivityIndicator(radius: 10),
+          ),
+        ] else if (interactive) ...[
           const SizedBox(width: 8),
           Icon(
-            AppIcons.chevronRight,
-            size: 22,
-            color: headerHovered ? scheme.onSurface : scheme.onSurfaceVariant,
+            widget.directPlay
+                ? AppIcons.playbackSection
+                : AppIcons.chevronRight,
+            size: widget.directPlay ? 30 : 22,
+            color: widget.directPlay
+                ? scheme.primary
+                : headerHovered
+                ? scheme.onSurface
+                : scheme.onSurfaceVariant,
           ),
         ],
       ],
@@ -2511,14 +2574,26 @@ class _SourceCardState extends State<_SourceCard> {
     final trailing = widget.lookup != null || widget.error != null;
     return Padding(
       key: widget.cardKey,
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: widget.directPlay ? 14 : 10),
       child: AnimatedContainer(
         duration: AppMotion.fast,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: fill,
           borderRadius: radius,
-          border: Border.all(color: border, width: widget.current ? 1.5 : 1),
+          border: Border.all(
+            color: border,
+            width: widget.current || widget.switching ? 1.5 : 1,
+          ),
+          boxShadow: widget.directPlay && widget.switching
+              ? [
+                  BoxShadow(
+                    color: scheme.primary.withValues(alpha: .14),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2565,6 +2640,8 @@ class _SourceCardState extends State<_SourceCard> {
                 last: index == faces.length - 1 && !trailing,
                 hovered: _hovered == index && interactive,
                 onHover: (value) => _hover(index, value),
+                directPlay: widget.directPlay,
+                switching: widget.switching,
                 onTap: widget.onOpen == null
                     ? null
                     : widget.onOpenVersion == null
@@ -2586,12 +2663,21 @@ class _SourceCardState extends State<_SourceCard> {
                   child: widget.lookup,
                 ),
               ),
+            if (widget.switching)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: _RowNote(
+                  text: AppLocalizations.of(context).sourceSelectionSwitching,
+                  icon: AppIcons.swap,
+                  color: scheme.primary,
+                ),
+              ),
             if (widget.error != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
                 child: _RowNote(
                   text: widget.error!,
-                  icon: AppIcons.wifiOff,
+                  icon: AppIcons.error,
                   color: scheme.error,
                 ),
               ),
@@ -2803,6 +2889,8 @@ class _VersionRow extends StatelessWidget {
     required this.hovered,
     required this.onHover,
     required this.onTap,
+    required this.directPlay,
+    required this.switching,
   });
   final _VersionFace face;
   final String? badge;
@@ -2811,6 +2899,8 @@ class _VersionRow extends StatelessWidget {
   final bool hovered;
   final ValueChanged<bool> onHover;
   final VoidCallback? onTap;
+  final bool directPlay;
+  final bool switching;
 
   @override
   Widget build(BuildContext context) {
@@ -2829,7 +2919,12 @@ class _VersionRow extends StatelessWidget {
         color: hovered
             ? scheme.onSurface.withValues(alpha: .05)
             : scheme.onSurface.withValues(alpha: 0),
-        padding: EdgeInsets.fromLTRB(14, divided ? 0 : 8, 14, last ? 14 : 10),
+        padding: EdgeInsets.fromLTRB(
+          directPlay ? 16 : 14,
+          divided ? 0 : 8,
+          directPlay ? 16 : 14,
+          last ? 14 : 10,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2838,15 +2933,36 @@ class _VersionRow extends StatelessWidget {
               const SizedBox(height: 10),
             ],
             if (face.release != null)
-              Text(
-                face.release!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: .9),
-                  fontWeight: FontWeight.w500,
-                  height: 1.35,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      face.release!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: .9),
+                        fontWeight: directPlay
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                  if (directPlay) ...[
+                    const SizedBox(width: 12),
+                    Icon(
+                      switching ? AppIcons.swap : AppIcons.play,
+                      size: 20,
+                      color: scheme.primary,
+                    ),
+                  ],
+                ],
+              )
+            else if (directPlay)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: Icon(AppIcons.play, size: 20, color: scheme.primary),
               ),
             if (face.specs.isNotEmpty || badge != null) ...[
               if (face.release != null) const SizedBox(height: 8),

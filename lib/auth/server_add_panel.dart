@@ -58,9 +58,17 @@ class ServerAddPanelState extends State<ServerAddPanel> {
       final value = await Clipboard.getData(Clipboard.kTextPlain);
       if (!mounted) return;
       raw.text = value?.text ?? '';
-      if (raw.text.isNotEmpty) parse();
+      if (raw.text.trim().isEmpty) {
+        setState(() => error = AppLocalizations.of(context).serversPasteEmpty);
+      } else {
+        parse();
+      }
     } catch (_) {
-      /* Manual paste is still available. */
+      if (mounted) {
+        setState(
+          () => error = AppLocalizations.of(context).serversPasteReadFailed,
+        );
+      }
     }
   }
 
@@ -72,6 +80,10 @@ class ServerAddPanelState extends State<ServerAddPanel> {
   }
 
   void parse() {
+    if (raw.text.trim().isEmpty) {
+      setState(() => error = AppLocalizations.of(context).serversPasteEmpty);
+      return;
+    }
     final result = ServerPastePreview.parse(raw.text);
     setState(() {
       preview = result;
@@ -175,7 +187,7 @@ class ServerAddPanelState extends State<ServerAddPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (selected != null) ...[
-            ServerFeedback(l.serversPasteIncomplete, error: false),
+            ServerFeedback(l.serversPasteSuccess, error: false),
             const SizedBox(height: 8),
           ] else
             ServerGroupHeader(title: l.serversSelectType),
@@ -192,18 +204,19 @@ class ServerAddPanelState extends State<ServerAddPanel> {
             title: l.serversMoreOptions,
             margin: EdgeInsets.zero,
             children: [
-              if (selected == null)
-                ServerRow(
-                  key: const Key('server-add-paste'),
-                  onTap: paste,
-                  leading: const ServerRowIcon(
-                    AppIcons.copy,
-                    tone: ServerTone.neutral,
-                  ),
-                  title: Text(l.serversPaste),
-                  subtitle: Text(l.serversPasteRowHint),
-                  chevron: true,
+              ServerRow(
+                key: const Key('server-add-paste'),
+                onTap: paste,
+                leading: const ServerRowIcon(
+                  AppIcons.copy,
+                  tone: ServerTone.neutral,
                 ),
+                title: Text(
+                  selected == null ? l.serversPaste : l.serversPasteAgain,
+                ),
+                subtitle: Text(l.serversPasteRowHint),
+                chevron: true,
+              ),
               ServerRow(
                 key: const Key('server-add-import'),
                 onTap: widget.onImport,
@@ -222,7 +235,7 @@ class ServerAddPanelState extends State<ServerAddPanel> {
     return ServerFlowFrame(
       title: selected != null ? l.serversPastePreview : l.serversAddTitle,
       subtitle: selected != null
-          ? l.serversPasteIncomplete
+          ? l.serversPastePreviewHint
           : l.serversAddSubtitle,
       onBack: back,
       child: body,

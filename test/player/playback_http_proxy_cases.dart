@@ -422,12 +422,13 @@ void main() {
         final proxy = await _createProxy();
         final client = HttpClient();
         var requests = 0;
+        var refuse = persistent;
         final ports = <int>[];
         server.listen((request) async {
           ports.add(request.connectionInfo!.remotePort);
           requests++;
           final output = request.response;
-          if (requests == 1 || persistent) {
+          if (requests == 1 || refuse) {
             output.statusCode = HttpStatus.forbidden;
             output.write('temporarily unavailable');
           } else {
@@ -452,6 +453,23 @@ void main() {
           expect(proxy.diagnostics['serialUpstream'], true);
           expect(proxy.diagnostics['authenticationStatus'], isNull);
           expect(proxy.diagnostics['rateLimitStatus'], persistent ? 403 : null);
+          if (persistent) {
+            refuse = false;
+            final retryRoute = proxy.register(
+              Uri.parse('http://127.0.0.1:${server.port}/media'),
+            );
+            expect(proxy.diagnostics['rateLimitStatus'], isNull);
+            final retry = await client.getUrl(retryRoute);
+            retry.headers.set('range', 'bytes=0-');
+            final recovered = await retry.close();
+            expect(await recovered.expand((chunk) => chunk).toList(), [
+              1,
+              2,
+              3,
+              4,
+            ]);
+            expect(recovered.statusCode, HttpStatus.partialContent);
+          }
         } finally {
           client.close(force: true);
           await proxy.close();

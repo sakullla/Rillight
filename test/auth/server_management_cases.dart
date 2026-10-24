@@ -907,7 +907,7 @@ void main() {
         greaterThan(tester.getTopLeft(password).dy),
       );
       await serverUiTap(tester, const Key('server-add-paste'));
-      expect(find.textContaining('密码和线路会直接填进登录表'), findsOneWidget);
+      expect(find.textContaining('已自动读取剪贴板'), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('server-paste-text')),
         '名称：第一台\n地址：https://first.test\n用户：alice\n密码：private-one\n名称：第二台\n地址：https://second.test\n用户：bob\n密码：private-two',
@@ -948,4 +948,75 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('clipboard import fills the form and stays reentrant', (
+    tester,
+  ) async {
+    final auth = controller();
+    addTearDown(auth.dispose);
+    await auth.restore();
+    await pumpServerSelection(tester, auth);
+    await serverUiTap(tester, const Key('server-add'));
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') {
+        return {'text': '名称：客厅\n地址：https://living.test\n用户名：alice\n密码：secret'};
+      }
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    await serverUiTap(tester, const Key('server-add-paste'));
+    expect(find.text('已识别并填入服务器信息，请确认后连接。'), findsOneWidget);
+    expect(
+      tester
+          .widget<ui.AppTextField>(find.byKey(const Key('provider-address')))
+          .controller!
+          .text,
+      'https://living.test',
+    );
+    expect(
+      tester
+          .widget<ui.AppTextField>(find.byKey(const Key('provider-username')))
+          .controller!
+          .text,
+      'alice',
+    );
+    expect(find.byKey(const Key('server-add-paste')), findsOneWidget);
+    expect(find.text('重新粘贴导入'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('empty and unavailable clipboard explain the next action', (
+    tester,
+  ) async {
+    final auth = controller();
+    addTearDown(auth.dispose);
+    await auth.restore();
+    await pumpServerSelection(tester, auth);
+    await serverUiTap(tester, const Key('server-add'));
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var fail = false;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') {
+        if (fail) throw PlatformException(code: 'clipboard-unavailable');
+        return {'text': '   '};
+      }
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    await serverUiTap(tester, const Key('server-add-paste'));
+    expect(find.textContaining('剪贴板里没有可识别的文本'), findsOneWidget);
+    fail = true;
+    await serverUiTap(tester, const Key('server-flow-back'));
+    await serverUiTap(tester, const Key('server-add-paste'));
+    expect(find.textContaining('无法读取剪贴板'), findsOneWidget);
+    expect(find.byKey(const Key('server-paste-text')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }

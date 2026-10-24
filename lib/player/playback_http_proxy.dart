@@ -1641,6 +1641,12 @@ class PlaybackHttpProxy {
     if (url.toString().length > 16384 || context.length > 4096) {
       throw ArgumentError('Media resource identifier is too large');
     }
+    if (role == PlaybackResourceRole.media) {
+      // A new playback attempt must wait for its own upstream result. An
+      // exhausted 403 from the previous attempt must not fail it before the
+      // first response, while subtitle/HLS registrations must not clear it.
+      _rateLimitStatus = null;
+    }
     final token = _routes.seal(url, role.index, context);
     return Uri.parse(
       'http://127.0.0.1:${_server.port}/$_secret/$token/${_proxyFileName(url, role)}',

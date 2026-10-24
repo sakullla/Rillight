@@ -974,6 +974,27 @@ void main() {
   );
 
   test(
+    'season switch recovers from a non-HTTP failure and can retry',
+    () async {
+      controller.itemId = 'episode-friends-s1e1';
+      await controller.start();
+      await controller.loadEpisodeList();
+      final target = 'synthetic-second-season';
+      expect(controller.episodeSeasonId, isNot(target));
+      client.queryError = StateError('Playback permission revoked');
+      await controller.selectSeason(target);
+      expect(controller.episodeListLoading, isFalse);
+      expect(controller.episodeListFailed, isTrue);
+      expect(controller.episodeSeasonId, isNot(target));
+      client.queryError = null;
+      await controller.selectSeason(target);
+      expect(controller.episodeListLoading, isFalse);
+      expect(controller.episodeListFailed, isFalse);
+      expect(controller.episodeSeasonId, target);
+    },
+  );
+
+  test(
     'superseding list, more and earlier loading releases its busy flag',
     () async {
       await controller.playEpisode(episode('episode-friends-s1e1'));
@@ -1471,6 +1492,7 @@ class _ControlledClient extends EmbyClient {
   Completer<void>? stoppedGate;
   bool failReports = false;
   Completer<void>? queryGate;
+  Object? queryError;
   int queryCount = 0;
   int userRequests = 0;
 
@@ -1498,6 +1520,8 @@ class _ControlledClient extends EmbyClient {
     String imageTypes = MediaServerClient.imageTypes,
   }) async {
     queryCount++;
+    final error = queryError;
+    if (error != null) throw error;
     final gate = queryGate;
     final page = await super.queryItems(
       parentId: parentId,

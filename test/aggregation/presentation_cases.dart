@@ -2536,14 +2536,26 @@ void main() {
         expect(original.permit.isValid, isFalse);
         expect(f.auth.serverAccess.allows(f.bId), isTrue);
         expect(find.byKey(const Key('source-selection-title')), findsNothing);
-        expect(find.byType(detailType), findsOneWidget);
-        final destination = DetailSourceScope.maybeOf(
-          tester.element(find.byType(detailType)),
-        )!;
-        expect(destination.source.account.configuredServerId, f.bId);
-        expect(destination.permit.isValid, isTrue);
-        expect(app.router.state.uri.path, '/item/shared-id');
-        expect(backend.openCount, 0);
+        if (!environment.isDesktop && !environment.isTv) {
+          expect(find.byType(MobilePlayerPage), findsOneWidget);
+          expect(app.router.state.uri.path, '/play/shared-id');
+          final request = app.router.state.extra as PlayerOpenRequest;
+          expect(request.source?.account.configuredServerId, f.bId);
+          expect(request.autoResume, isTrue);
+          final player = tester.state<MobilePlayerPageState>(
+            find.byType(MobilePlayerPage),
+          );
+          expect(player.controller!.itemId, 'shared-id');
+        } else {
+          expect(find.byType(detailType), findsOneWidget);
+          final destination = DetailSourceScope.maybeOf(
+            tester.element(find.byType(detailType)),
+          )!;
+          expect(destination.source.account.configuredServerId, f.bId);
+          expect(destination.permit.isValid, isTrue);
+          expect(app.router.state.uri.path, '/item/shared-id');
+          expect(backend.openCount, 0);
+        }
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
         await _settle(tester);
@@ -4728,283 +4740,340 @@ void main() {
     tags: ['integration'],
   );
 
-  cases.testWidgets(
-    'episode source row opens the matched episode and does not autoplay',
-    (tester) async {
-      isolateImageCache();
-      final f = _Fixture();
-      final adapter = _HoldSeasonLookup([f.a, f.b]);
-      await tester.runAsync(() => f.open(sourceAdapter: adapter));
-      addTearDown(() {
-        if (!adapter.gate.isCompleted) adapter.gate.complete();
-      });
-      addTearDown(() => _drive(tester, f.close()));
-      f.a.items = [
-        _Series(),
-        FakeEmbyItem(
-          id: 'episode',
-          name: '合成剧集第一集',
-          type: 'Episode',
-          parentId: 'series',
-          seriesId: 'series',
-          indexNumber: 1,
-          parentIndexNumber: 1,
-        ),
-      ];
-      f.b.items = [
-        _Series(),
-        FakeEmbyItem(
-          id: 'b-season-1',
-          name: '第 1 季',
-          type: 'Season',
-          parentId: 'series',
-          seriesId: 'series',
-          indexNumber: 1,
-        ),
-        FakeEmbyItem(
-          id: 'b-episode-1',
-          name: '同一集',
-          type: 'Episode',
-          parentId: 'b-season-1',
-          seasonId: 'b-season-1',
-          seriesId: 'series',
-          indexNumber: 1,
-          parentIndexNumber: 1,
-          mediaStreams: const [
-            FakeMediaStream(
-              index: 0,
-              type: 'Video',
-              codec: 'hevc',
-              width: 3840,
-              height: 2160,
-            ),
-          ],
-          extraSources: const [
-            FakeMediaSource(
-              id: 'b-episode-1-1080p',
-              name: 'Show.S01E01.1080p.WEB-DL-GRP.mkv',
-              mediaStreams: [
-                FakeMediaStream(
-                  index: 0,
-                  type: 'Video',
-                  codec: 'h264',
-                  width: 1920,
-                  height: 1080,
-                ),
-              ],
-            ),
-          ],
-        ),
-        FakeEmbyItem(
-          id: 'b-episode-unnumbered',
-          name: '没有集号',
-          type: 'Episode',
-          parentId: 'b-season-1',
-          seasonId: 'b-season-1',
-          seriesId: 'series',
-          parentIndexNumber: 1,
-        ),
-        FakeEmbyItem(
-          id: 'b-season-blank',
-          name: '未编号季',
-          type: 'Season',
-          parentId: 'series',
-          seriesId: 'series',
-        ),
-        FakeEmbyItem(
-          id: 'b-season-2',
-          name: '第 2 季',
-          type: 'Season',
-          parentId: 'series',
-          seriesId: 'series',
-          indexNumber: 2,
-        ),
-        FakeEmbyItem(
-          id: 'b-episode-other',
-          name: '另一季的第一集',
-          type: 'Episode',
-          parentId: 'b-season-2',
-          seasonId: 'b-season-2',
-          seriesId: 'series',
-          indexNumber: 1,
-          parentIndexNumber: 2,
-        ),
-      ];
-      final backend = FakeVideoBackend();
-      final app = f.app(PresentationEnvironment.desktop, backend: backend);
-      await tester.pumpWidget(app);
-      await _settle(tester);
-      final account = await tester.runAsync(
-        () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
-      );
-      app.router.go(
-        '/item/episode',
-        extra: PlayerHostOpenItemCommand(
-          itemId: 'episode',
-          source: SourceReference(account: account!, itemId: 'episode'),
-          libraryId: 'view-tv',
-          accessGeneration: f.auth.sources
-              .permit(account, libraryId: 'view-tv')
-              .accessGeneration,
-        ),
-      );
-      await _settle(tester);
-      await tester.tap(find.byKey(const Key('source-selection-open')));
-      final card = find.byKey(Key('source-selection-item-${f.bId}-series'));
-      for (
-        var i = 0;
-        i < 40 && (card.evaluate().isEmpty || !adapter.entered);
-        i++
-      ) {
-        await tester.pump(const Duration(milliseconds: 50));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+  ]) {
+    cases.testWidgets(
+      '${environment.isDesktop ? 'desktop' : 'phone'} episode source row opens the matched episode',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        final adapter = _HoldSeasonLookup([f.a, f.b]);
+        await tester.runAsync(() => f.open(sourceAdapter: adapter));
+        addTearDown(() {
+          if (!adapter.gate.isCompleted) adapter.gate.complete();
+        });
+        addTearDown(() => _drive(tester, f.close()));
+        f.a.items = [
+          _Series(),
+          FakeEmbyItem(
+            id: 'episode',
+            name: '合成剧集第一集',
+            type: 'Episode',
+            parentId: 'series',
+            seriesId: 'series',
+            indexNumber: 1,
+            parentIndexNumber: 1,
+          ),
+        ];
+        f.b.items = [
+          _Series(),
+          FakeEmbyItem(
+            id: 'b-season-1',
+            name: '第 1 季',
+            type: 'Season',
+            parentId: 'series',
+            seriesId: 'series',
+            indexNumber: 1,
+          ),
+          FakeEmbyItem(
+            id: 'b-episode-1',
+            name: '同一集',
+            type: 'Episode',
+            parentId: 'b-season-1',
+            seasonId: 'b-season-1',
+            seriesId: 'series',
+            indexNumber: 1,
+            parentIndexNumber: 1,
+            mediaStreams: const [
+              FakeMediaStream(
+                index: 0,
+                type: 'Video',
+                codec: 'hevc',
+                width: 3840,
+                height: 2160,
+              ),
+            ],
+            extraSources: const [
+              FakeMediaSource(
+                id: 'b-episode-1-1080p',
+                name: 'Show.S01E01.1080p.WEB-DL-GRP.mkv',
+                mediaStreams: [
+                  FakeMediaStream(
+                    index: 0,
+                    type: 'Video',
+                    codec: 'h264',
+                    width: 1920,
+                    height: 1080,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          FakeEmbyItem(
+            id: 'b-episode-unnumbered',
+            name: '没有集号',
+            type: 'Episode',
+            parentId: 'b-season-1',
+            seasonId: 'b-season-1',
+            seriesId: 'series',
+            parentIndexNumber: 1,
+          ),
+          FakeEmbyItem(
+            id: 'b-season-blank',
+            name: '未编号季',
+            type: 'Season',
+            parentId: 'series',
+            seriesId: 'series',
+          ),
+          FakeEmbyItem(
+            id: 'b-season-2',
+            name: '第 2 季',
+            type: 'Season',
+            parentId: 'series',
+            seriesId: 'series',
+            indexNumber: 2,
+          ),
+          FakeEmbyItem(
+            id: 'b-episode-other',
+            name: '另一季的第一集',
+            type: 'Episode',
+            parentId: 'b-season-2',
+            seasonId: 'b-season-2',
+            seriesId: 'series',
+            indexNumber: 1,
+            parentIndexNumber: 2,
+          ),
+        ];
+        final backend = FakeVideoBackend();
+        final app = f.app(environment, backend: backend);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        final account = await tester.runAsync(
+          () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
         );
-      }
-      expect(card, findsOneWidget);
-      expect(find.text('正在查找这一集'), findsOneWidget);
-      expect(find.textContaining('打开这一集'), findsNothing);
-      expect(adapter.entered, isTrue);
-      await tester.tap(find.descendant(of: card, matching: find.text('来源 B')));
-      await tester.pump();
-      expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
-      expect(app.router.state.uri.path, '/item/episode');
-      expect(f.auth.session!.server.id, f.aId);
-      adapter.gate.complete();
-      await _settle(tester);
-      expect(find.text('正在查找这一集'), findsNothing);
-      expect(find.textContaining('打开这一集'), findsNothing);
-      expect(find.text('这台服务器上没有这一集'), findsNothing);
-      // The row shows that episode's versions like a movie row: the release
-      // name without its extension, and spec labels. A version named only
-      // after the episode adds nothing and shows no release line.
-      expect(
-        find.descendant(
+        app.router.go(
+          '/item/episode',
+          extra: PlayerHostOpenItemCommand(
+            itemId: 'episode',
+            source: SourceReference(account: account!, itemId: 'episode'),
+            libraryId: 'view-tv',
+            accessGeneration: f.auth.sources
+                .permit(account, libraryId: 'view-tv')
+                .accessGeneration,
+          ),
+        );
+        await _settle(tester);
+        await tester.tap(find.byKey(const Key('source-selection-open')));
+        final card = find.byKey(Key('source-selection-item-${f.bId}-series'));
+        for (
+          var i = 0;
+          i < 40 && (card.evaluate().isEmpty || !adapter.entered);
+          i++
+        ) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        expect(card, findsOneWidget);
+        expect(find.text('正在查找这一集'), findsOneWidget);
+        expect(find.textContaining('打开这一集'), findsNothing);
+        expect(adapter.entered, isTrue);
+        final serverName = find.descendant(
           of: card,
-          matching: find.text('Show.S01E01.1080p.WEB-DL-GRP'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: card, matching: find.text('4K')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: card, matching: find.text('1080p')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: card, matching: find.textContaining('同一集')),
-        findsOneWidget,
-        reason: 'Only the meta line names the matched episode',
-      );
-      expect(
-        f.b.requests.where(
-          (request) =>
-              request.contains('ParentId=series') &&
-              request.contains('IncludeItemTypes=Episode'),
-        ),
-        isEmpty,
-      );
-      expect(
-        f.b.requests.where(
-          (request) => request.contains('ParentId=b-season-2'),
-        ),
-        isEmpty,
-      );
-      expect(
-        f.b.requests.where(
-          (request) => request.contains('ParentId=b-season-blank'),
-        ),
-        isEmpty,
-      );
-      await tester.tap(find.descendant(of: card, matching: find.text('来源 B')));
-      await _settle(tester);
-      expect(app.router.state.uri.path, '/item/b-episode-1');
-      expect(f.auth.session!.server.id, f.bId);
-      expect(backend.openCount, 0);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      app.router.dispose();
-    },
-    tags: ['integration'],
-  );
-
-  cases.testWidgets(
-    'unmatched episode stays explained and still opens the series',
-    (tester) async {
-      isolateImageCache();
-      final f = _Fixture();
-      await tester.runAsync(f.open);
-      addTearDown(() => _drive(tester, f.close()));
-      f.a.items = [
-        _Series(),
-        FakeEmbyItem(
-          id: 'episode',
-          name: '合成剧集第一集',
-          type: 'Episode',
-          parentId: 'series',
-          seriesId: 'series',
-          indexNumber: 1,
-          parentIndexNumber: 1,
-        ),
-      ];
-      f.b.items = [
-        _Series(),
-        FakeEmbyItem(
-          id: 'b-season-blank',
-          name: '未编号季',
-          type: 'Season',
-          parentId: 'series',
-          seriesId: 'series',
-        ),
-      ];
-      final backend = FakeVideoBackend();
-      final app = f.app(PresentationEnvironment.desktop, backend: backend);
-      await tester.pumpWidget(app);
-      await _settle(tester);
-      final account = await tester.runAsync(
-        () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
-      );
-      app.router.go(
-        '/item/episode',
-        extra: PlayerHostOpenItemCommand(
-          itemId: 'episode',
-          source: SourceReference(account: account!, itemId: 'episode'),
-          libraryId: 'view-tv',
-          accessGeneration: f.auth.sources
-              .permit(account, libraryId: 'view-tv')
-              .accessGeneration,
-        ),
-      );
-      await _settle(tester);
-      await tester.tap(find.byKey(const Key('source-selection-open')));
-      await _settle(tester);
-      expect(find.text('正在查找这一集'), findsOneWidget);
-      expect(find.text('这台服务器上没有这一集'), findsNothing);
-      expect(find.text('查找这一集失败，可重试'), findsNothing);
-      expect(find.textContaining('打开这一集'), findsNothing);
-      final series = find.byKey(Key('source-selection-item-${f.bId}-series'));
-      await tester.tap(
-        find.descendant(of: series, matching: find.text('来源 B')),
-      );
-      await _settle(tester);
-      expect(app.router.state.uri.path, '/item/series');
-      expect(f.auth.session!.server.id, f.bId);
-      expect(backend.openCount, 0);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      app.router.dispose();
-    },
-    tags: ['integration'],
-  );
+          matching: find.text('来源 B'),
+        );
+        await tester.ensureVisible(serverName);
+        await tester.tap(serverName);
+        await tester.pump();
+        expect(find.byKey(const Key('source-selection-title')), findsOneWidget);
+        expect(app.router.state.uri.path, '/item/episode');
+        expect(f.auth.session!.server.id, f.aId);
+        adapter.gate.complete();
+        await _settle(tester);
+        expect(find.text('正在查找这一集'), findsNothing);
+        expect(find.textContaining('打开这一集'), findsNothing);
+        expect(find.text('这台服务器上没有这一集'), findsNothing);
+        // The row shows that episode's versions like a movie row: the release
+        // name without its extension, and spec labels. A version named only
+        // after the episode adds nothing and shows no release line.
+        expect(
+          find.descendant(
+            of: card,
+            matching: find.text('Show.S01E01.1080p.WEB-DL-GRP'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: card, matching: find.text('4K')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: card, matching: find.text('1080p')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: card, matching: find.textContaining('同一集')),
+          findsOneWidget,
+          reason: 'Only the meta line names the matched episode',
+        );
+        expect(
+          f.b.requests.where(
+            (request) =>
+                request.contains('ParentId=series') &&
+                request.contains('IncludeItemTypes=Episode'),
+          ),
+          isEmpty,
+        );
+        expect(
+          f.b.requests.where(
+            (request) => request.contains('ParentId=b-season-2'),
+          ),
+          isEmpty,
+        );
+        expect(
+          f.b.requests.where(
+            (request) => request.contains('ParentId=b-season-blank'),
+          ),
+          isEmpty,
+        );
+        await tester.ensureVisible(serverName);
+        await tester.tap(serverName);
+        await _settle(tester);
+        expect(f.auth.session!.server.id, f.bId);
+        if (environment.isDesktop) {
+          expect(app.router.state.uri.path, '/item/b-episode-1');
+          expect(backend.openCount, 0);
+        } else {
+          expect(app.router.state.uri.path, '/play/b-episode-1');
+          expect(find.byType(MobilePlayerPage), findsOneWidget);
+          final request = app.router.state.extra as PlayerOpenRequest;
+          expect(request.itemId, 'b-episode-1');
+          expect(request.autoResume, isTrue);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
 
   for (final environment in [
     PresentationEnvironment.desktop,
     PresentationEnvironment.phone,
   ]) {
     cases.testWidgets(
-      '${environment.isDesktop ? 'desktop' : 'phone'} version row opens the target detail with that version selected',
+      '${environment.isDesktop ? 'desktop' : 'phone'} unmatched episode stays explained and still opens the series',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
+        f.a.items = [
+          _Series(),
+          FakeEmbyItem(
+            id: 'episode',
+            name: '合成剧集第一集',
+            type: 'Episode',
+            parentId: 'series',
+            seriesId: 'series',
+            indexNumber: 1,
+            parentIndexNumber: 1,
+          ),
+        ];
+        f.b.items = [
+          _Series(),
+          FakeEmbyItem(
+            id: 'b-season-blank',
+            name: '未编号季',
+            type: 'Season',
+            parentId: 'series',
+            seriesId: 'series',
+          ),
+        ];
+        final backend = FakeVideoBackend();
+        final app = f.app(environment, backend: backend);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        final account = await tester.runAsync(
+          () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
+        );
+        app.router.go(
+          '/item/episode',
+          extra: PlayerHostOpenItemCommand(
+            itemId: 'episode',
+            source: SourceReference(account: account!, itemId: 'episode'),
+            libraryId: 'view-tv',
+            accessGeneration: f.auth.sources
+                .permit(account, libraryId: 'view-tv')
+                .accessGeneration,
+          ),
+        );
+        await _settle(tester);
+        await tester.tap(find.byKey(const Key('source-selection-open')));
+        await _settle(tester);
+        expect(find.text('正在查找这一集'), findsOneWidget);
+        expect(find.text('这台服务器上没有这一集'), findsNothing);
+        expect(find.text('查找这一集失败，可重试'), findsNothing);
+        expect(find.textContaining('打开这一集'), findsNothing);
+        final series = find.byKey(Key('source-selection-item-${f.bId}-series'));
+        await tester.tap(
+          find.descendant(of: series, matching: find.text('来源 B')),
+        );
+        await _settle(tester);
+        expect(app.router.state.uri.path, '/item/series');
+        expect(f.auth.session!.server.id, f.bId);
+        expect(backend.openCount, 0);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+
+  cases.testWidgets('phone series source switch stays on series detail', (
+    tester,
+  ) async {
+    isolateImageCache();
+    final f = _Fixture();
+    await tester.runAsync(f.open);
+    addTearDown(() => _drive(tester, f.close()));
+    f.a.items = [_Series()];
+    f.b.items = [_Series()];
+    final backend = FakeVideoBackend();
+    final app = f.app(PresentationEnvironment.phone, backend: backend);
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    await _openOwnedDetail(tester, f, app, serverId: f.aId, itemId: 'series');
+    final entry = find.byKey(const Key('source-selection-open'));
+    await tester.ensureVisible(entry);
+    await tester.tap(entry);
+    await _settle(tester);
+    final target = find.byKey(Key('source-selection-item-${f.bId}-series'));
+    await tester.ensureVisible(target);
+    await tester.tap(find.descendant(of: target, matching: find.text('来源 B')));
+    await _settle(tester);
+    expect(app.router.state.uri.path, '/item/series');
+    expect(find.byType(MobileDetailPage), findsOneWidget);
+    expect(find.byType(MobilePlayerPage), findsNothing);
+    expect(f.auth.session!.server.id, f.bId);
+    expect(backend.openCount, 0);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+  }, tags: ['integration']);
+
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+  ]) {
+    cases.testWidgets(
+      '${environment.isDesktop ? 'desktop' : 'phone'} version row opens the target with that version selected',
       (tester) async {
         isolateImageCache();
         final f = _Fixture();
@@ -5041,43 +5110,33 @@ void main() {
         await _settle(tester);
         expect(find.byKey(const Key('source-selection-title')), findsNothing);
         expect(f.auth.session!.server.id, f.bId);
-        expect(app.router.state.uri.path, '/item/shared-id');
-        expect(
-          app.router.state.uri.queryParameters['version'],
-          'internal-version-1',
-        );
-        expect(backend.openCount, 0, reason: 'Opening a version never plays');
-        // The detail shows the chosen version, not the default first one.
-        final detailType = environment.isDesktop
-            ? ItemDetailPage
-            : MobileDetailPage;
-        final detail = find.byType(detailType);
-        expect(
-          find.descendant(of: detail, matching: find.text('收藏版 4K')),
-          findsWidgets,
-        );
-        expect(
-          find.descendant(of: detail, matching: find.textContaining('剧场版')),
-          findsNothing,
-        );
-        if (!environment.isDesktop) {
-          // The routed choice is explicit: the first playback pins it.
-          final play = find.descendant(of: detail, matching: find.text('播放'));
-          await tester.ensureVisible(play.first);
-          await tester.tap(play.first);
-          for (
-            var i = 0;
-            i < 20 && app.router.state.extra is! PlayerOpenRequest;
-            i++
-          ) {
-            await tester.pump(const Duration(milliseconds: 50));
-            await tester.runAsync(
-              () => Future<void>.delayed(const Duration(milliseconds: 10)),
-            );
-          }
+        if (environment.isDesktop) {
+          expect(app.router.state.uri.path, '/item/shared-id');
+          expect(
+            app.router.state.uri.queryParameters['version'],
+            'internal-version-1',
+          );
+          expect(backend.openCount, 0);
+          final detail = find.byType(ItemDetailPage);
+          expect(
+            find.descendant(of: detail, matching: find.text('收藏版 4K')),
+            findsWidgets,
+          );
+          expect(
+            find.descendant(of: detail, matching: find.textContaining('剧场版')),
+            findsNothing,
+          );
+        } else {
+          expect(app.router.state.uri.path, '/play/shared-id');
+          expect(find.byType(MobilePlayerPage), findsOneWidget);
           final request = app.router.state.extra as PlayerOpenRequest;
           expect(request.itemId, 'shared-id');
           expect(request.mediaSourceId, 'internal-version-1');
+          expect(request.autoResume, isTrue);
+          final player = tester.state<MobilePlayerPageState>(
+            find.byType(MobilePlayerPage),
+          );
+          expect(player.controller!.itemId, 'shared-id');
         }
         await tester.pumpWidget(const SizedBox.shrink());
         await _settle(tester);
@@ -5126,7 +5185,7 @@ void main() {
         find.descendant(of: failed, matching: find.text('来源 B')),
       );
       await _settle(tester);
-      const unreachable = '这台服务器暂时连不上，当前连接不受影响。';
+      const unreachable = '未能切换片源，请重试。当前服务器和观看进度不受影响。';
       expect(find.text(unreachable), findsOneWidget);
       expect(
         find.descendant(of: failed, matching: find.text(unreachable)),
