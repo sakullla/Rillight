@@ -1042,8 +1042,50 @@ void main() {
         kPlayerProcessImageCacheMaxBytes,
       );
       configurePaintingImageCache();
+      expect(
+        MediaImageCache.instance.memoryLimitBytes,
+        MediaImageCache.defaultMemoryLimitBytes,
+      );
     },
   );
+
+  test('memory pressure trims decoded and encoded image layers', () async {
+    const imageId = (
+      serverId: 'pressure-server',
+      itemId: 'pressure-item',
+      type: 'Primary',
+      maxWidth: 120,
+    );
+    final bytes = Uint8List.fromList(const [1, 2, 3, 4]);
+    await MediaImageCache.instance.load(
+      serverId: imageId.serverId,
+      itemId: imageId.itemId,
+      type: imageId.type,
+      maxWidth: imageId.maxWidth,
+      fetch: () async => bytes,
+    );
+    expect(
+      MediaImageCache.instance.peek(
+        serverId: imageId.serverId,
+        itemId: imageId.itemId,
+        type: imageId.type,
+        maxWidth: imageId.maxWidth,
+      ),
+      bytes,
+    );
+
+    trimImageCachesForMemoryPressure();
+
+    expect(
+      MediaImageCache.instance.peek(
+        serverId: imageId.serverId,
+        itemId: imageId.itemId,
+        type: imageId.type,
+        maxWidth: imageId.maxWidth,
+      ),
+      isNull,
+    );
+  });
 
   testWidgets('retains the visible frame until the next image is ready', (
     tester,

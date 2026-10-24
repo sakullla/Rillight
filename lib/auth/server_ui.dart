@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import '../app/l10n/app_localizations.dart';
+import '../app/desktop_performance_host.dart';
 import '../app/ui/app_icons.dart';
 import '../app/ui/ui.dart';
 import '../media_server/capabilities.dart';
@@ -1035,18 +1036,21 @@ class ServerScrim extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark =
         AppUiTheme.of(context).colorScheme.brightness == Brightness.dark;
+    final fill = ColoredBox(
+      color: AppInk.black.withValues(
+        alpha: AppScrim.of(context, dark ? .5 : .28),
+      ),
+    );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-          child: ColoredBox(
-            color: AppInk.black.withValues(
-              alpha: AppScrim.of(context, dark ? .5 : .28),
-            ),
-          ),
-        ),
+        child: DesktopPerformanceHost.systemReducedMotionOf(context)
+            ? fill
+            : BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                child: fill,
+              ),
       ),
     );
   }

@@ -78,7 +78,9 @@ abstract class DesktopPlayerProcessControl
         PlayerLineProcessControl,
         PlayerUrgentLockProcessControl {
   DesktopPlayerProcessControl({
-    this.pollInterval = const Duration(milliseconds: 100),
+    // Readiness is signalled through the mailbox. A shorter poll interval
+    // removes the average half-interval from startup without busy-spinning.
+    this.pollInterval = const Duration(milliseconds: 50),
     this.startupTimeout = const Duration(seconds: 20),
   });
 

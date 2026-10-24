@@ -113,6 +113,32 @@ const int kMediaBackdropTvMaxRequestWidth = 2560;
 /// 电视解码缓存:4K 面板上海报与背景按物理像素解码,单张约为 1080p 的四倍。
 const int kTvPaintingImageCacheMaxBytes = 160 * 1024 * 1024;
 
+/// Drop both image layers when the host reports memory pressure. The disk
+/// cache remains intact, so the next visible card can be restored without a
+/// network request.
+void trimImageCachesForMemoryPressure() {
+  MediaImageCache.instance.clearMemory();
+  final cache = PaintingBinding.instance.imageCache;
+  cache.clearLiveImages();
+  cache.clear();
+}
+
+class _ImageMemoryPressureObserver with WidgetsBindingObserver {
+  @override
+  void didHaveMemoryPressure() {
+    trimImageCachesForMemoryPressure();
+  }
+}
+
+final _imageMemoryPressureObserver = _ImageMemoryPressureObserver();
+var _imageMemoryPressureObserverInstalled = false;
+
+void _installImageMemoryPressureObserver() {
+  if (_imageMemoryPressureObserverInstalled) return;
+  WidgetsBinding.instance.addObserver(_imageMemoryPressureObserver);
+  _imageMemoryPressureObserverInstalled = true;
+}
+
 /// 环境确认为电视后放宽解码缓存,避免 4K 下来回滚动反复解码。
 void configureTvPaintingImageCache() {
   PaintingBinding.instance.imageCache.maximumSizeBytes =
@@ -121,6 +147,7 @@ void configureTvPaintingImageCache() {
 
 /// 把 Flutter 解码缓存收到低配可承受的上限。启动时调用一次。
 void configurePaintingImageCache({bool playerProcess = false}) {
+  _installImageMemoryPressureObserver();
   final cache = PaintingBinding.instance.imageCache;
   if (playerProcess) {
     cache.maximumSize = kPlayerProcessImageCacheMaxEntries;
@@ -131,6 +158,11 @@ void configurePaintingImageCache({bool playerProcess = false}) {
   }
   cache.maximumSize = kPaintingImageCacheMaxEntries;
   cache.maximumSizeBytes = kPaintingImageCacheMaxBytes;
+  // Keep the byte cache in lockstep with Flutter's decoded image budget. This
+  // also matters in tests and when the host switches back from the player
+  // process configuration in the same isolate.
+  MediaImageCache.instance.memoryLimitBytes =
+      MediaImageCache.defaultMemoryLimitBytes;
 }
 
 /// 背景图按当前窗口逻辑宽 × DPR 取整,再夹在

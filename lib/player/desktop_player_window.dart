@@ -305,7 +305,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     this._consumeOpenItem,
     this.closeTimeout = const Duration(seconds: 1),
     this.reportTimeout = const Duration(seconds: 3),
-    this.watchInterval = const Duration(milliseconds: 400),
+    // IPC commands (especially line switches) should feel immediate. The
+    // mailbox reads are bounded and serialized, so 120ms avoids the old
+    // 400ms worst-case input lag without creating a tight polling loop.
+    this.watchInterval = const Duration(milliseconds: 120),
     this.entryOpenTimeout = const Duration(seconds: 150),
     this.lineSelectionTimeout = const Duration(seconds: 45),
   }) : _control = processControl ?? createPlayerProcessControl() {
@@ -1890,7 +1893,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       final run = commit;
       final transaction = _restoreSwitch;
       unawaited(
-        Future<void>.delayed(const Duration(milliseconds: 100), () async {
+        // The switch receipt has already been written before this callback is
+        // scheduled. Yield one turn so the child can consume it, then start
+        // the replacement immediately instead of adding a visible 100ms gap.
+        Future<void>.delayed(Duration.zero, () async {
           try {
             if (_pid != pid || _privateRevoked || _disposed) return;
             actual.permit.requireValid();
@@ -2176,7 +2182,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     if (widget._onExit == null) {
       unawaited(_configureWindow());
     }
-    _commands = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    _commands = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (_readingCommand || _closing != null) return;
       _readingCommand = true;
       unawaited(() async {

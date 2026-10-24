@@ -10,7 +10,25 @@ runs:
         set +o pipefail
         yes | sdkmanager --licenses > /dev/null
         set -o pipefail
-        sdkmanager --install 'ndk;28.2.13676358' 'build-tools;36.0.0'
+        # The hosted Android mirror occasionally returns a truncated NDK zip.
+        # sdkmanager leaves the failed package directory behind, so a plain
+        # retry sees the same broken install and fails again. Retry a bounded
+        # number of times and remove only the affected package's staging data.
+        for attempt in 1 2 3; do
+          if sdkmanager --install 'ndk;28.2.13676358' 'build-tools;36.0.0'; then
+            break
+          fi
+          if [[ "$attempt" == 3 ]]; then
+            echo "Android SDK installation failed after $attempt attempts" >&2
+            exit 1
+          fi
+          echo "Android SDK download failed (attempt $attempt); retrying" >&2
+          rm -rf \
+            "$ANDROID_HOME/ndk/28.2.13676358" \
+            "$ANDROID_HOME/.temp" \
+            "$ANDROID_HOME/.downloadIntermediates"
+          sleep $((attempt * 10))
+        done
     - name: Restore pinned Android SDK
       id: sdk-cache
       uses: actions/cache/restore@v5

@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/desktop_performance_host.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -318,28 +319,10 @@ class LibraryCardFace extends StatelessWidget {
               child: Align(
                 alignment: Alignment.bottomLeft,
                 // 玻璃铭牌:名字浮在毛玻璃片上,比裸白字更精致,亮图上也可读。
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                    child: ColoredBox(
-                      color: AppInk.black.withValues(alpha: 0.32),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                          vertical: AppSpacing.xxs,
-                        ),
-                        child: Text(
-                          library.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.start,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: AppInk.white,
-                          ),
-                        ),
-                      ),
-                    ),
+                child: _LibraryNameBadge(
+                  name: library.name,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppInk.white,
                   ),
                 ),
               ),
@@ -347,6 +330,47 @@ class LibraryCardFace extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The badge is small, but every visible library tile used to create a
+/// separate backdrop blur layer while the row was moving. Reuse the desktop
+/// performance signal so sustained raster pressure turns this into a solid
+/// badge along with the other optional effects.
+class _LibraryNameBadge extends StatelessWidget {
+  const _LibraryNameBadge({required this.name, required this.style});
+
+  final String name;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = ColoredBox(
+      color: AppInk.black.withValues(alpha: 0.32),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xxs,
+        ),
+        child: Text(
+          name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.start,
+          style: style,
+        ),
+      ),
+    );
+    final body = DesktopPerformanceHost.systemReducedMotionOf(context)
+        ? content
+        : BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: content,
+          );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: body,
     );
   }
 }
