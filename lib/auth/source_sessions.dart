@@ -1441,6 +1441,7 @@ class SourceSessionRegistry {
     String id,
     SavedServer Function(SavedServer) edit, {
     void Function()? guard,
+    bool prepareLines = true,
   }) async {
     final original = _allowed(id);
     final scope = _authorizations[id] ?? 0;
@@ -1486,16 +1487,18 @@ class SourceSessionRegistry {
     final prepared = <MediaServerClient>[];
     MediaServerClient? replacement;
     try {
-      for (final line in candidate.lines) {
-        if (original.lines.any(
-              (old) => old.id == line.id && old.address == line.address,
-            ) &&
-            !(connectionChanged && line.id == active.id)) {
-          continue;
+      if (prepareLines) {
+        for (final line in candidate.lines) {
+          if (original.lines.any(
+                (old) => old.id == line.id && old.address == line.address,
+              ) &&
+              !(connectionChanged && line.id == active.id)) {
+            continue;
+          }
+          final probe = await _prepareLine(candidate, line, current);
+          prepared.add(probe);
+          if (line.id == active.id) replacement = probe;
         }
-        final probe = await _prepareLine(candidate, line, current);
-        prepared.add(probe);
-        if (line.id == active.id) replacement = probe;
       }
       current();
       await _enqueue(() async {
@@ -1654,6 +1657,54 @@ class SourceSessionRegistry {
       ],
     );
   });
+
+  /// Validate discovered addresses concurrently, then persist the complete
+  /// batch once. The extension response is authenticated, but each address
+  /// still has to prove the same Emby identity before it is saved.
+  Future<int> addDiscoveredLines(String id, List<ServerLine> additions) async {
+    final original = _allowed(id);
+    final existing = original.lines.map((line) => line.address).toSet();
+    final unique = <ServerLine>[];
+    for (final line in additions) {
+      final address = normalizeServerAddress(line.address).toString();
+      if (existing.add(address)) {
+        unique.add(line.copyWith(address: address));
+      }
+    }
+    if (unique.isEmpty) return 0;
+
+    final scope = _authorizations[id] ?? 0;
+    final generation = access.generation(id);
+    void current() {
+      _requireCurrent(original, scope, generation);
+      final latest = _allowed(id);
+      if (jsonEncode(latest.lines.map((line) => line.toJson()).toList()) !=
+          jsonEncode(original.lines.map((line) => line.toJson()).toList())) {
+        throw StateError('Lines changed; retry the edit');
+      }
+    }
+
+    final candidate = original.copyWith(lines: [...original.lines, ...unique]);
+    final prepared = <MediaServerClient>[];
+    try {
+      prepared.addAll(
+        await Future.wait(
+          unique.map((line) => _prepareLine(candidate, line, current)),
+        ),
+      );
+      await _editLines(
+        id,
+        (server) => server.copyWith(lines: [...server.lines, ...unique]),
+        guard: current,
+        prepareLines: false,
+      );
+      return unique.length;
+    } finally {
+      for (final probe in prepared) {
+        probe.clearSession();
+      }
+    }
+  }
 
   Future<void> removeLine(String id, String lineId) => _editLines(id, (server) {
     if (!server.lines.any((l) => l.id == lineId)) {

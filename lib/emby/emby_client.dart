@@ -362,6 +362,52 @@ class EmbyClient
   String get userAgent => resolveUserAgent(_customUserAgent, device);
   @override
   String? get customUserAgent => _customUserAgent;
+  String? get _configuredClientName {
+    final value = _customUserAgent?.trim();
+    if (value == null || value.isEmpty) return null;
+    final token = value.split(RegExp(r'[\s/()]')).first.trim();
+    return token.isEmpty ? null : token;
+  }
+
+  String get _configuredClientVersion {
+    final value = _customUserAgent?.trim();
+    if (value != null) {
+      final match = RegExp(
+        r'^[^\s/()]+/(\S+)',
+        caseSensitive: false,
+      ).firstMatch(value);
+      if (match != null && match.group(1)!.isNotEmpty) {
+        return match.group(1)!;
+      }
+    }
+    return device.version;
+  }
+
+  Map<String, dynamic> _clientQuery({bool includeToken = true}) {
+    final clientName = _configuredClientName;
+    if (clientName == null) return const {};
+    return {
+      'X-Emby-Client': clientName,
+      'X-Emby-Device-Name': device.deviceName,
+      'X-Emby-Device-Id': device.deviceId,
+      'X-Emby-Client-Version': _configuredClientVersion,
+      'X-Emby-Language': 'en-us',
+      if (includeToken && _accessToken?.isNotEmpty == true)
+        'X-Emby-Token': _accessToken,
+    };
+  }
+
+  Uri _withClientQuery(Uri uri, {bool includeToken = true}) {
+    final extra = _clientQuery(includeToken: includeToken);
+    if (extra.isEmpty) return uri;
+    return uri.replace(
+      queryParameters: {
+        ...uri.queryParameters,
+        ...extra.map((key, value) => MapEntry(key, '$value')),
+      },
+    );
+  }
+
   @override
   bool get hasSession =>
       _baseUrl != null && _accessToken != null && _accessToken!.isNotEmpty;
@@ -399,7 +445,10 @@ class EmbyClient
 
   @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
-    final uri = joinEmbyApiPath(baseUrl, '/System/Info/Public');
+    final uri = _withClientQuery(
+      joinEmbyApiPath(baseUrl, '/System/Info/Public'),
+      includeToken: false,
+    );
     try {
       final response = await _dio.getUri<dynamic>(
         uri,
@@ -434,9 +483,10 @@ class EmbyClient
   /// The extension is a separate process. It is reachable when a reverse
   /// proxy mounts it on the Emby host, and by default at `host:52143`
   /// (`GET /emby/System/Ext/ServerDomains`). Candidate addresses are probed
-  /// together. Each keeps [probeTimeout]; an address that does not answer is
-  /// omitted and the others are still merged. A missing extension or a closed
-  /// port returns an empty list. HTTP 401 is remembered in
+  /// together. The configured Emby/reverse-proxy address keeps [probeTimeout];
+  /// the optional port-52143 fallback is deliberately shorter. An address that
+  /// does not answer is omitted and the others are still merged. A missing
+  /// extension or a closed port returns an empty list. HTTP 401 is remembered in
   /// [extendedDomainLoginRejected] so an empty list can be told apart from a
   /// rejected login.
   Future<List<ExtendedServerDomain>> loadExtendedServerDomains({
@@ -448,27 +498,44 @@ class EmbyClient
     if (!hasSession) return const [];
     final base = _baseUrl;
     if (base == null) return const [];
-    final uris = <Uri>[joinEmbyApiPath(base, '/System/Ext/ServerDomains')];
+    final requests = <Future<List<ExtendedServerDomain>>>[
+      _readExtendedDomains(
+        _withClientQuery(joinEmbyApiPath(base, '/System/Ext/ServerDomains')),
+        probeTimeout,
+      ),
+    ];
+    // A separately exposed sidecar is an optional fallback. Keep its probe
+    // short: the configured Emby/reverse-proxy port is authoritative, and a
+    // closed 52143 must not hold the refresh button for the full main timeout.
+    const sidecarTimeout = Duration(milliseconds: 750);
     if (base.port != 52143) {
-      uris.add(
-        joinEmbyApiPath(
-          base.replace(port: 52143, path: '', query: ''),
-          '/System/Ext/ServerDomains',
+      requests.add(
+        _readExtendedDomains(
+          _withClientQuery(
+            joinEmbyApiPath(
+              base.replace(port: 52143, path: '', query: ''),
+              '/System/Ext/ServerDomains',
+            ),
+          ),
+          sidecarTimeout,
         ),
       );
     }
     if (plainSidecar && base.scheme == 'https') {
-      uris.add(
-        joinEmbyApiPath(
-          base.replace(scheme: 'http', port: 52143, path: '', query: ''),
-          '/System/Ext/ServerDomains',
+      requests.add(
+        _readExtendedDomains(
+          _withClientQuery(
+            joinEmbyApiPath(
+              base.replace(scheme: 'http', port: 52143, path: '', query: ''),
+              '/System/Ext/ServerDomains',
+            ),
+          ),
+          sidecarTimeout,
         ),
       );
     }
     _extendedDomainProbeStarted = true;
-    final batches = await Future.wait(
-      uris.map((uri) => _readExtendedDomains(uri, probeTimeout)),
-    );
+    final batches = await Future.wait(requests);
     final found = <ExtendedServerDomain>[];
     final seen = <String>{};
     for (final items in batches) {
@@ -495,7 +562,9 @@ class EmbyClient
               receiveTimeout: timeout,
             ),
           )
-          .timeout(timeout + const Duration(seconds: 1));
+          // Dio already bounds connect/send/receive. Keep only a small guard
+          // for adapters that never surface their timeout as a Dio error.
+          .timeout(timeout + const Duration(milliseconds: 250));
       final payload = _decodeBody(response.data);
       if (response.statusCode != 200 || payload is! Map) {
         return const [];
@@ -538,7 +607,10 @@ class EmbyClient
     required String password,
     required String serverId,
   }) async {
-    final uri = joinEmbyApiPath(baseUrl, '/Users/AuthenticateByName');
+    final uri = _withClientQuery(
+      joinEmbyApiPath(baseUrl, '/Users/AuthenticateByName'),
+      includeToken: false,
+    );
     try {
       final response = await _dio.postUri<dynamic>(
         uri,
@@ -1553,10 +1625,12 @@ class EmbyClient
     if (!hasSession) {
       throw const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
-    final uri = joinEmbyApiPath(
-      _baseUrl!,
-      path,
-    ).replace(queryParameters: _stringifyQuery(queryParameters));
+    final uri = joinEmbyApiPath(_baseUrl!, path).replace(
+      queryParameters: _stringifyQuery({
+        ..._clientQuery(),
+        ...?queryParameters,
+      }),
+    );
     return _withAuthRetry(() async {
       final response = await _dio.requestUri<dynamic>(
         uri,
@@ -1580,10 +1654,12 @@ class EmbyClient
     if (!hasSession) {
       throw const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
-    final uri = joinEmbyApiPath(
-      _baseUrl!,
-      path,
-    ).replace(queryParameters: _stringifyQuery(queryParameters));
+    final uri = joinEmbyApiPath(_baseUrl!, path).replace(
+      queryParameters: _stringifyQuery({
+        ..._clientQuery(),
+        ...?queryParameters,
+      }),
+    );
     return readAuthorizedBytes(
       uri,
       cancelToken: cancelToken,
@@ -1681,6 +1757,7 @@ class EmbyClient
       device,
       userId: userId,
       token: token,
+      clientName: _configuredClientName,
     );
     return {
       'Authorization': authorization,

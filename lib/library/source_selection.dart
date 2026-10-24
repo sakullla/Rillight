@@ -343,19 +343,22 @@ class _SourceSelectionActionState extends State<SourceSelectionAction> {
             ),
           );
       if (!mounted || !stillHere() || !origin.permit.isValid) return;
-      var dto = await origin.permit.dispatch(
-        (c) => c.getItem(origin.source.itemId),
-      );
+      final MediaItem dto =
+          origin.resolvedItem ??
+          await origin.permit.dispatch((c) => c.getItem(origin.source.itemId));
+      var current = dto;
       EpisodeSource? episode;
-      if (dto.isEpisode && dto.seriesId != null) {
-        episode = EpisodeSource.fromMediaItem(origin.source, dto);
-        dto = await origin.permit.dispatch((c) => c.getItem(dto.seriesId!));
+      if (current.isEpisode && current.seriesId != null) {
+        episode = EpisodeSource.fromMediaItem(origin.source, current);
+        current = await origin.permit.dispatch(
+          (c) => c.getItem(current.seriesId!),
+        );
       }
       if (!mounted || !stillHere() || !origin.permit.isValid) return;
       final item = QueryItem(
-        SourceReference(account: origin.source.account, itemId: dto.id),
+        SourceReference(account: origin.source.account, itemId: current.id),
         origin.libraryId,
-        dto,
+        current,
       );
       controller = SameSourceQueryController(
         registry: runtime.registry,
@@ -534,13 +537,16 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
         _closeAfterFrame();
         return;
       }
-      var dto = await origin.permit.dispatch(
-        (c) => c.getItem(origin.source.itemId),
-      );
+      final MediaItem dto =
+          origin.resolvedItem ??
+          await origin.permit.dispatch((c) => c.getItem(origin.source.itemId));
+      var current = dto;
       EpisodeSource? episode;
-      if (dto.isEpisode && dto.seriesId != null) {
-        episode = EpisodeSource.fromMediaItem(origin.source, dto);
-        dto = await origin.permit.dispatch((c) => c.getItem(dto.seriesId!));
+      if (current.isEpisode && current.seriesId != null) {
+        episode = EpisodeSource.fromMediaItem(origin.source, current);
+        current = await origin.permit.dispatch(
+          (c) => c.getItem(current.seriesId!),
+        );
       }
       if (!mounted || !stillHere() || !origin.permit.isValid) {
         _closeAfterFrame();
@@ -548,9 +554,9 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       }
       _resolvedEpisode = episode;
       final item = QueryItem(
-        SourceReference(account: origin.source.account, itemId: dto.id),
+        SourceReference(account: origin.source.account, itemId: current.id),
         origin.libraryId,
-        dto,
+        current,
       );
       unawaited(
         widget.controller.start(origin: item, scope: QueryScope(pageSize: 24)),
@@ -726,7 +732,12 @@ class _SourceSelectionDialogState extends State<_SourceSelectionDialog> {
       // Entering B can revoke the detail hosting this dialog. Navigation uses
       // the captured router, never that soon-to-be-unmounted A context.
       // Detail only: the source list never starts playback.
-      if (navigator.mounted && route?.isCurrent == true) navigator.pop();
+      if (navigator.mounted && route?.isCurrent == true) {
+        // A sheet/dialog pop starts an exit animation. Waiting for the pop
+        // future prevents the following route replacement from racing the
+        // overlay teardown on Android.
+        await navigator.maybePop();
+      }
       overlay?.close();
       router.go(
         '/item/${Uri.encodeComponent(target.source.itemId)}',

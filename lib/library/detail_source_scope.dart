@@ -350,6 +350,7 @@ class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
         libraryId: libraryId,
         permit: permit,
         client: client,
+        resolvedItem: item,
       );
       _imagePolicy = MediaImageSourcePolicy(_origin!);
     } catch (_) {

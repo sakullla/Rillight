@@ -144,7 +144,9 @@ class ServerLineSelectorState extends State<ServerLineSelector> {
         eagerError: false,
       );
       if (mounted && ticket == _checksTicket) {
-        await widget.auth.refreshServers();
+        // Each check has already committed its result. Refresh the in-memory
+        // projection without rereading the file and all credentials again.
+        widget.auth.refreshServerProjection();
       }
     } finally {
       if (mounted && ticket == _checksTicket) {

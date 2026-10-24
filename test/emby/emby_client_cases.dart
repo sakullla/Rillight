@@ -261,11 +261,24 @@ void main() {
         userAgent: configuredUserAgent,
       );
       await emby.getPlaybackInfo(itemId: 'movie-inception');
-      expect(server.requests, [
-        'GET /emby/System/Info/Public',
-        'POST /emby/Users/AuthenticateByName',
-        'POST /emby/Items/movie-inception/PlaybackInfo?UserId=user-alice',
-      ]);
+      expect(
+        server.requests[0],
+        startsWith(
+          'GET /emby/System/Info/Public?X-Emby-Client=ConfiguredClient',
+        ),
+      );
+      expect(
+        server.requests[1],
+        startsWith(
+          'POST /emby/Users/AuthenticateByName?X-Emby-Client=ConfiguredClient',
+        ),
+      );
+      expect(
+        server.requests[2],
+        startsWith(
+          'POST /emby/Items/movie-inception/PlaybackInfo?X-Emby-Client=ConfiguredClient',
+        ),
+      );
       expect(server.requestUserAgents, everyElement(configuredUserAgent));
       expect(
         emby
@@ -434,7 +447,7 @@ void main() {
     expect(emby.userAgent, 'LineUA/9');
     await emby.getPublicInfo(server.baseUrl);
     expect(server.lastUserAgent, 'LineUA/9');
-    expect(server.lastAuthorization, contains('Client="Rillight"'));
+    expect(server.lastAuthorization, contains('Client="LineUA"'));
     expect(server.lastAuthorization, isNot(contains('LineUA/9')));
 
     final auth = await emby.authenticateByName(
@@ -450,7 +463,7 @@ void main() {
       userAgent: 'LineUA/9',
     );
     expect(emby.sessionHeaders['User-Agent'], 'LineUA/9');
-    expect(emby.sessionHeaders['Authorization'], contains('Client="Rillight"'));
+    expect(emby.sessionHeaders['Authorization'], contains('Client="LineUA"'));
     await emby.getJson('/System/Info');
     expect(server.lastUserAgent, 'LineUA/9');
 

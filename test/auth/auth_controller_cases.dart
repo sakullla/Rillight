@@ -510,7 +510,7 @@ void main() {
     expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
     expect(
       auth.client.sessionHeaders['Authorization'],
-      contains('Client="Rillight"'),
+      contains('Client="CustomUA"'),
     );
 
     await auth.connect(

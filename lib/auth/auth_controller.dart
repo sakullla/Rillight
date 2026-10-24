@@ -680,9 +680,7 @@ class AuthController extends ChangeNotifier {
       );
       final domains = await probe.loadExtendedServerDomains(
         plainSidecar: force,
-        probeTimeout: force
-            ? const Duration(seconds: 3)
-            : const Duration(seconds: 2),
+        probeTimeout: const Duration(seconds: 2),
       );
       final rejected =
           domains.isEmpty &&
@@ -690,14 +688,30 @@ class AuthController extends ChangeNotifier {
               (probe.extendedDomainProbeStarted &&
                   await _embyLoginRejected(probe.getUser(), stored.userId)));
       if (rejected) return -1;
+      final serverLines = _serverById(id)?.lines ?? const <ServerLine>[];
+      final existing = serverLines.map((line) => line.address).toSet();
+      final candidates = <ServerLine>[];
       for (final domain in domains) {
+        final address = domain.url.toString();
+        if (existing.add(address)) {
+          candidates.add(
+            ServerLine(
+              id: generateLineId(),
+              address: address,
+              nickname: _lineNickname(domain.name),
+            ),
+          );
+        }
+      }
+      if (candidates.isNotEmpty) {
         try {
-          if (await addLine(id, domain.url.toString(), nickname: domain.name)) {
-            added++;
-          }
+          await _lineMutation(id, () async {
+            await sources.addDiscoveredLines(id, candidates);
+          }, reloadServers: false);
+          added = candidates.length;
         } on Object {
-          // Extension entries are hints. Identity failures, duplicates and
-          // unreachable domains are all silently ignored.
+          // Extension entries are hints. Identity failures and unreachable
+          // domains are all silently ignored.
         }
       }
     } on Object {
@@ -965,6 +979,27 @@ class AuthController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  /// Publish the registry's already-updated configuration without rereading
+  /// the file or every server's credentials. Line checks and discovery have
+  /// already persisted their individual changes before reaching this point.
+  void refreshServerProjection() {
+    if (_disposed) return;
+    _savedServers = sources.project();
+    final selected = _session;
+    if (selected != null) {
+      final current = _serverById(selected.server.id);
+      if (current != null) {
+        _session = AuthSession(
+          server: current,
+          userId: selected.userId,
+          username: selected.username,
+          accessToken: selected.accessToken,
+        );
+      }
+    }
+    notifyListeners();
+  }
+
   Future<ServerImportResult> importServers(
     Iterable<ServerImportDraft> drafts,
   ) async {
@@ -985,15 +1020,29 @@ class AuthController extends ChangeNotifier {
 
   Future<void> _lineMutation(
     String id,
-    Future<void> Function() mutation,
-  ) async {
+    Future<void> Function() mutation, {
+    bool reloadServers = true,
+  }) async {
     final previous = _session;
     final generation = _activationGeneration;
     _refreshingSelection = true;
     try {
       await mutation();
-      await refreshServers();
+      if (reloadServers) {
+        await refreshServers();
+      } else {
+        _savedServers = sources.project();
+      }
       final next = sources.server(id);
+      if (!reloadServers && _session?.server.id == id) {
+        final selected = _session!;
+        _session = AuthSession(
+          server: next,
+          userId: selected.userId,
+          username: selected.username,
+          accessToken: selected.accessToken,
+        );
+      }
       if (_ownsActivation(generation) &&
           _session?.server.id == id &&
           previous?.server.id == id &&
@@ -1063,6 +1112,7 @@ class AuthController extends ChangeNotifier {
     String serverId,
     String address, {
     String? nickname,
+    bool reloadServers = true,
   }) async {
     final server = _serverById(serverId);
     if (server == null) return false;
@@ -1080,6 +1130,7 @@ class AuthController extends ChangeNotifier {
         url,
         nickname: _lineNickname(nickname),
       ),
+      reloadServers: reloadServers,
     );
     return true;
   }

@@ -4,9 +4,10 @@ String embyAuthorizationHeader(
   ClientDeviceInfo device, {
   String? userId,
   String? token,
+  String? clientName,
 }) {
   final parts = <String>[
-    'MediaBrowser Client="${_headerValue(device.clientName)}"',
+    'MediaBrowser Client="${_headerValue(clientName ?? device.clientName)}"',
     'Device="${_headerValue(device.deviceName)}"',
     'DeviceId="${_headerValue(device.deviceId)}"',
     'Version="${_headerValue(device.version)}"',

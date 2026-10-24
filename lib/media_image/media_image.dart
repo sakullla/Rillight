@@ -565,6 +565,10 @@ class _MediaImageState extends State<MediaImage> {
       }
     });
     await done.future;
+    // A detail route can mount its image subtree in the same frame as the
+    // inherited source scope. Wait for the frame's layout/paint completion so
+    // the first viewport check cannot stay null and leave the load turn parked.
+    await WidgetsBinding.instance.endOfFrame;
   }
 
   /// 滚动位置只在依赖变化时订阅。异步续体里再调 [Scrollable.maybeOf] 会登记继承依赖。
