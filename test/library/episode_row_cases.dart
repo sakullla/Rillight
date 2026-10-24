@@ -3,6 +3,7 @@ import '../helpers/cupertino_test_app.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 import 'package:rillight/app/ui/ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/models.dart';
@@ -213,6 +214,109 @@ void main() {
       expect(find.textContaining('剩余'), findsNothing);
       expect(tester.takeException(), isNull);
       semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    'episode thumbnail actions reveal and activate from the keyboard',
+    (tester) async {
+      var played = 0;
+      var watched = 0;
+      const item = MediaItem(
+        id: 'keyboard-episode',
+        name: '键盘可达',
+        type: 'Episode',
+        indexNumber: 1,
+      );
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          locale: const Locale('zh'),
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: CupertinoPageScaffold(
+            child: Column(
+              children: [
+                const Focus(
+                  autofocus: true,
+                  child: SizedBox(width: 1, height: 1),
+                ),
+                SizedBox(
+                  width: 600,
+                  child: EpisodeRow(
+                    item: item,
+                    selected: false,
+                    busyPlayed: false,
+                    onTap: () {},
+                    onPlay: () => played++,
+                    onTogglePlayed: () => watched++,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: ui.AppUiTheme.dark(),
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final playKey = CatalogKeys.episodePlay(item.id);
+      final watchedKey = CatalogKeys.episodePlayed(item.id);
+      AnimatedOpacity opacityOf(Key key) => tester.widget<AnimatedOpacity>(
+        find
+            .ancestor(
+              of: find.byKey(key),
+              matching: find.byType(AnimatedOpacity),
+            )
+            .first,
+      );
+      // 未看按钮和中央播放钮隐藏时不抢占 Tab 焦点。
+      expect(opacityOf(playKey).opacity, 0);
+      expect(opacityOf(watchedKey).opacity, 0);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(opacityOf(playKey).opacity, 1);
+      expect(opacityOf(watchedKey).opacity, 1);
+      expect(played, 0);
+      expect(watched, 0);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final playDecoration =
+          tester
+                  .widget<DecoratedBox>(
+                    find
+                        .descendant(
+                          of: find.byKey(
+                            const ValueKey(
+                              'episode-thumb-play-keyboard-episode',
+                            ),
+                          ),
+                          matching: find.byType(DecoratedBox),
+                        )
+                        .first,
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(playDecoration.border, isNotNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(played, 1);
+      expect(watched, 0);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(opacityOf(watchedKey).opacity, 1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(watched, 1);
+      expect(tester.takeException(), isNull);
     },
   );
 

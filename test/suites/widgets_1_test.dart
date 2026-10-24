@@ -3,15 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
 import '../app/app_shell_top_bar_cases.dart' as case1;
-import '../app/browsing_polish_cases.dart' as case2;
-import '../app/desktop_gestures_cases.dart' as case3;
-import '../auth/login_widgets_cases.dart' as case4;
-import '../auth/provider_connect_entry_user_agent_cases.dart' as case5;
-import '../catalog/item_detail_cases.dart' as case6;
-import '../library/episode_list_scroll_cases.dart' as case7;
-import '../mobile/phone_pages_cases.dart' as case8;
-import '../player/player_window_cases.dart' as case9;
-import '../widgets/scrim_icon_button_cases.dart' as case10;
+import '../app/desktop_gestures_cases.dart' as case2;
+import '../app/startup_history_recovery_cases.dart' as case3;
+import '../catalog/catalog_controller_cases.dart' as case4;
+import '../catalog/item_detail_cases.dart' as case5;
+import '../library/season_switcher_cases.dart' as case6;
+import '../mobile/phone_pages_cases.dart' as case7;
+import '../player/subtitle_viewport_cases.dart' as case8;
+import '../tv/tv_lan_pair_cases.dart' as case9;
+import '../widgets/liquid_glass_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,13 +21,13 @@ void main() {
     () => case0.mainShard(0, 6),
   );
   group('app/app_shell_top_bar_test.dart', case1.main);
-  group('app/browsing_polish_test.dart', case2.main);
-  group('app/desktop_gestures_test.dart', case3.main);
-  group('auth/login_widgets_test.dart', case4.main);
-  group('auth/provider_connect_entry_user_agent_test.dart', case5.main);
-  group('catalog/item_detail_test.dart [part 3]', () => case6.mainShard(2, 3));
-  group('library/episode_list_scroll_test.dart', case7.main);
-  group('mobile/phone_pages_test.dart [part 2]', () => case8.mainShard(1, 3));
-  group('player/player_window_test.dart', case9.main);
-  group('widgets/scrim_icon_button_test.dart', case10.main);
+  group('app/desktop_gestures_test.dart', case2.main);
+  group('app/startup_history_recovery_test.dart', case3.main);
+  group('catalog/catalog_controller_test.dart', case4.main);
+  group('catalog/item_detail_test.dart [part 3]', () => case5.mainShard(2, 3));
+  group('library/season_switcher_test.dart', case6.main);
+  group('mobile/phone_pages_test.dart [part 2]', () => case7.mainShard(1, 3));
+  group('player/subtitle_viewport_test.dart', case8.main);
+  group('tv/tv_lan_pair_test.dart [part 2]', () => case9.mainShard(1, 3));
+  group('widgets/liquid_glass_test.dart', case10.main);
 }

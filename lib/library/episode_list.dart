@@ -690,6 +690,7 @@ class EpisodeRow extends StatefulWidget {
 class _EpisodeRowState extends State<EpisodeRow> {
   bool _hovered = false;
   bool _focused = false;
+  bool _actionFocused = false;
 
   Future<void> _openMenu(BuildContext context, Offset globalPosition) async {
     final l10n = AppLocalizations.of(context);
@@ -740,7 +741,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final runtime = runtimeLabel(l10n, item);
     final premiere = item.premiereDate;
     final overview = plainOverview(item.overview);
-    final revealed = _hovered || _focused;
+    final revealed = _hovered || _focused || _actionFocused;
     // 每张卡都有稳定表面；当前集再用描边和集号强调，悬停只提升层次。
     final fill = selected
         ? scheme.primaryContainer.withValues(alpha: 0.58)
@@ -796,6 +797,8 @@ class _EpisodeRowState extends State<EpisodeRow> {
                           played: played,
                           busyPlayed: widget.busyPlayed,
                           onTogglePlayed: widget.onTogglePlayed,
+                          onActionFocusChange: (value) =>
+                              setState(() => _actionFocused = value),
                         ),
                       ),
                     ),
@@ -934,6 +937,7 @@ class _EpisodeThumb extends StatelessWidget {
     required this.played,
     required this.busyPlayed,
     required this.onTogglePlayed,
+    required this.onActionFocusChange,
   });
 
   final MediaItem item;
@@ -944,6 +948,7 @@ class _EpisodeThumb extends StatelessWidget {
   final bool played;
   final bool busyPlayed;
   final VoidCallback onTogglePlayed;
+  final ValueChanged<bool> onActionFocusChange;
 
   @override
   Widget build(BuildContext context) {
@@ -1024,7 +1029,9 @@ class _EpisodeThumb extends StatelessWidget {
                           clipBehavior: Clip.antiAlias,
                           child: AppSurfaceAction(
                             key: ValueKey('episode-thumb-play-${item.id}'),
-                            canRequestFocus: false,
+                            canRequestFocus: hovered,
+                            onFocusChange: onActionFocusChange,
+                            borderRadius: BorderRadius.circular(AppRadii.pill),
                             onTap: onPlay,
                             child: Padding(
                               padding: EdgeInsets.all(height * .06),
@@ -1050,30 +1057,35 @@ class _EpisodeThumb extends StatelessWidget {
                     // 未看的勾平时隐去,悬停/聚焦再出现;已看的实心勾常驻。
                     opacity: played || hovered ? 1 : 0,
                     duration: AppMotion.durationOf(context, AppMotion.fast),
-                    child: AppIconButton(
-                      key: CatalogKeys.episodePlayed(item.id),
-                      tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
-                      style: AppButtonStyle(
-                        minimumSize: const Size(32, 32),
-                        padding: const EdgeInsets.all(4),
-                      ),
-                      onPressed: busyPlayed ? null : onTogglePlayed,
-                      icon: played
-                          ? const EpisodeWatchedBadge()
-                          : DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: AppInk.black.withValues(alpha: .6),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(2),
-                                child: Icon(
-                                  CupertinoIcons.check_mark,
-                                  size: 16,
-                                  color: AppInk.white.withValues(alpha: .7),
+                    child: Focus(
+                      canRequestFocus: played || hovered,
+                      skipTraversal: true,
+                      onFocusChange: onActionFocusChange,
+                      child: AppIconButton(
+                        key: CatalogKeys.episodePlayed(item.id),
+                        tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+                        style: AppButtonStyle(
+                          minimumSize: const Size(32, 32),
+                          padding: const EdgeInsets.all(4),
+                        ),
+                        onPressed: busyPlayed ? null : onTogglePlayed,
+                        icon: played
+                            ? const EpisodeWatchedBadge()
+                            : DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: AppInk.black.withValues(alpha: .6),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(2),
+                                  child: Icon(
+                                    CupertinoIcons.check_mark,
+                                    size: 16,
+                                    color: AppInk.white.withValues(alpha: .7),
+                                  ),
                                 ),
                               ),
-                            ),
+                      ),
                     ),
                   ),
                 ),

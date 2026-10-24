@@ -2,34 +2,34 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../app/desktop_performance_host_cases.dart' as case0;
-import '../app/selection_contrast_cases.dart' as case1;
-import '../app/update_app_cases.dart' as case2;
-import '../auth/connect_page_cases.dart' as case3;
-import '../auth/server_management_cases.dart' as case4;
-import '../home/hero_carousel_cases.dart' as case5;
-import '../library/person_works_cases.dart' as case6;
-import '../library/source_detail_route_cases.dart' as case7;
-import '../media_image/blurred_artwork_cases.dart' as case8;
-import '../mobile/phone_player_cases.dart' as case9;
-import '../player/ended_navigation_cases.dart' as case10;
-import '../widgets/backdrop_scrim_cases.dart' as case11;
+import '../auth/connect_page_cases.dart' as case1;
+import '../auth/server_management_cases.dart' as case2;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case3;
+import '../home/hero_carousel_cases.dart' as case4;
+import '../library/source_detail_route_cases.dart' as case5;
+import '../mobile/phone_player_cases.dart' as case6;
+import '../player/player_cache_status_cases.dart' as case7;
+import '../player/seek_preview_cases.dart' as case8;
+import '../tv/tv_detail_cases.dart' as case9;
+import '../widgets/desktop_back_button_cases.dart' as case10;
+import '../widgets/long_press_copy_cases.dart' as case11;
 import '../helpers/suite.dart';
 
 void main() {
   verifySuiteManifest();
   group('app/desktop_performance_host_test.dart', case0.main);
-  group('app/selection_contrast_test.dart', case1.main);
-  group('app/update_app_test.dart', case2.main);
-  group('auth/connect_page_test.dart', case3.main);
-  group('auth/server_management_test.dart', case4.main);
-  group('home/hero_carousel_test.dart', case5.main);
-  group('library/person_works_test.dart', case6.main);
+  group('auth/connect_page_test.dart', case1.main);
+  group('auth/server_management_test.dart', case2.main);
+  group('catalog/shelf_grid_scroll_rebuild_test.dart', case3.main);
+  group('home/hero_carousel_test.dart', case4.main);
   group(
     'library/source_detail_route_test.dart [part 1]',
-    () => case7.mainShard(0, 3),
+    () => case5.mainShard(0, 3),
   );
-  group('media_image/blurred_artwork_test.dart', case8.main);
-  group('mobile/phone_player_test.dart [part 4]', () => case9.mainShard(3, 4));
-  group('player/ended_navigation_test.dart', case10.main);
-  group('widgets/backdrop_scrim_test.dart', case11.main);
+  group('mobile/phone_player_test.dart [part 4]', () => case6.mainShard(3, 4));
+  group('player/player_cache_status_test.dart', case7.main);
+  group('player/seek_preview_test.dart', case8.main);
+  group('tv/tv_detail_test.dart [part 2]', () => case9.mainShard(1, 2));
+  group('widgets/desktop_back_button_test.dart', case10.main);
+  group('widgets/long_press_copy_test.dart', case11.main);
 }

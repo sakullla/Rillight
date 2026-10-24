@@ -1241,7 +1241,7 @@ class _DetailPlayActions extends StatelessWidget {
     this.onNext,
   });
 
-  static const double _height = 52;
+  static const double _height = 54;
 
   final String label;
 
@@ -1280,7 +1280,9 @@ class _DetailPlayActions extends StatelessWidget {
       ...status,
     ];
     final episodeNavigation = onPrevious != null || onNext != null;
-    const shape = StadiumBorder();
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadii.lg + 2),
+    );
     final playButton = AppTooltip(
       message: tooltip ?? label,
       child: AppButton.icon(
@@ -1295,6 +1297,7 @@ class _DetailPlayActions extends StatelessWidget {
           textStyle: theme.textTheme.titleSmall?.copyWith(
             fontSize: 16,
             fontWeight: FontWeight.w700,
+            letterSpacing: .1,
           ),
         ),
         onPressed: enabled ? onPlay : null,
@@ -1437,85 +1440,46 @@ class _EpisodeStepButton extends StatelessWidget {
   }
 }
 
-/// 次级操作条：与播放钮同宽的一块圆角面板，按格数等分；格间一道短发丝线。
-/// 均分后一格窄于标签所需时整组折成多行（各行格数尽量相等），行间同样用
-/// 发丝线分开。
+/// 状态操作使用独立的圆形图标与文字，不再挤在一整块工具面板里。
+/// 每格仍有完整触控区；字号变大时按相同规则平衡折行。
 class _ActionBar extends StatelessWidget {
   const _ActionBar({required this.children});
 
   final List<Widget> children;
 
-  static const double _inset = 4;
-
   @override
   Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final light = theme.brightness == Brightness.light;
-    final hairline = AppEdge.of(theme.brightness, strong: true);
-    return DecoratedBox(
+    return LayoutBuilder(
       key: const Key('phone-detail-actions'),
-      decoration: BoxDecoration(
-        color: light
-            ? scheme.surfaceContainerLowest.withValues(alpha: .72)
-            : scheme.surfaceContainerHigh.withValues(alpha: .56),
-        borderRadius: BorderRadius.circular(AppRadii.lg + 4),
-        border: Border.all(color: hairline),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(_inset),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final layout = _StatusIconButton.gridOf(
-              context,
-              width: constraints.maxWidth,
-              count: children.length,
-            );
-            final rows = <List<Widget>>[
-              for (
-                var start = 0;
-                start < children.length;
-                start += layout.perRow
-              )
-                children.sublist(
-                  start,
-                  math.min(start + layout.perRow, children.length),
+      builder: (context, constraints) {
+        final layout = _StatusIconButton.gridOf(
+          context,
+          width: constraints.maxWidth,
+          count: children.length,
+        );
+        final rows = <List<Widget>>[
+          for (var start = 0; start < children.length; start += layout.perRow)
+            children.sublist(
+              start,
+              math.min(start + layout.perRow, children.length),
+            ),
+        ];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var index = 0; index < rows.length; index++)
+              Padding(
+                padding: EdgeInsets.only(top: index == 0 ? 0 : AppSpacing.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final child in rows[index]) Expanded(child: child),
+                  ],
                 ),
-            ];
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var index = 0; index < rows.length; index++) ...[
-                  if (index > 0)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Container(height: 1, color: hairline),
-                    ),
-                  IntrinsicHeight(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (
-                          var cell = 0;
-                          cell < rows[index].length;
-                          cell++
-                        ) ...[
-                          if (cell > 0)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              child: Container(width: 1, color: hairline),
-                            ),
-                          Expanded(child: rows[index][cell]),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            );
-          },
-        ),
-      ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1620,15 +1584,32 @@ class _StatusIconButton extends StatelessWidget {
         scale: .94,
         child: AppSurfaceAction(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                SizedBox(height: 26, child: Center(child: animatedIcon)),
-                const SizedBox(height: 5),
+                AnimatedContainer(
+                  duration: duration,
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: highlighted
+                        ? scheme.primaryContainer.withValues(alpha: .78)
+                        : scheme.surfaceContainerHigh.withValues(alpha: .62),
+                    border: Border.all(
+                      color: highlighted
+                          ? scheme.primary.withValues(alpha: .64)
+                          : AppEdge.of(theme.brightness),
+                      width: highlighted ? 1.2 : 1,
+                    ),
+                  ),
+                  child: Center(child: animatedIcon),
+                ),
+                const SizedBox(height: 7),
                 caption,
               ],
             ),

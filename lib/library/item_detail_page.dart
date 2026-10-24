@@ -2692,6 +2692,7 @@ class _DetailHeader extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
+        final stacked = width < 760;
         final viewportHeight = MediaQuery.sizeOf(context).height;
         final theme = AppUiTheme.of(context);
         final light = theme.brightness == Brightness.light;
@@ -2773,63 +2774,91 @@ class _DetailHeader extends StatelessWidget {
                     AppSpacing.page,
                     item.isSeries ? AppSpacing.md : AppSpacing.xl,
                   ),
-                  // At narrow desktop widths the poster and action stack must
-                  // remain readable; keeping them in a row squeezes the
-                  // primary play button behind long Chinese titles.
-                  child: Flex(
-                    direction: width < AppBreakpoints.compact
-                        ? Axis.vertical
-                        : Axis.horizontal,
-                    crossAxisAlignment: width < AppBreakpoints.compact
-                        ? CrossAxisAlignment.start
-                        : CrossAxisAlignment.end,
-                    mainAxisSize: width < AppBreakpoints.compact
-                        ? MainAxisSize.min
-                        : MainAxisSize.max,
-                    children: [
-                      _DetailPoster(
-                        item: artworkItem ?? item,
-                        layoutWidth: width,
-                      ),
-                      const SizedBox(width: AppSpacing.xl),
-                      Flexible(
-                        fit: width < AppBreakpoints.compact
-                            ? FlexFit.loose
-                            : FlexFit.tight,
-                        child: _DetailInfo(
-                          item: item,
-                          runtime: runtime,
-                          compact: width < AppBreakpoints.compact,
-                          seasonCount: seasonCount,
-                          seriesId: seriesId,
-                          overview: overview,
-                          overviewWidget: overviewWidget,
-                          genres: genres,
-                          mediaSource: _headerSource(item, mediaSourceId),
-                          playEpisode: item.isSeries ? nextEpisode : null,
-                          onLocateEpisode: onLocateEpisode,
-                          actions: _DetailActions(
-                            item: item,
-                            busyPlayed: busyPlayed,
-                            onPlay: onPlay,
-                            onPlayFromStart: onPlayFromStart,
-                            onOpenPreviousEpisode: onOpenPreviousEpisode,
-                            onOpenNextEpisode: onOpenNextEpisode,
-                            onPlayedChanged: onPlayedChanged,
-                            busyFavorite: busyFavorite,
-                            onFavoriteChanged: onFavoriteChanged,
-                            playEpisode: item.isSeries ? nextEpisode : null,
-                            mediaSourceId: mediaSourceId,
-                            audioStreamIndex: audioStreamIndex,
-                            subtitleStreamIndex: subtitleStreamIndex,
-                            onMediaSource: onMediaSource,
-                            onAudio: onAudio,
-                            onSubtitle: onSubtitle,
-                            holdOptionRow: holdOptionRow,
+                  child: Container(
+                    padding: EdgeInsets.all(
+                      stacked ? AppSpacing.md : AppSpacing.lg,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          theme.colorScheme.surfaceContainerLowest.withValues(
+                            alpha: light ? .82 : .58,
                           ),
+                          theme.colorScheme.surfaceContainerHigh.withValues(
+                            alpha: light ? .62 : .30,
+                          ),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(AppRadii.overlay + 4),
+                      border: Border.all(
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: light ? .10 : .16,
                         ),
                       ),
-                    ],
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppInk.scrim(light ? .08 : .20),
+                          blurRadius: 32,
+                          offset: const Offset(0, 16),
+                        ),
+                      ],
+                    ),
+                    // The poster and copy read as one content stage above the
+                    // artwork instead of unrelated widgets over a backdrop.
+                    child: Flex(
+                      direction: stacked ? Axis.vertical : Axis.horizontal,
+                      crossAxisAlignment: stacked
+                          ? CrossAxisAlignment.start
+                          : CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _DetailPoster(
+                          item: artworkItem ?? item,
+                          layoutWidth: width,
+                        ),
+                        SizedBox(
+                          width: stacked ? 0 : AppSpacing.xl,
+                          height: stacked ? AppSpacing.lg : 0,
+                        ),
+                        Flexible(
+                          fit: FlexFit.loose,
+                          child: _DetailInfo(
+                            item: item,
+                            runtime: runtime,
+                            compact: width < AppBreakpoints.compact,
+                            seasonCount: seasonCount,
+                            seriesId: seriesId,
+                            overview: overview,
+                            overviewWidget: overviewWidget,
+                            genres: genres,
+                            mediaSource: _headerSource(item, mediaSourceId),
+                            playEpisode: item.isSeries ? nextEpisode : null,
+                            onLocateEpisode: onLocateEpisode,
+                            actions: _DetailActions(
+                              item: item,
+                              busyPlayed: busyPlayed,
+                              onPlay: onPlay,
+                              onPlayFromStart: onPlayFromStart,
+                              onOpenPreviousEpisode: onOpenPreviousEpisode,
+                              onOpenNextEpisode: onOpenNextEpisode,
+                              onPlayedChanged: onPlayedChanged,
+                              busyFavorite: busyFavorite,
+                              onFavoriteChanged: onFavoriteChanged,
+                              playEpisode: item.isSeries ? nextEpisode : null,
+                              mediaSourceId: mediaSourceId,
+                              audioStreamIndex: audioStreamIndex,
+                              subtitleStreamIndex: subtitleStreamIndex,
+                              onMediaSource: onMediaSource,
+                              onAudio: onAudio,
+                              onSubtitle: onSubtitle,
+                              holdOptionRow: holdOptionRow,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -2970,16 +2999,24 @@ class _DetailInfo extends StatelessWidget {
             seriesId: seriesId ?? item.seriesId,
             seasonId: item.seasonId ?? item.parentId,
           ),
-        AppSelectableText(
-          item.name,
-          key: ItemDetailPage.titleKey,
-          style:
-              (compact
-                      ? theme.textTheme.headlineLarge
-                      : theme.textTheme.displaySmall)
-                  ?.copyWith(color: theme.colorScheme.onSurface),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: AppSelectableText(
+            item.name,
+            key: ItemDetailPage.titleKey,
+            style:
+                (compact
+                        ? theme.textTheme.headlineLarge
+                        : theme.textTheme.displaySmall)
+                    ?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                      height: 1.10,
+                      letterSpacing: -.6,
+                    ),
+          ),
         ),
-        const SizedBox(height: AppSpacing.xs),
+        const SizedBox(height: AppSpacing.sm),
         _MetaRow(
           item: item,
           runtime: runtime,
@@ -3007,14 +3044,14 @@ class _DetailInfo extends StatelessWidget {
               key: CatalogKeys.overview,
               maxLines: item.isSeries ? 2 : 3,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
-                height: 1.5,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.82),
+                height: 1.6,
               ),
             ),
           ),
         ],
-        SizedBox(height: item.isSeries ? AppSpacing.md : AppSpacing.lg),
+        SizedBox(height: item.isSeries ? AppSpacing.lg : AppSpacing.xl),
         actions,
       ],
     );
@@ -3291,14 +3328,28 @@ class _DetailActions extends StatelessWidget {
         : (resume
               ? l10n.resumePlayEpisode(playCode)
               : l10n.playEpisode(playCode));
-    final actions = <Widget>[
+    final playbackActions = <Widget>[
       if (onPlay != null)
-        AppActionButton(
-          key: PlayerKeys.open,
-          tier: AppActionTier.primary,
-          onPressed: onPlay,
-          icon: AppIcons.play,
-          label: playLabel,
+        Container(
+          constraints: const BoxConstraints(minWidth: 184),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+            boxShadow: [
+              BoxShadow(
+                color: AppUiTheme.of(context).colorScheme.primary
+                    .withValues(alpha: .24),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: AppActionButton(
+            key: PlayerKeys.open,
+            tier: AppActionTier.primary,
+            onPressed: onPlay,
+            icon: AppIcons.play,
+            label: playLabel,
+          ),
         ),
       if (onPlayFromStart != null)
         AppActionButton(
@@ -3321,6 +3372,8 @@ class _DetailActions extends StatelessWidget {
           icon: AppIcons.skipNext,
           label: l10n.nextEpisode,
         ),
+    ];
+    final libraryActions = <Widget>[
       if (onFavoriteChanged != null)
         AppActionButton(
           key: CatalogKeys.favoriteToggle,
@@ -3420,42 +3473,76 @@ class _DetailActions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Wrap(
+        Column(
           key: ItemDetailPage.actionRowKey,
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: actions,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: playbackActions,
+            ),
+            if (libraryActions.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: libraryActions,
+              ),
+            ],
+          ],
         ),
         if (choices.isEmpty && holdOptionRow) ...[
           const SizedBox(height: AppSpacing.md),
           // 不可见、不可点、不进读屏，只占一枚选项胶囊的高度。
-          const Visibility(
+          Visibility(
             key: ItemDetailPage.optionRowPlaceholderKey,
             visible: false,
             maintainSize: true,
             maintainAnimation: true,
             maintainState: true,
-            child: _DetailOptionChip(
-              icon: AppIcons.mediaSource,
-              value: ' ',
-              tooltip: ' ',
-              semanticLabel: '',
-              onPressed: null,
+            child: Container(
+              padding: const EdgeInsets.all(AppSpacing.xs),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                border: Border.all(color: AppInk.transparent),
+              ),
+              child: const _DetailOptionChip(
+                icon: AppIcons.mediaSource,
+                value: ' ',
+                tooltip: ' ',
+                semanticLabel: '',
+                onPressed: null,
+              ),
             ),
           ),
         ],
         if (choices.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
-          Semantics(
-            container: true,
-            label: l10n.detailPlaybackOptions,
-            child: Wrap(
-              key: ItemDetailPage.optionRowKey,
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: choices,
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.xs),
+            decoration: BoxDecoration(
+              color: AppUiTheme.of(context).colorScheme.surfaceContainerLowest
+                  .withValues(alpha: .24),
+              borderRadius: BorderRadius.circular(AppRadii.lg),
+              border: Border.all(
+                color: AppUiTheme.of(context).colorScheme.onSurface
+                    .withValues(alpha: .10),
+              ),
+            ),
+            child: Semantics(
+              container: true,
+              label: l10n.detailPlaybackOptions,
+              child: Wrap(
+                key: ItemDetailPage.optionRowKey,
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: choices,
+              ),
             ),
           ),
         ],

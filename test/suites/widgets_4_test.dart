@@ -2,18 +2,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
-import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case1;
-import '../helpers/capture_png_cases.dart' as case2;
-import '../mobile/mobile_flow_cases.dart' as case3;
-import '../mobile/motion_behaviors_cases.dart' as case4;
-import '../mobile/phone_nav_style_cases.dart' as case5;
-import '../mobile/phone_player_cases.dart' as case6;
-import '../player/android_seek_cancellation_cases.dart' as case7;
-import '../player/buffer_snapshot_cases.dart' as case8;
-import '../player/phone_presentation_lifecycle_cases.dart' as case9;
-import '../player/playback_image_release_cases.dart' as case10;
-import '../player/player_cache_status_cases.dart' as case11;
-import '../widgets/long_press_copy_cases.dart' as case12;
+import '../app/hero_palette_overlay_cases.dart' as case1;
+import '../app/selection_contrast_cases.dart' as case2;
+import '../app/update_check_cases.dart' as case3;
+import '../app/update_ui_cases.dart' as case4;
+import '../media_image/blurred_artwork_cases.dart' as case5;
+import '../mobile/mobile_flow_cases.dart' as case6;
+import '../mobile/phone_player_cases.dart' as case7;
+import '../mobile/search_cached_refresh_cases.dart' as case8;
+import '../player/buffer_snapshot_cases.dart' as case9;
+import '../player/desktop_player_page_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -22,16 +20,14 @@ void main() {
     'aggregation/presentation_test.dart [part 4]',
     () => case0.mainShard(3, 6),
   );
-  group('catalog/shelf_grid_scroll_rebuild_test.dart', case1.main);
-  group('helpers/capture_png_test.dart', case2.main);
-  group('mobile/mobile_flow_test.dart [part 4]', () => case3.mainShard(3, 4));
-  group('mobile/motion_behaviors_test.dart', case4.main);
-  group('mobile/phone_nav_style_test.dart', case5.main);
-  group('mobile/phone_player_test.dart [part 1]', () => case6.mainShard(0, 4));
-  group('player/android_seek_cancellation_test.dart', case7.main);
-  group('player/buffer_snapshot_test.dart', case8.main);
-  group('player/phone_presentation_lifecycle_test.dart', case9.main);
-  group('player/playback_image_release_test.dart', case10.main);
-  group('player/player_cache_status_test.dart', case11.main);
-  group('widgets/long_press_copy_test.dart', case12.main);
+  group('app/hero_palette_overlay_test.dart', case1.main);
+  group('app/selection_contrast_test.dart', case2.main);
+  group('app/update_check_test.dart', case3.main);
+  group('app/update_ui_test.dart', case4.main);
+  group('media_image/blurred_artwork_test.dart', case5.main);
+  group('mobile/mobile_flow_test.dart [part 4]', () => case6.mainShard(3, 4));
+  group('mobile/phone_player_test.dart [part 1]', () => case7.mainShard(0, 4));
+  group('mobile/search_cached_refresh_test.dart', case8.main);
+  group('player/buffer_snapshot_test.dart', case9.main);
+  group('player/desktop_player_page_test.dart', case10.main);
 }

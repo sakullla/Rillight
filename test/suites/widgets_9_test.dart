@@ -3,15 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/playback_runtime_cases.dart' as case0;
 import '../app/desktop_scroll_cases.dart' as case1;
-import '../app/rating_star_cases.dart' as case2;
-import '../auth/provider_connect_routing_cases.dart' as case3;
-import '../library/album_cases.dart' as case4;
-import '../mobile/mobile_flow_cases.dart' as case5;
-import '../mobile/phone_detail_rows_cases.dart' as case6;
-import '../mobile/phone_home_first_screen_cases.dart' as case7;
-import '../player/subtitle_menu_cases.dart' as case8;
-import '../tv/tv_detail_cases.dart' as case9;
-import '../tv/tv_top_nav_scale_cases.dart' as case10;
+import '../app/update_app_cases.dart' as case2;
+import '../auth/provider_connect_entry_user_agent_cases.dart' as case3;
+import '../library/episode_list_scroll_cases.dart' as case4;
+import '../library/external_link_cases.dart' as case5;
+import '../library/person_works_cases.dart' as case6;
+import '../mobile/mobile_flow_cases.dart' as case7;
+import '../mobile/phone_detail_rows_cases.dart' as case8;
+import '../player/player_window_cases.dart' as case9;
+import '../widgets/backdrop_scrim_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,14 +21,14 @@ void main() {
     () => case0.mainShard(0, 3),
   );
   group('app/desktop_scroll_test.dart', case1.main);
-  group('app/rating_star_test.dart', case2.main);
-  group('auth/provider_connect_routing_test.dart', case3.main);
-  group('library/album_test.dart', case4.main);
-  group('mobile/mobile_flow_test.dart [part 1]', () => case5.mainShard(0, 4));
-  group('mobile/mobile_flow_test.dart [part 3]', () => case5.mainShard(2, 4));
-  group('mobile/phone_detail_rows_test.dart', case6.main);
-  group('mobile/phone_home_first_screen_test.dart', case7.main);
-  group('player/subtitle_menu_test.dart', case8.main);
-  group('tv/tv_detail_test.dart [part 1]', () => case9.mainShard(0, 2));
-  group('tv/tv_top_nav_scale_test.dart', case10.main);
+  group('app/update_app_test.dart', case2.main);
+  group('auth/provider_connect_entry_user_agent_test.dart', case3.main);
+  group('library/episode_list_scroll_test.dart', case4.main);
+  group('library/external_link_test.dart', case5.main);
+  group('library/person_works_test.dart', case6.main);
+  group('mobile/mobile_flow_test.dart [part 1]', () => case7.mainShard(0, 4));
+  group('mobile/mobile_flow_test.dart [part 3]', () => case7.mainShard(2, 4));
+  group('mobile/phone_detail_rows_test.dart', case8.main);
+  group('player/player_window_test.dart', case9.main);
+  group('widgets/backdrop_scrim_test.dart', case10.main);
 }

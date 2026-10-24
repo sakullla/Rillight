@@ -108,7 +108,7 @@ class PhoneItemBanner extends StatelessWidget {
     final size = MediaQuery.sizeOf(context);
     // viewPadding 只含状态栏；padding 在透明顶栏下还加了顶栏高度。
     final top = MediaQuery.viewPaddingOf(context).top;
-    final byWidth = size.width * .68 + top;
+    final byWidth = size.width * .74 + top;
     final cap = size.height * 0.52;
     // 取整：半像素的画面下缘会和页面底色叠出一条细线。
     return (byWidth < cap ? byWidth : cap).floorToDouble();
@@ -137,7 +137,7 @@ class PhoneItemBanner extends StatelessWidget {
     final posterWidth = posterWidthOf(context);
     final posterHeight = posterWidth * 1.5;
     // 海报卡上半截压在画面上，标题块与海报底边对齐；单集无海报卡时让标题块稳稳压在画面底带内。
-    final rise = showPoster ? posterHeight * .62 : 76.0;
+    final rise = showPoster ? posterHeight * .67 : 92.0;
     final landscape = hasLandscapeArt(item);
     final sameAsEntry = _imagePrefersBackdrop == preferBackdrop;
     final handoffOnBackdrop = preferBackdrop || !showPoster;
@@ -206,6 +206,20 @@ class PhoneItemBanner extends StatelessWidget {
                         colors: [
                           AppInk.scrim(AppScrim.of(context, AppScrim.top)),
                           AppInk.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 轻微的横向暗角把视线收向海报与标题，画面仍然保持完整出血。
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          AppInk.scrim(.14),
+                          AppInk.transparent,
+                          AppInk.scrim(.06),
                         ],
                       ),
                     ),
@@ -340,7 +354,7 @@ class _PosterCard extends StatelessWidget {
     return DecoratedBox(
       key: PhoneItemBanner.posterKey,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
         boxShadow: [
           BoxShadow(
             color: AppInk.scrim(light ? .22 : .55),
@@ -350,7 +364,7 @@ class _PosterCard extends StatelessWidget {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
         child: SizedBox(
           width: width,
           height: height,
@@ -361,7 +375,7 @@ class _PosterCard extends StatelessWidget {
               IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
+                    borderRadius: BorderRadius.circular(AppRadii.lg),
                     border: Border.all(
                       color: light
                           ? AppInk.scrim(.08)
