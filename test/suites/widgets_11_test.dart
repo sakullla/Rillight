@@ -9,7 +9,7 @@ import '../catalog/catalog_browse_cases.dart' as case4;
 import '../library/episode_row_cases.dart' as case5;
 import '../mobile/phone_detail_redesign_cases.dart' as case6;
 import '../mobile/tv_server_management_cases.dart' as case7;
-import '../player/subtitle_menu_cases.dart' as case8;
+import '../player/ended_navigation_cases.dart' as case8;
 import '../tv/tv_lan_pair_cases.dart' as case9;
 import '../widgets/app_button_cases.dart' as case10;
 import '../widgets/skeleton_cases.dart' as case11;
@@ -28,7 +28,7 @@ void main() {
   group('library/episode_row_test.dart', case5.main);
   group('mobile/phone_detail_redesign_test.dart', case6.main);
   group('mobile/tv_server_management_test.dart', case7.main);
-  group('player/subtitle_menu_test.dart', case8.main);
+  group('player/ended_navigation_test.dart', case8.main);
   group('tv/tv_lan_pair_test.dart [part 1]', () => case9.mainShard(0, 3));
   group('widgets/app_button_test.dart', case10.main);
   group('widgets/skeleton_test.dart', case11.main);

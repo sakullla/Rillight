@@ -3,15 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../aggregation/presentation_cases.dart' as case0;
 import '../app/rating_star_cases.dart' as case1;
-import '../auth/provider_connect_routing_cases.dart' as case2;
-import '../mobile/motion_behaviors_cases.dart' as case3;
-import '../mobile/phone_home_first_screen_cases.dart' as case4;
+import '../auth/provider_connect_management_cases.dart' as case2;
+import '../library/detail_palette_cases.dart' as case3;
+import '../mobile/motion_behaviors_cases.dart' as case4;
 import '../mobile/phone_player_cases.dart' as case5;
-import '../player/danmaku/danmaku_renderer_cases.dart' as case6;
-import '../player/ended_navigation_cases.dart' as case7;
+import '../mobile/tv_shelf_focus_cases.dart' as case6;
+import '../player/danmaku/danmaku_renderer_cases.dart' as case7;
 import '../player/phone_presentation_lifecycle_cases.dart' as case8;
-import '../tv/tv_player_controls_cases.dart' as case9;
-import '../tv/tv_top_nav_scale_cases.dart' as case10;
+import '../tv/tv_focus_cases.dart' as case9;
+import '../tv/tv_player_controls_cases.dart' as case10;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,13 +21,13 @@ void main() {
     () => case0.mainShard(5, 6),
   );
   group('app/rating_star_test.dart', case1.main);
-  group('auth/provider_connect_routing_test.dart', case2.main);
-  group('mobile/motion_behaviors_test.dart', case3.main);
-  group('mobile/phone_home_first_screen_test.dart', case4.main);
+  group('auth/provider_connect_management_test.dart', case2.main);
+  group('library/detail_palette_test.dart', case3.main);
+  group('mobile/motion_behaviors_test.dart', case4.main);
   group('mobile/phone_player_test.dart [part 3]', () => case5.mainShard(2, 4));
-  group('player/danmaku/danmaku_renderer_test.dart', case6.main);
-  group('player/ended_navigation_test.dart', case7.main);
+  group('mobile/tv_shelf_focus_test.dart', case6.main);
+  group('player/danmaku/danmaku_renderer_test.dart', case7.main);
   group('player/phone_presentation_lifecycle_test.dart', case8.main);
-  group('tv/tv_player_controls_test.dart', case9.main);
-  group('tv/tv_top_nav_scale_test.dart', case10.main);
+  group('tv/tv_focus_test.dart', case9.main);
+  group('tv/tv_player_controls_test.dart', case10.main);
 }

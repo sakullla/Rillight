@@ -395,6 +395,7 @@ class PlayerController extends ChangeNotifier {
   bool sessionExpired = false;
   int _reportFailureStreak = 0;
   Map<String, Object?>? _lastProgressFailure;
+  Map<String, Object?>? _lastProgressOutcomeFailure;
   Map<String, Object?>? _lastCleanupFailure;
 
   /// Safe diagnostics: never include a server address, credential or raw error.
@@ -402,6 +403,7 @@ class PlayerController extends ChangeNotifier {
     'failed': progressSyncFailed,
     'persistent': progressSyncPersistent,
     'lastFailure': _lastProgressFailure,
+    'lastOutcomeFailure': _lastProgressOutcomeFailure,
     'pendingCleanupCount': _pendingResourceCleanup.length,
     'lastCleanupFailure': _lastCleanupFailure,
   };
@@ -1072,6 +1074,8 @@ class PlayerController extends ChangeNotifier {
     progressSyncPersistent = false;
     sessionExpired = false;
     _reportFailureStreak = 0;
+    _lastProgressFailure = null;
+    _lastProgressOutcomeFailure = null;
     _progressFailBannerTimer?.cancel();
     _progressFailBannerTimer = null;
     subtitleNotice = null;
@@ -5857,23 +5861,42 @@ class PlayerController extends ChangeNotifier {
         await session.enqueue(() => session.client.reportProgress(report));
       }
       if (!_ownsSession(session)) return;
-      await reportOutcomeSink?.call(report, observationSequence, true);
+      // The desktop helper reports the already completed server request back
+      // to the host through a mailbox. That IPC is advisory: a locked or
+      // already released mailbox must not turn a successful server progress
+      // report into a visible sync failure in the player.
+      await _reportOutcomeSafely(report, observationSequence, true);
       _onReportSucceeded();
       _writeSnapshot(session, report);
     } on MediaServerException catch (failure) {
       if (_ownsSession(session)) {
         if (sent) {
-          await reportOutcomeSink?.call(report, observationSequence, false);
+          await _reportOutcomeSafely(report, observationSequence, false);
         }
         _onReportFailed(failure, stage: sent ? 'progress' : 'observation');
       }
     } catch (failure) {
       if (_ownsSession(session)) {
         if (sent) {
-          await reportOutcomeSink?.call(report, observationSequence, false);
+          await _reportOutcomeSafely(report, observationSequence, false);
         }
         _onReportFailed(failure, stage: sent ? 'progress' : 'observation');
       }
+    }
+  }
+
+  Future<void> _reportOutcomeSafely(
+    PlaybackReport report,
+    int observationSequence,
+    bool succeeded,
+  ) async {
+    try {
+      await reportOutcomeSink?.call(report, observationSequence, succeeded);
+    } catch (failure) {
+      // The host can still reconcile the durable playback snapshot. Keep the
+      // IPC failure available to diagnostics, but leave progressSyncFailed
+      // reserved for observation or server-report failures.
+      _lastProgressOutcomeFailure = _syncFailure('outcome', failure);
     }
   }
 

@@ -428,6 +428,7 @@ void main() {
     String itemId = 'movie-up',
     PlayerSettingsStore? settingsStore,
     String? userAgent,
+    PlaybackReportOutcomeSink? reportOutcomeSink,
   }) async {
     final client = EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final auth = AuthController(
@@ -455,6 +456,7 @@ void main() {
       onClose: onClose,
       onOpenItem: onOpenItem,
       onOpenItemDetail: onOpenItemDetail,
+      reportOutcomeSink: reportOutcomeSink,
     );
     await controller.start();
     expect(controller.loading, isFalse);
@@ -1416,6 +1418,23 @@ void main() {
     await controller.seekTo(const Duration(seconds: 20));
     expect(controller.progressSyncFailed, isFalse);
     expect(controller.progressSyncPersistent, isFalse);
+  });
+
+  test('a desktop outcome IPC failure does not mask a successful server progress report', () async {
+    final controller = await startStandaloneController(
+      reportOutcomeSink: (_, _, _) async {
+        throw StateError('simulated watch-sync mailbox failure');
+      },
+    );
+    addTearDown(controller.dispose);
+    await controller.seekTo(const Duration(seconds: 5));
+
+    expect(controller.progressSyncFailed, isFalse);
+    expect(controller.progressSyncDiagnostics['lastOutcomeFailure'], {
+      'stage': 'outcome',
+      'kind': 'local',
+    });
+    expect(controller.progressSyncDiagnostics['lastFailure'], isNull);
   });
 
   test(

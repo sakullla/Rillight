@@ -1927,7 +1927,13 @@ class PlaybackHttpProxy {
           if (attempt > 0) _recoveries++;
           if (speculative) {
             _prefetchRateLimitStatus = null;
-          } else {
+          } else if (attempt > 0) {
+            // A successful first-attempt response can belong to a cached
+            // prefix or another independent range while a previous
+            // foreground demand is still rate-limited. Only clear the
+            // foreground diagnostic when this response actually recovered
+            // the rejected request's retry loop; a new source registration
+            // or renewal clears it for a new playback attempt.
             _rateLimitStatus = null;
           }
         }

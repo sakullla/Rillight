@@ -5,14 +5,14 @@ import '../app/appearance_cases.dart' as case0;
 import '../app/content_theme_cases.dart' as case1;
 import '../auth/line_management_cases.dart' as case2;
 import '../auth/provider_connect_dialog_cases.dart' as case3;
-import '../home/library_latest_row_cases.dart' as case4;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case4;
 import '../library/source_detail_route_cases.dart' as case5;
-import '../mobile/mobile_performance_timing_cases.dart' as case6;
-import '../search/aggregation_search_surface_cases.dart' as case7;
-import '../tv/tv_frame_cases.dart' as case8;
+import '../mobile/tv_shell_navigation_cases.dart' as case6;
+import '../player/player_cache_status_cases.dart' as case7;
+import '../player/seek_preview_cases.dart' as case8;
 import '../tv/tv_home_featured_cases.dart' as case9;
-import '../widgets/artwork_crop_cases.dart' as case10;
-import '../widgets/cupertino_controls_cases.dart' as case11;
+import '../widgets/desktop_back_button_cases.dart' as case10;
+import '../widgets/long_press_copy_cases.dart' as case11;
 import '../helpers/suite.dart';
 
 void main() {
@@ -21,15 +21,15 @@ void main() {
   group('app/content_theme_test.dart', case1.main);
   group('auth/line_management_test.dart', case2.main);
   group('auth/provider_connect_dialog_test.dart', case3.main);
-  group('home/library_latest_row_test.dart', case4.main);
+  group('catalog/shelf_grid_scroll_rebuild_test.dart', case4.main);
   group(
     'library/source_detail_route_test.dart [part 3]',
     () => case5.mainShard(2, 3),
   );
-  group('mobile/mobile_performance_timing_test.dart', case6.main);
-  group('search/aggregation_search_surface_test.dart', case7.main);
-  group('tv/tv_frame_test.dart', case8.main);
+  group('mobile/tv_shell_navigation_test.dart', case6.main);
+  group('player/player_cache_status_test.dart', case7.main);
+  group('player/seek_preview_test.dart', case8.main);
   group('tv/tv_home_featured_test.dart', case9.main);
-  group('widgets/artwork_crop_test.dart', case10.main);
-  group('widgets/cupertino_controls_test.dart', case11.main);
+  group('widgets/desktop_back_button_test.dart', case10.main);
+  group('widgets/long_press_copy_test.dart', case11.main);
 }

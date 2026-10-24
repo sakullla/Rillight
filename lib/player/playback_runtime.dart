@@ -468,17 +468,19 @@ class PlaybackRuntime {
     MediaItem item,
     List<PlaybackMediaSource> versions,
   ) {
-    final candidates = versions.map(
-      (s) => PreferenceCandidate(
-        SourceReference(
-          account: origin.source.account,
-          itemId: item.id,
-          mediaSourceId: s.id,
-        ),
-        origin.libraryId,
-        versionName: s.name,
-      ),
-    );
+    final candidates = versions
+        .map(
+          (s) => PreferenceCandidate(
+            SourceReference(
+              account: origin.source.account,
+              itemId: item.id,
+              mediaSourceId: s.id,
+            ),
+            origin.libraryId,
+            versionName: s.name,
+          ),
+        )
+        .toList(growable: false);
     var result = history.resolvePreference(
       owner: origin.work,
 
@@ -505,6 +507,19 @@ class PlaybackRuntime {
             source: EpisodeSource.fromMediaItem(origin.source, item),
           ),
         },
+      );
+    }
+    // A series preference can carry an old release-group label that is no
+    // longer present on the current episode. When the server exposes exactly
+    // one permitted concrete source, there is no real choice to present and
+    // it is safe to use that source. Keep the stricter uncertainty result in
+    // HistoryWriter for callers that still have multiple candidates.
+    if (result.failure == PreferenceFailure.versionUncertain &&
+        result.allowedCandidates.length == 1) {
+      result = PreferenceResolution(
+        preference: result.preference,
+        selected: result.allowedCandidates.single,
+        allowedCandidates: result.allowedCandidates,
       );
     }
     return result;
