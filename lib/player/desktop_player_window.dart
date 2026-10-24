@@ -1237,8 +1237,22 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         throw StateError('Target has not opened successfully');
       }
       final version = event['version'] as String;
-      if (_watchSession?.source.mediaSourceId != version ||
-          _watchSession?.source.itemId != event['item']) {
+      final item = event['item'];
+      final openingRequest = _current;
+      final canStartOpeningSession =
+          _watchSession == null &&
+          item == origin.source.itemId &&
+          openingRequest?.itemId == item &&
+          openingRequest?.mediaSourceId == version;
+      if (canStartOpeningSession) {
+        // The host already verified this concrete item/version while preparing
+        // the launch. Starting the authority session directly avoids a second
+        // item + PlaybackInfo round trip on the first real frame, which could
+        // otherwise time out the child's observation acknowledgement on slow
+        // desktop connections.
+        _watchSession = await runtime!.begin(origin, version);
+      } else if (_watchSession?.source.mediaSourceId != version ||
+          _watchSession?.source.itemId != item) {
         // A new episode/version needs authoritative server reads. Receiving
         // the event is not acceptance, but lets the child wait for that work.
         await historyControl.acknowledgeWatchEvent(pid, {
@@ -1247,11 +1261,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         });
         final actual = await runtime!.resolveItem(
           origin,
-          event['item'] as String,
+          item as String,
           mediaSourceId: version,
         );
         final info = await actual.permit.dispatch(
-          (_) => origin.client.getPlaybackInfo(itemId: actual.source.itemId),
+          (client) => client.getPlaybackInfo(itemId: actual.source.itemId),
         );
         if (!info.mediaSources.any((s) => s.id == version)) {
           throw StateError('Unknown actual version');
