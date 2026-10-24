@@ -3572,9 +3572,13 @@ void main() {
       );
       fixture.binaryBody = Uint8List(16 * mib)..fillRange(0, 16 * mib, 120);
       fixture.forbiddenOffset = 8 * mib;
+      // One registration for the whole playback. register() starts a new
+      // attempt and clears the foreground 403; repeating it from the url
+      // getter drops the demand failure before the assertion can observe it.
+      final media = fixture.url;
       // Start with a validated cached prefix, then reject the first continuous
       // future request. Playback may consume that prefix before surfacing 403.
-      await fixture.readBytes('bytes=0-0');
+      await fixture.readBytes('bytes=0-0', route: media);
       await fixture.proxy.refreshTimeline(const Duration(seconds: 4));
       final identity = fixture.proxy.diagnostics['timelineIdentity'] as String;
       final split = identity.lastIndexOf(':');
@@ -3586,7 +3590,7 @@ void main() {
           bytes: Uint8List(mib)..fillRange(0, mib, 120),
         );
       }
-      final request = await fixture.client.getUrl(fixture.url);
+      final request = await fixture.client.getUrl(media);
       request.headers.set('range', 'bytes=0-${16 * mib - 1}');
       final response = await request.close();
       final received = Completer<void>();
@@ -3619,7 +3623,10 @@ void main() {
         expect(fixture.proxy.diagnostics['readAheadFailed'], true);
         expect(fixture.proxy.diagnostics['lastUpstreamStatus'], 403);
         expect(fixture.cache.diagnostics['invalidations'], 0);
-        expect((await fixture.read('bytes=0-1023')).$2, 'x' * 1024);
+        expect(
+          (await fixture.read('bytes=0-1023', route: media)).$2,
+          'x' * 1024,
+        );
         // A paused client can still receive the cached prefix through the
         // socket buffer. The original 16 MiB demand may already have reached
         // the rate-limited 8 MiB boundary, so demand failure timing varies.
@@ -3629,7 +3636,10 @@ void main() {
         expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
         expect(fixture.proxy.diagnostics['rateLimitStatus'], 403);
         expect(
-          (await fixture.read('bytes=${8 * mib}-${8 * mib + 63}')).$1,
+          (await fixture.read(
+            'bytes=${8 * mib}-${8 * mib + 63}',
+            route: media,
+          )).$1,
           403,
         );
         expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
@@ -3637,7 +3647,7 @@ void main() {
         fixture.forbiddenOffset = null;
         expect(fixture.proxy.diagnostics['readAheadForegroundAcquisitions'], 0);
         fixture.proxy.refreshSourceUrl(
-          fixture.url,
+          media,
           fixture.origin.resolve('/video?renewed=1'),
         );
         final renewed = DateTime.now().add(const Duration(seconds: 5));
@@ -4763,15 +4773,15 @@ class _CacheFixture {
     fail('Cache writer did not settle: ${cache.diagnostics}');
   }
 
-  Future<(int, String)> read(String? range) async {
-    final request = await client.getUrl(url);
+  Future<(int, String)> read(String? range, {Uri? route}) async {
+    final request = await client.getUrl(route ?? url);
     if (range != null) request.headers.set('range', range);
     final response = await request.close();
     return (response.statusCode, await response.transform(utf8.decoder).join());
   }
 
-  Future<void> readBytes(String? range) async {
-    final request = await client.getUrl(url);
+  Future<void> readBytes(String? range, {Uri? route}) async {
+    final request = await client.getUrl(route ?? url);
     if (range != null) request.headers.set('range', range);
     await (await request.close()).drain<void>();
   }
